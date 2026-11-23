@@ -514,6 +514,71 @@ void hdLayerCapture(const HdLayer* layer, const unsigned char* buffer, int buffe
     }
 }
 
+void hdLayerDrawOver(HdLayer* layer, const unsigned char* buffer, int bufferPitch,
+    int x, int y, int width, int height, const HdImage& image, const uint32_t* under, const unsigned char* basePalette8)
+{
+    if (layer == nullptr || under == nullptr || width <= 0 || height <= 0 || image.width <= 0 || image.height <= 0) {
+        return;
+    }
+
+    const HdImage* source = &image;
+    HdImage resampled;
+    if (image.width != width * kHdScale || image.height != height * kHdScale) {
+        hdImageResample(image, width * kHdScale, height * kHdScale, &resampled);
+        source = &resampled;
+    }
+
+    const int left = std::max(x, 0);
+    const int top = std::max(y, 0);
+    const int right = std::min(x + width, layer->width);
+    const int bottom = std::min(y + height, layer->height);
+    const int layerPitch = layer->width * kHdScale;
+    const int underPitch = width * kHdScale;
+
+    for (int ly = top; ly < bottom; ly++) {
+        for (int lx = left; lx < right; lx++) {
+            size_t offset = static_cast<size_t>(ly) * layer->width + lx;
+            unsigned char index = buffer[static_cast<size_t>(ly) * bufferPitch + lx];
+            if (hdIsCyclingIndex(index)) {
+                layer->valid[offset] = 0;
+                continue;
+            }
+
+            const uint32_t* src = source->pixels.data() + static_cast<size_t>(ly - y) * kHdScale * source->width + (lx - x) * kHdScale;
+            bool anyVisible = false;
+            for (int sy = 0; sy < kHdScale && !anyVisible; sy++) {
+                for (int sx = 0; sx < kHdScale; sx++) {
+                    if ((src[sy * source->width + sx] >> 24) != 0) {
+                        anyVisible = true;
+                        break;
+                    }
+                }
+            }
+            if (!anyVisible) {
+                continue;
+            }
+
+            const uint32_t* below = under + static_cast<size_t>(ly - y) * kHdScale * underPitch + (lx - x) * kHdScale;
+            uint32_t legacy = (static_cast<uint32_t>(basePalette8[index * 3]) << 16)
+                | (static_cast<uint32_t>(basePalette8[index * 3 + 1]) << 8)
+                | basePalette8[index * 3 + 2];
+            uint32_t* dest = layer->pixels.data() + static_cast<size_t>(ly) * kHdScale * layerPitch + lx * kHdScale;
+            for (int sy = 0; sy < kHdScale; sy++) {
+                for (int sx = 0; sx < kHdScale; sx++) {
+                    uint32_t colour = below[sy * underPitch + sx];
+                    // No captured colour (a colour-cycling index was there):
+                    // blend over the legacy colour now in the buffer.
+                    uint32_t base = (colour >> 24) != 0 ? colour : legacy;
+                    dest[sy * layerPitch + sx] = blendOver(src[sy * source->width + sx], base);
+                }
+            }
+
+            layer->shadow[offset] = index;
+            layer->valid[offset] = 1;
+        }
+    }
+}
+
 // lerp(a, b, t / 256) per channel, t in 0..256.
 static inline uint32_t mixRgb(uint32_t a, uint32_t b, int t)
 {

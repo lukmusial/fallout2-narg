@@ -39,6 +39,9 @@ namespace fallout {
 //   hdtextstats <name>        write HD text counters to <name>.json
 //   floattext <text>          floating text over the player (in a game)
 //   monitor <text>            a line in the interface bar's message monitor
+//   loot [<n>]                open the loot window on party member n
+//                             (default 1, the first companion; 0 = player)
+//   talk [<n>]                start a dialogue with party member n
 //   refresh                   redraw the whole map window (in a game)
 //   benchrefresh <name> <n>   redraw it n times in a row; min/median/max ms
 //                             per redraw (and HD tile drawing) to <name>.json

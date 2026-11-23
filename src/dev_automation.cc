@@ -564,6 +564,27 @@ namespace {
             return true;
         }
 
+        if (name == "loot" || name == "talk") {
+            // Opens the loot window on a party member the way the steal
+            // skill does (companions let the player take and give freely),
+            // or starts a dialogue with one; the game loop handles the
+            // request (party index 1 = the first companion).
+            int index = args.empty() ? 1 : atoi(args[0].c_str());
+            if (strcmp(devAutomationGetState(), "game") != 0 || gDude == nullptr) {
+                fail(command, "usage: loot|talk [<party index>] (in a game)");
+            }
+            std::vector<Object*> party = get_all_party_members_objects(false);
+            if (index < 0 || index >= static_cast<int>(party.size())) {
+                fail(command, "no such party member");
+            }
+            if (name == "loot") {
+                scriptsRequestStealing(gDude, party[index]);
+            } else {
+                scriptsRequestDialog(party[index]);
+            }
+            return true;
+        }
+
         if (name == "monitor") {
             // A line in the interface bar's message monitor.
             displayMonitorAddMessage(command.rest.c_str());

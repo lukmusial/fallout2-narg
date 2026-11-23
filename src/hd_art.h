@@ -78,6 +78,13 @@ bool hdArtDrawImageRegion(int win, const FrmImage& image, int srcX, int srcY, in
 bool hdArtDrawRegion(int win, const HdImage& hd, const unsigned char* source, int sourceWidth, int sourceHeight,
     int srcX, int srcY, int width, int height, int destX, int destY);
 
+// Inventory items (Phase 2.10): draws art into window `win` like artRender
+// (centred in the box (x, y, width, height), scaled down to fit when larger),
+// then the pack's HD image of it, resampled to the drawn size, over what the
+// window's HD layer showed there. Without HD (or a pack image) it is exactly
+// artRender.
+void hdArtRender(int win, const FrmId& frmId, int x, int y, int width, int height);
+
 // Gives a graphic button the HD art of the images it was made from (see
 // buttonSetHdArt). The button images must be the size of these images; they
 // may be copies with labels drawn in.

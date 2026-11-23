@@ -244,6 +244,67 @@ Klamath day, 8 Den at night, 6 rat caves):
 | whole-map redraw, median | 1.0-2.9 ms | 8.3-12.3 ms | 7.8-9.9 ms | 8.1-11.2 ms |
 | of that, HD tiles / objects | - | 3.1-6.5 / 1.3-2.5 ms | 2.9-4.9 / 1.2-2.1 ms | 2.9-4.9 / 1.2-2.4 ms |
 
+## Inventory (Phase 2.10)
+
+Every inventory item image (`art/inven`, all 366 FRMs) and the art of the
+inventory, loot, use-item-on, barter/trade (also the expanded `barter_e`/
+`trade_e`, `invbox2.png`, `loot2.png`, `partyslot.png` from `ce.dat`) and
+move-items windows, their scroll/take-all buttons and the interface bar's
+item button (`sattkbup`, `sattkbdn`, `saturbup`): 395 images.
+
+```sh
+cd tools/hd
+.venv/bin/python extract.py --areas --objects --inven
+NAMES=$(.venv/bin/python -c "
+import json, extract as e
+w = {p.rsplit('.', 1)[0] + '.png' for p in e.INVENTORY_SCREENS + e.CE_DAT_FRM_INVEN + e.CE_DAT_PNG_INVEN}
+print(' '.join(a['key'] for a in json.load(open('work/manifest.json'))['assets'] if a['type'] == 'inven' or a['key'] in w))")
+.venv/bin/python enhance_scripted.py $NAMES   # 395 images: 12.6 s
+.venv/bin/python enhance_ai.py $NAMES         # 30.4 s
+.venv/bin/python install.py
+.venv/bin/python inventory_sheet.py     # runs the game hidden -> docs/screens/phase2.10_inventory/
+.venv/bin/python pack_review.py --inven # work/pack_review_inven.json
+```
+
+In the engine:
+
+- Items: `hdArtRender` (`src/hd_art.h`) replaces `artRender` in the
+  inventory, loot, trade tables, party slots and move-items window. The
+  legacy item is drawn as before (nearest-scaled when it does not fit its
+  slot); the pack image is resampled (bilinear) to the drawn rectangle and
+  blended over what the layer showed there, captured before the legacy draw
+  (`hdLayerDrawOver`), so the HD silhouette replaces the legacy one.
+  Quantity labels drawn over items stay legacy.
+- Window backgrounds: HD after each full and partial background restore
+  (`inventoryHdRestore`, which first drops whatever the layer held there).
+  The trade window's panes are cut from the dialogue's barter window, so
+  their HD pixels are copied along (`windowHdCopyRect`); the barter/trade
+  panel gets its HD art once it has slid in.
+- Buttons made from art ids (`buttonCreateWithFrm`, `buttonSetDisabledFrm`)
+  get HD art automatically, including the disabled images.
+- Interface bar: the item button's HD images are composed from the pack's
+  button art and the item (`interfaceBarUpdateItemButtonHd`, darkened and
+  shifted on the pressed image like the legacy overlay); the action text
+  and AP numbers stay legacy.
+- Not HD: the dragged item (it is the mouse cursor), the "ALL" button of the
+  move-items window (its label is drawn into the cached art) and critters
+  in the body views (Phase 2.9 critters).
+- Harness: `loot [n]` opens the loot window on party member n as the steal
+  skill does; `talk [n]` starts a dialogue (the trade window is `b`).
+
+Observations (see `docs/screens/phase2.10_inventory/`):
+
+- AI is the better pack for items: metal, wood, glass, leather and labels
+  stay crisp, where scripted softens them; the window backgrounds look like
+  2.6's screens (AI keeps the riveted metal).
+- Where AI does poorly (`mixed_candidates.png`): the small scroll arrows
+  (`invup*`, `invdn*`, `di_up*`, `di_down*`, `di_upds.png`, `di_dnds.png`)
+  get blue streaks or smeared heads, the failure seen on the 2.6 arrows; the
+  super tool kit (`suprtool`, colour drift 14.6 vs 7.6) turns its speckled
+  red paint into wood grain. These are proposed for the mixed manifest, not
+  applied. `brain1` (AI deepens the grooves) and `eastregg` (edge metric
+  flagged, bands look the same) were checked and are not proposed.
+
 ## Timings (Apple M5 Pro, 64 GB; per asset, warm)
 
 | Asset | Scripted | AI (x2plus, MPS) |
