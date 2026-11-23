@@ -368,6 +368,101 @@ def make_hd_screens_test(pack):
     return test
 
 
+# --- Phase 2.7: floors and roofs with the real HD packs ----------------------
+#
+# tests/scripts/hd_map.txt loads a save with hd=1 and a pack, captures the
+# frame, then runs `hdcheck` (tileHdCheck in src/tile.cc) before and after
+# scrolling: the iso window's HD layer is compared with a fresh redraw of the
+# same view (stale pixels) and with a redraw without objects (pixels objects
+# cover must stay legacy).
+
+HD_FLOOR_MIN_TILE_HD = 0.97     # floor/roof pixels (no object drawn there) showing HD
+HD_FLOOR_MAX_COLOUR_DIFF = 12.0  # mean abs difference, HD frame box-downsampled vs the legacy golden
+HD_FLOOR_GOLDEN_MAX_DIFF = 0.05  # live views animate: fraction of pixels off by > 12 levels
+HD_FLOOR_MAX_STALE = 16          # isolated pixels on scroll-strip edges, see hd_check
+
+
+def tile_pack_installed(pack):
+    return (RUN_DIR / f"data/hd/{pack}/art/tiles/edg5000.png").exists()
+
+
+def hd_check(out, name):
+    check = json.loads((out / f"{name}.json").read_text())
+    if not check["active"]:
+        raise TestFailure(f"{name}: no HD layer on the map")
+    if check["object_pixels_hd"] != 0 or check["cycling_hd"] != 0:
+        raise TestFailure(f"{name}: {check['object_pixels_hd']} object pixels and {check['cycling_hd']} "
+                          f"colour-cycling pixels show HD (see {out / name}.png)")
+    # Stale = same legacy index as a fresh redraw but different HD. The
+    # legacy engine's partial redraws after a scroll leave a few single
+    # pixels on strip edges that differ from a fresh redraw (an overlapping
+    # tile the strip's tile range misses); where that tile's pixel has the
+    # same palette index only the HD side shows it. Missed scrolls or
+    # invalidations show up as whole strips or rectangles instead, so only
+    # a handful of isolated pixels is accepted.
+    mask = np.asarray(Image.open(out / f"{name}.png").convert("RGB"))
+    stale = np.all(mask == (255, 255, 0), axis=2)
+    neighbours = sum(np.roll(np.roll(stale, dy, 0), dx, 1)
+                     for dy in (-1, 0, 1) for dx in (-1, 0, 1) if dy or dx)
+    clustered = int((stale & (neighbours >= 2)).sum())
+    if stale.sum() > HD_FLOOR_MAX_STALE or clustered:
+        raise TestFailure(f"{name}: {int(stale.sum())} stale HD pixels ({clustered} clustered) on floors/roofs "
+                          f"vs a fresh redraw (see {out / name}.png)")
+    share = check["tile_pixels_hd"] / max(check["tile_pixels"], 1)
+    if share < HD_FLOOR_MIN_TILE_HD:
+        raise TestFailure(f"{name}: only {share:.1%} of floor/roof pixels show HD")
+    return check, share
+
+
+def make_hd_floors_test(pack):
+    def test(update):
+        """All ten saves with a real HD pack: HD floors and roofs, objects and
+        critters legacy, colour-cycling legacy, nothing stale after keyboard
+        and edge scrolling, lighting close to the legacy frame, state
+        unchanged, per-slot goldens."""
+        if not tile_pack_installed(pack):
+            raise TestSkipped(f"pack '{pack}' has no tiles (tools/hd: extract.py --areas, enhance_*.py, install.py)")
+        notes = []
+        started = time.time()
+        for slot in range(1, SLOT_COUNT + 1):
+            reset_saves()
+            out, _ = run_game(f"hd_floors_{pack}_slot{slot:02d}", "hd_map.txt",
+                              [f"--dev-load-game={slot}", *HD_ARGS, f"[graphics]hd_pack={pack}"])
+            compare_state(out / "state.json", f"slot{slot:02d}_state.json", False)
+            check, share = hd_check(out, "check")
+            scrolled, _ = hd_check(out, "scrolled")
+            fb = load_png(out / "game.png")
+            if fb.shape != (960, 1280, 3):
+                raise TestFailure(f"slot {slot}: frame is {fb.shape}")
+            legacy = load_png(GOLDEN / f"slot{slot:02d}_game.png")
+            small = fb.reshape(480, 2, 640, 2, 3).mean(axis=(1, 3))
+            colour = float(np.abs(small - legacy).mean())
+            if colour > HD_FLOOR_MAX_COLOUR_DIFF:
+                raise TestFailure(f"slot {slot}: HD frame differs from the legacy view by {colour:.1f} levels on average")
+            detail = nonuniform_blocks(fb[:760])
+            golden = compare_hd_golden_live(out / "game.png", f"hd_{pack}_slot{slot:02d}.png", update)
+            notes.append(f"{slot}:{share:.0%}/{detail:.0%}/{golden}")
+        return "tiles HD/detail/golden " + " ".join(notes) + f" ({time.time() - started:.0f}s)"
+    test.__name__ = f"test_hd_floors_{pack}"
+    return test
+
+
+def compare_hd_golden_live(actual_path, golden_name, update):
+    golden_path = GOLDEN / golden_name
+    if update or not golden_path.exists():
+        golden_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(actual_path, golden_path)
+        return "new"
+    actual = load_png(actual_path)
+    golden = load_png(golden_path)
+    if actual.shape != golden.shape:
+        raise TestFailure(f"{golden_name}: size {actual.shape} != golden {golden.shape}")
+    changed = float((np.abs(actual - golden).max(axis=2) > 12).mean())
+    if changed > HD_FLOOR_GOLDEN_MAX_DIFF:
+        raise TestFailure(f"{golden_name}: {changed:.2%} of pixels differ (limit {HD_FLOOR_GOLDEN_MAX_DIFF:.0%})")
+    return f"{changed:.1%}"
+
+
 def make_slot_test(slot, hd=False):
     def test(update):
         reset_saves()
@@ -515,13 +610,18 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
          + [make_slot_test(slot, hd=True) for slot in HD_SLOTS]
          + [test_stimpack_save_unchanged, test_character_screens, test_stimpack_edit_player, test_stimpack_cancel,
             test_stimpack_edit_companion, test_stimpack_lists]
-         + [make_hd_screens_test(pack) for pack in ("scripted", "ai")])
+         + [make_hd_screens_test(pack) for pack in ("scripted", "ai")]
+         + [make_hd_floors_test(pack) for pack in ("scripted", "ai")])
 
 
 PERF_CONFIGS = [
     ("1280x960 scale 2", ["[screen]resolution_x=1280", "[screen]resolution_y=960", "[screen]scale=2"]),
     ("3440x1440 scale 2", ["[screen]resolution_x=3440", "[screen]resolution_y=1440", "[screen]scale=2"]),
     ("3440x1440 hd=1", ["[screen]resolution_x=3440", "[screen]resolution_y=1440", "[screen]scale=2", *HD_ART_ARGS]),
+    ("3440x1440 hd=1 scripted", ["[screen]resolution_x=3440", "[screen]resolution_y=1440", "[screen]scale=2", *HD_ARGS,
+                                 "[graphics]hd_pack=scripted"]),
+    ("3440x1440 hd=1 ai", ["[screen]resolution_x=3440", "[screen]resolution_y=1440", "[screen]scale=2", *HD_ARGS,
+                           "[graphics]hd_pack=ai"]),
 ]
 
 
@@ -531,13 +631,23 @@ def run_perf(slot):
     for label, overrides in PERF_CONFIGS:
         reset_saves()
         out, _ = run_game("perf_" + label.replace(" ", "_").replace("=", ""), "perf_game.txt", [f"--dev-load-game={slot}", *overrides])
-        for phase in ("idle", "scroll"):
+        for phase in ("idle", "scroll", "full"):
             stats = json.loads((out / f"{phase}.json").read_text())
             fb = "x".join(str(v) for v in stats["framebuffer"])
-            print(f"  {label:20s} fb {fb:9s} {phase:6s} presents {stats['presents']:5d}  "
+            frames = max(stats["presents"], 1)
+            work = (stats["present_avg_ms"] * stats["presents"] + stats["map_refresh_total_ms"] + stats["scroll_total_ms"]) / frames
+            print(f"  {label:24s} fb {fb:9s} {phase:6s} presents {stats['presents']:5d} "
+                  f"({stats['presents'] / max(stats['elapsed_ms'], 1) * 1000:5.1f}/s)  "
                   f"present avg {stats['present_avg_ms']:6.3f} max {stats['present_max_ms']:7.3f}  "
-                  f"convert {stats['convert_total_ms']:8.1f} ms / {stats['converted_pixels'] / 1e6:6.1f} Mpx  "
-                  f"palette {stats['palette_total_ms']:7.1f} ms / {stats['palette_updates']} updates")
+                  f"map redraw {stats['map_refreshes']:4d} x {stats['map_refresh_total_ms'] / max(stats['map_refreshes'], 1):6.3f} "
+                  f"max {stats['map_refresh_max_ms']:7.3f}  "
+                  f"scroll {stats['scrolls']:3d} x {stats['scroll_total_ms'] / max(stats['scrolls'], 1):6.3f} "
+                  f"max {stats['scroll_max_ms']:7.3f}  HD tiles {stats['hd_tiles_total_ms']:7.1f} ms  work/frame {work:6.3f} ms")
+        bench = json.loads((out / "bench.json").read_text())
+        if bench["count"]:
+            r, t = bench["refresh_ms"], bench["hd_tiles_ms"]
+            print(f"  {label:24s} whole-map redraw x{bench['count']}: min {r['min']:6.2f} median {r['median']:6.2f} "
+                  f"max {r['max']:6.2f} ms; HD tiles median {t['median']:6.2f} ms")
 
 
 def main():

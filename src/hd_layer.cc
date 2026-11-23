@@ -1,5 +1,6 @@
 #include "hd_layer.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include <algorithm>
@@ -114,6 +115,202 @@ void hdLayerDrawImageEx(HdLayer* layer, const unsigned char* buffer, int bufferP
 
             layer->shadow[offset] = index;
             layer->valid[offset] = 1;
+        }
+    }
+}
+
+void hdLayerDrawLit(HdLayer* layer, const unsigned char* buffer, int bufferPitch, const HdLitDraw& draw, const unsigned char* basePalette8)
+{
+    if (layer == nullptr || draw.frame == nullptr || draw.image == nullptr) {
+        return;
+    }
+
+    const HdImage& image = *draw.image;
+    int left = std::max(draw.x, 0);
+    int top = std::max(draw.y, 0);
+    int right = std::min(draw.x + draw.width, layer->width);
+    int bottom = std::min(draw.y + draw.height, layer->height);
+    if (left >= right || top >= bottom) {
+        return;
+    }
+
+    // The frame rectangle must lie inside the HD image.
+    if (draw.frameX + (left - draw.x) < 0 || draw.frameY + (top - draw.y) < 0
+        || (draw.frameX + (right - draw.x)) * kHdScale > image.width
+        || (draw.frameY + (bottom - draw.y)) * kHdScale > image.height) {
+        return;
+    }
+
+    // Locals, so the byte stores to valid/shadow do not force reloads.
+    const int layerPitch = layer->width * kHdScale;
+    const int imageWidth = image.width;
+    const uint32_t* imagePixels = image.pixels.data();
+    uint32_t* layerPixels = layer->pixels.data();
+    unsigned char* valid = layer->valid.data();
+    unsigned char* shadow = layer->shadow.data();
+    const unsigned char* expected = draw.expected;
+    const int constantIntensity = draw.constantIntensity;
+    const int frameOffsetX = draw.frameX - draw.x;
+
+    for (int ly = top; ly < bottom; ly++) {
+        int fy = draw.frameY + (ly - draw.y);
+        const unsigned char* frameRow = draw.frame + static_cast<size_t>(fy) * draw.framePitch;
+        const unsigned char* bufferRow = buffer + static_cast<size_t>(ly) * bufferPitch;
+        const int* intensityRow = draw.intensity != nullptr
+            ? draw.intensity + static_cast<size_t>(ly - draw.y) * draw.intensityPitch
+            : nullptr;
+        const uint32_t* imageRow = imagePixels + static_cast<size_t>(fy) * kHdScale * imageWidth;
+        uint32_t* layerRow = layerPixels + static_cast<size_t>(ly) * kHdScale * layerPitch;
+        unsigned char* validRow = valid + static_cast<size_t>(ly) * layer->width;
+        unsigned char* shadowRow = shadow + static_cast<size_t>(ly) * layer->width;
+
+        for (int lx = left; lx < right; lx++) {
+            int fx = lx + frameOffsetX;
+            unsigned char frameIndex = frameRow[fx];
+            if (frameIndex == 0) {
+                continue;
+            }
+
+            unsigned char index = bufferRow[lx];
+            if (expected != nullptr && expected[frameIndex] != index) {
+                continue;
+            }
+
+            if (hdIsCyclingIndex(index)) {
+                validRow[lx] = 0;
+                continue;
+            }
+
+            const uint32_t* src = imageRow + fx * kHdScale;
+            uint32_t* dest = layerRow + lx * kHdScale;
+            uint32_t s00 = src[0];
+            uint32_t s01 = src[1];
+            uint32_t s10 = src[imageWidth];
+            uint32_t s11 = src[imageWidth + 1];
+            uint32_t alphaAnd = s00 & s01 & s10 & s11;
+            uint32_t alphaOr = s00 | s01 | s10 | s11;
+            if ((alphaOr >> 24) == 0) {
+                validRow[lx] = 0;
+                continue;
+            }
+
+            int intensity = intensityRow != nullptr ? intensityRow[lx - draw.x] : constantIntensity;
+
+            if ((alphaAnd >> 24) == 255) {
+                dest[0] = hdLight(s00, intensity);
+                dest[1] = hdLight(s01, intensity);
+                dest[layerPitch] = hdLight(s10, intensity);
+                dest[layerPitch + 1] = hdLight(s11, intensity);
+            } else {
+                bool layerShows = validRow[lx] != 0 && shadowRow[lx] == index;
+                uint32_t legacy = (static_cast<uint32_t>(basePalette8[index * 3]) << 16)
+                    | (static_cast<uint32_t>(basePalette8[index * 3 + 1]) << 8)
+                    | basePalette8[index * 3 + 2];
+                for (int sy = 0; sy < kHdScale; sy++) {
+                    for (int sx = 0; sx < kHdScale; sx++) {
+                        uint32_t pixel = src[sy * imageWidth + sx];
+                        uint32_t lit = hdLight(pixel, intensity) | (pixel & 0xFF000000u);
+                        uint32_t under = layerShows ? dest[sy * layerPitch + sx] : legacy;
+                        dest[sy * layerPitch + sx] = blendOver(lit, under);
+                    }
+                }
+            }
+
+            shadowRow[lx] = index;
+            validRow[lx] = 1;
+        }
+    }
+}
+
+void hdLayerInvalidateRect(HdLayer* layer, int x, int y, int width, int height)
+{
+    if (layer == nullptr) {
+        return;
+    }
+
+    int left = std::max(x, 0);
+    int top = std::max(y, 0);
+    int right = std::min(x + width, layer->width);
+    int bottom = std::min(y + height, layer->height);
+    for (int ly = top; ly < bottom; ly++) {
+        memset(layer->valid.data() + static_cast<size_t>(ly) * layer->width + left, 0, std::max(right - left, 0));
+    }
+}
+
+void hdLayerInvalidateMasked(HdLayer* layer, int x, int y, int width, int height, const unsigned char* mask, int maskPitch)
+{
+    if (layer == nullptr || mask == nullptr) {
+        return;
+    }
+
+    int left = std::max(x, 0);
+    int top = std::max(y, 0);
+    int right = std::min(x + width, layer->width);
+    int bottom = std::min(y + height, layer->height);
+    for (int ly = top; ly < bottom; ly++) {
+        const unsigned char* maskRow = mask + static_cast<size_t>(ly - y) * maskPitch;
+        unsigned char* valid = layer->valid.data() + static_cast<size_t>(ly) * layer->width;
+        for (int lx = left; lx < right; lx++) {
+            if (maskRow[lx - x] != 0) {
+                valid[lx] = 0;
+            }
+        }
+    }
+}
+
+void hdLayerScroll(HdLayer* layer, int dx, int dy)
+{
+    if (layer == nullptr || (dx == 0 && dy == 0)) {
+        return;
+    }
+
+    int width = layer->width;
+    int height = layer->height;
+    if (dx <= -width || dx >= width || dy <= -height || dy >= height) {
+        hdLayerClear(layer);
+        return;
+    }
+
+    // Destination columns [destLeft, destLeft + count) take source columns
+    // shifted by dx; rows likewise.
+    int destLeft = std::max(-dx, 0);
+    int count = width - std::abs(dx);
+    int pitch = width * kHdScale;
+
+    auto moveRow = [&](int destY) {
+        int srcY = destY + dy;
+        unsigned char* valid = layer->valid.data() + static_cast<size_t>(destY) * width;
+        if (srcY < 0 || srcY >= height) {
+            memset(valid, 0, width);
+            return;
+        }
+
+        const size_t srcOffset = static_cast<size_t>(srcY) * width + destLeft + dx;
+        const size_t destOffset = static_cast<size_t>(destY) * width + destLeft;
+        memmove(layer->valid.data() + destOffset, layer->valid.data() + srcOffset, count);
+        memmove(layer->shadow.data() + destOffset, layer->shadow.data() + srcOffset, count);
+        for (int sy = 0; sy < kHdScale; sy++) {
+            uint32_t* destPixels = layer->pixels.data() + static_cast<size_t>(destY * kHdScale + sy) * pitch + destLeft * kHdScale;
+            const uint32_t* srcPixels = layer->pixels.data() + static_cast<size_t>(srcY * kHdScale + sy) * pitch + (destLeft + dx) * kHdScale;
+            memmove(destPixels, srcPixels, sizeof(uint32_t) * count * kHdScale);
+        }
+
+        // Columns with no source.
+        if (dx > 0) {
+            memset(valid + width - dx, 0, dx);
+        } else if (dx < 0) {
+            memset(valid, 0, -dx);
+        }
+    };
+
+    // Copy in the direction that never overwrites rows still to be read.
+    if (dy > 0) {
+        for (int y = 0; y < height; y++) {
+            moveRow(y);
+        }
+    } else {
+        for (int y = height - 1; y >= 0; y--) {
+            moveRow(y);
         }
     }
 }

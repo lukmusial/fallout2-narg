@@ -1,6 +1,8 @@
 #ifndef TILE_H
 #define TILE_H
 
+#include <vector>
+
 #include "geometry.h"
 #include "map.h"
 #include "map_defs.h"
@@ -69,6 +71,55 @@ void tileRenderRoofsInRect(Rect* rect, MapElevation elevation);
 void tile_fill_roof(int x, int y, MapElevation elevation, bool on);
 void tileRenderFloorsInRect(Rect* rect, MapElevation elevation);
 void tileRenderEdgeBlackSquares(Rect* rect, MapElevation elevation, bool drawOnTop);
+
+// CE: HD floors and roofs (Phase 2.7). With [graphics] hd=1 and an HD pack,
+// floor and roof tiles also draw their pack image (or a 2x expansion of the
+// legacy tile) into the iso window's HD layer, lit in RGB from the same
+// intensities the legacy draw uses. These keep that layer in step with the
+// legacy buffer; they do nothing without an HD layer.
+//
+// The rectangle (iso window coordinates, inclusive) is about to be redrawn.
+void tileHdInvalidateRect(const Rect* rect);
+// Legacy art (objects) was drawn at (x, y): its non-zero pixels stay legacy.
+void tileHdInvalidateMasked(const unsigned char* src, int srcPitch, int x, int y, int width, int height);
+// The iso window buffer was scrolled: pixel (x, y) now holds (x + dx, y + dy).
+void tileHdScroll(int dx, int dy);
+
+// Self-check for tests (dev automation `hdcheck`), all in one tick so nothing
+// animates in between: the current iso window is compared with a fresh full
+// redraw (stale HD pixels), then redrawn without objects to find the pixels
+// objects cover, which must not show HD.
+struct TileHdCheck {
+    int pixels = 0; // iso window logical pixels
+    int hdShown = 0; // showing HD
+    int stalePixels = 0; // same legacy index, but HD shown/colour differs from a fresh redraw
+    int staleTilePixels = 0; // of those, on floor/roof pixels (not objects)
+    int legacyChanged = 0; // legacy index itself differs from a fresh redraw
+    int objectPixels = 0; // drawn by objects
+    int objectPixelsHd = 0; // of those, showing HD (must be 0)
+    int tilePixels = 0; // floor/roof only (not black, not colour-cycling, no object drawn there)
+    int tilePixelsHd = 0; // of those, showing HD
+    int cyclingHd = 0; // colour-cycling indices showing HD (must be 0)
+    std::vector<unsigned char> mask; // per pixel: 0 legacy, 1 HD tile, 2 object, 3 object with HD, 4 stale, 5 legacy changed
+};
+bool tileHdCheck(TileHdCheck* check);
+
+// Timing of map redraws (dev automation `perf`): full or partial redraws of
+// the iso window (tileRefreshGame) and scroll steps (mapScroll: move, strip
+// redraws, window refresh).
+struct TileRenderStats {
+    unsigned long long refreshes = 0;
+    double refreshMs = 0;
+    double refreshMaxMs = 0;
+    unsigned long long scrolls = 0;
+    double scrollMs = 0;
+    double scrollMaxMs = 0;
+    double hdTilesMs = 0; // of all that, drawing HD floor and roof tiles
+};
+double tileRenderClockMs();
+void tileRenderStatsAdd(bool scroll, double ms);
+void tileGetRenderStats(TileRenderStats* stats);
+void tileResetRenderStats();
 bool _square_roof_intersect(int x, int y, MapElevation elevation);
 void _grid_render(Rect* rect, MapElevation elevation);
 int _tile_scroll_to(int tile, int flags);

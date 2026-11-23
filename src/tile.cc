@@ -5,13 +5,18 @@
 #include <string.h>
 
 #include <algorithm>
+#include <chrono>
+#include <memory>
 #include <stack>
+#include <unordered_map>
 
 #include "art.h"
 #include "color.h"
 #include "debug.h"
 #include "draw.h"
 #include "game_mouse.h"
+#include "hd_art.h"
+#include "hd_layer.h"
 #include "light.h"
 #include "map.h"
 #include "map_edge.h"
@@ -20,6 +25,7 @@
 #include "settings.h"
 #include "svga.h"
 #include "tile_hires_stencil.h"
+#include "window_manager.h"
 
 namespace fallout {
 
@@ -289,6 +295,265 @@ int gCenterTile;
 
 // Optional mapper overlay drawn over the iso view each refresh (edge editor). Null when unused.
 static TileMapperOverlayProc* gTileMapperOverlayProc = nullptr;
+
+// CE: HD floors and roofs (Phase 2.7), see tile.h.
+namespace {
+
+    struct TileHdState {
+        // The iso window's HD layer for the current render pass, or null.
+        HdLayer* layer = nullptr;
+        unsigned char basePalette8[256 * 3];
+
+        // HD image per tile fid (null: none); the images stay alive while
+        // the HD art cache may evict them. Dropped when the pack changes.
+        std::unordered_map<int, std::shared_ptr<const HdImage>> images;
+        unsigned int generation = 0;
+    };
+
+    TileHdState gTileHd;
+
+    TileRenderStats gTileRenderStats;
+
+    constexpr size_t kTileHdMaxImages = 4096;
+
+} // namespace
+
+// The iso window's existing HD layer (never creates one).
+static HdLayer* tileHdExistingLayer()
+{
+    Window* window = windowGetWindow(gIsoWindow);
+    if (window == nullptr || window->hdLayer == nullptr || window->buffer != gTileWindowBuffer
+        || window->hdLayer->width != gTileWindowPitch || window->hdLayer->height != gTileWindowHeight) {
+        return nullptr;
+    }
+    return window->hdLayer;
+}
+
+// Sets up gTileHd for a render pass; HD tiles need hd=1 and an HD pack.
+static void tileHdBegin()
+{
+    gTileHd.layer = nullptr;
+    if (!windowHdIsActive() || hdArtGetPack().empty()) {
+        return;
+    }
+
+    HdLayer* layer = windowHdGetLayer(gIsoWindow);
+    if (layer == nullptr || layer->width != gTileWindowPitch || layer->height != gTileWindowHeight
+        || windowGetBuffer(gIsoWindow) != gTileWindowBuffer) {
+        return;
+    }
+
+    if (gTileHd.generation != hdArtGeneration() || gTileHd.images.size() > kTileHdMaxImages) {
+        gTileHd.images.clear();
+        gTileHd.generation = hdArtGeneration();
+    }
+
+    windowHdGetBasePalette(gTileHd.basePalette8);
+    gTileHd.layer = layer;
+}
+
+// The 2x image of a tile: the pack's, else the legacy tile expanded.
+static const HdImage* tileHdImage(const FrmId& frmId, Art* art)
+{
+    auto found = gTileHd.images.find(frmId.fid());
+    if (found != gTileHd.images.end()) {
+        return found->second.get();
+    }
+
+    std::shared_ptr<const HdImage> image;
+    const char* path = frmId.filePath();
+    unsigned char* data = artGetFrameData(art);
+    int width = artGetWidth(art);
+    int height = artGetHeight(art);
+    if (path != nullptr && data != nullptr && width > 0 && height > 0) {
+        image = hdArtGetFrame(path, 0, 0, data, width, height, width);
+        if (image != nullptr && (image->width != width * kHdScale || image->height != height * kHdScale)) {
+            auto resampled = std::make_shared<HdImage>();
+            hdImageResample(*image, width * kHdScale, height * kHdScale, resampled.get());
+            image = resampled;
+        }
+    }
+
+    gTileHd.images.emplace(frmId.fid(), image);
+    return image.get();
+}
+
+void tileHdInvalidateRect(const Rect* rect)
+{
+    HdLayer* layer = tileHdExistingLayer();
+    if (layer != nullptr) {
+        hdLayerInvalidateRect(layer, rect->left, rect->top, rect->right - rect->left + 1, rect->bottom - rect->top + 1);
+    }
+}
+
+// While tileHdCheck redraws the map: the pixels objects cover.
+static std::vector<unsigned char>* gTileHdCoverage = nullptr;
+
+void tileHdInvalidateMasked(const unsigned char* src, int srcPitch, int x, int y, int width, int height)
+{
+    HdLayer* layer = tileHdExistingLayer();
+    if (layer != nullptr) {
+        hdLayerInvalidateMasked(layer, x, y, width, height, src, srcPitch);
+    }
+
+    if (gTileHdCoverage != nullptr) {
+        for (int row = std::max(y, 0); row < std::min(y + height, gTileWindowHeight); row++) {
+            for (int column = std::max(x, 0); column < std::min(x + width, gTileWindowPitch); column++) {
+                if (src[(row - y) * srcPitch + (column - x)] != 0) {
+                    (*gTileHdCoverage)[static_cast<size_t>(row) * gTileWindowPitch + column] = 1;
+                }
+            }
+        }
+    }
+}
+
+void tileHdScroll(int dx, int dy)
+{
+    HdLayer* layer = tileHdExistingLayer();
+    if (layer != nullptr) {
+        hdLayerScroll(layer, dx, dy);
+    }
+}
+
+double tileRenderClockMs()
+{
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+void tileRenderStatsAdd(bool scroll, double ms)
+{
+    if (scroll) {
+        gTileRenderStats.scrolls++;
+        gTileRenderStats.scrollMs += ms;
+        gTileRenderStats.scrollMaxMs = std::max(gTileRenderStats.scrollMaxMs, ms);
+    } else {
+        gTileRenderStats.refreshes++;
+        gTileRenderStats.refreshMs += ms;
+        gTileRenderStats.refreshMaxMs = std::max(gTileRenderStats.refreshMaxMs, ms);
+    }
+}
+
+void tileGetRenderStats(TileRenderStats* stats)
+{
+    *stats = gTileRenderStats;
+}
+
+void tileResetRenderStats()
+{
+    gTileRenderStats = TileRenderStats();
+}
+
+bool tileHdCheck(TileHdCheck* check)
+{
+    HdLayer* layer = tileHdExistingLayer();
+    if (layer == nullptr) {
+        return false;
+    }
+
+    size_t count = static_cast<size_t>(gTileWindowPitch) * gTileWindowHeight;
+    auto shows = [&](size_t offset) {
+        return layer->valid[offset] != 0 && layer->shadow[offset] == gTileWindowBuffer[offset];
+    };
+
+    // As maintained incrementally (scrolls, partial redraws).
+    std::vector<unsigned char> buffer(gTileWindowBuffer, gTileWindowBuffer + count);
+    std::vector<unsigned char> shown(count);
+    for (size_t offset = 0; offset < count; offset++) {
+        shown[offset] = shows(offset);
+    }
+    std::vector<uint32_t> pixels = layer->pixels;
+
+    std::vector<unsigned char> coverage(count, 0);
+    gTileHdCoverage = &coverage;
+    tileWindowRefresh();
+    gTileHdCoverage = nullptr;
+
+    check->pixels = static_cast<int>(count);
+    check->mask.assign(count, 0);
+    const int pitch = gTileWindowPitch * kHdScale;
+    for (size_t offset = 0; offset < count; offset++) {
+        bool now = shows(offset);
+        if (now) {
+            check->hdShown++;
+            check->mask[offset] = 1;
+            if (hdIsCyclingIndex(gTileWindowBuffer[offset])) {
+                check->cyclingHd++;
+            }
+        }
+        if (buffer[offset] != gTileWindowBuffer[offset]) {
+            // The legacy drawing itself differs (an engine artefact of
+            // partial redraws); the HD side follows it.
+            check->legacyChanged++;
+            check->mask[offset] = 5;
+            continue;
+        }
+        bool stale = now != (shown[offset] != 0);
+        if (!stale && now) {
+            size_t x = offset % gTileWindowPitch;
+            size_t y = offset / gTileWindowPitch;
+            for (int sy = 0; sy < kHdScale && !stale; sy++) {
+                for (int sx = 0; sx < kHdScale; sx++) {
+                    size_t index = (y * kHdScale + sy) * pitch + x * kHdScale + sx;
+                    if (pixels[index] != layer->pixels[index]) {
+                        stale = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (stale) {
+            check->stalePixels++;
+            check->mask[offset] = 4;
+        }
+    }
+
+    // Objects: everything the redraw without them changes.
+    std::vector<unsigned char> withObjects(gTileWindowBuffer, gTileWindowBuffer + count);
+    std::vector<unsigned char> withObjectsShown(count);
+    for (size_t offset = 0; offset < count; offset++) {
+        withObjectsShown[offset] = shows(offset);
+    }
+
+    const ObjectType types[] = { OBJ_TYPE_ITEM, OBJ_TYPE_CRITTER, OBJ_TYPE_SCENERY, OBJ_TYPE_WALL, OBJ_TYPE_MISC, OBJ_TYPE_INTERFACE };
+    bool toggled[6] = {};
+    for (int index = 0; index < 6; index++) {
+        if (!artIsObjectTypeHidden(types[index])) {
+            artToggleObjectTypeHidden(types[index]);
+            toggled[index] = true;
+        }
+    }
+    tileWindowRefresh();
+
+    for (size_t offset = 0; offset < count; offset++) {
+        unsigned char index = withObjects[offset];
+        if (check->mask[offset] == 4 && index == gTileWindowBuffer[offset]) {
+            check->staleTilePixels++;
+        }
+        if (index != gTileWindowBuffer[offset]) {
+            check->objectPixels++;
+            check->mask[offset] = 2;
+            if (withObjectsShown[offset]) {
+                check->objectPixelsHd++;
+                check->mask[offset] = 3;
+            }
+        } else if (index != 0 && !hdIsCyclingIndex(index) && coverage[offset] == 0) {
+            // (Object pixels of the same index as the tile under them are
+            // left out, as they are legacy by design.)
+            check->tilePixels++;
+            if (withObjectsShown[offset]) {
+                check->tilePixelsHd++;
+            }
+        }
+    }
+
+    for (int index = 0; index < 6; index++) {
+        if (toggled[index]) {
+            artToggleObjectTypeHidden(types[index]);
+        }
+    }
+    tileWindowRefresh();
+    return true;
+}
 
 void tileSetMapperOverlayProc(TileMapperOverlayProc* proc)
 {
@@ -680,6 +945,9 @@ static void tileRefreshMapper(Rect* rect, MapElevation elevation)
     Rect renderRect = rectToUpdate;
     bool didClear = checkRectNeedsClear(&rectToUpdate, hasVisArea, &visArea);
 
+    // CE: everything in the rectangle is drawn again.
+    tileHdInvalidateRect(&rectToUpdate);
+
     // HRP EdgeClipping: when clipped, clear only if CheckRect; otherwise always clear.
     if (didClear) {
         bufferFill(gTileWindowBuffer + gTileWindowPitch * rectToUpdate.top + rectToUpdate.left,
@@ -711,8 +979,17 @@ static void tileRefreshMapper(Rect* rect, MapElevation elevation)
     gTileWindowRefreshProc(didClear ? &rectToUpdate : &renderRect);
 }
 
+static void tileRefreshGameImpl(Rect* rect, MapElevation elevation);
+
 // 0x4B15E8 refresh_game
 static void tileRefreshGame(Rect* rect, MapElevation elevation)
+{
+    double start = tileRenderClockMs();
+    tileRefreshGameImpl(rect, elevation);
+    tileRenderStatsAdd(false, tileRenderClockMs() - start);
+}
+
+static void tileRefreshGameImpl(Rect* rect, MapElevation elevation)
 {
     Rect rectToUpdate;
 
@@ -725,6 +1002,9 @@ static void tileRefreshGame(Rect* rect, MapElevation elevation)
 
     Rect renderRect = rectToUpdate;
     bool didClear = checkRectNeedsClear(&rectToUpdate, hasVisArea, &visArea);
+
+    // CE: everything in the rectangle is drawn again.
+    tileHdInvalidateRect(&rectToUpdate);
 
     // HRP EdgeClipping: when clipped, clear only if CheckRect; otherwise always clear.
     if (didClear) {
@@ -1308,6 +1588,8 @@ void tileRenderRoofsInRect(Rect* rect, MapElevation elevation)
 
     int light = lightGetAmbientIntensity();
 
+    tileHdBegin();
+
     int baseSquareTile = gSquareGridWidth * minY;
 
     for (int y = minY; y <= maxY; y++) {
@@ -1497,6 +1779,35 @@ static void tileRenderRoof(const TileFrmId& frmId, int x, int y, Rect* rect, int
             }
 
             artUnlock(eggFrmHandle);
+
+            // CE: the HD roof wherever the buffer holds the plain lit roof
+            // (under the cut-out the legacy blend stays).
+            if (gTileHd.layer != nullptr) {
+                const HdImage* image = tileHdImage(frmId, tileFrm);
+                if (image != nullptr) {
+                    unsigned char expected[256];
+                    int intensityIndex = light / 512;
+                    for (int index = 0; index < 256; index++) {
+                        expected[index] = index < 0xE5 ? intensityColorTable[index][intensityIndex] : static_cast<unsigned char>(index);
+                    }
+
+                    HdLitDraw draw;
+                    draw.frame = artGetFrameData(tileFrm);
+                    draw.framePitch = tileWidth;
+                    draw.image = image;
+                    draw.frameX = tileRect.left - x;
+                    draw.frameY = tileRect.top - y;
+                    draw.x = tileRect.left;
+                    draw.y = tileRect.top;
+                    draw.width = tileRect.right - tileRect.left + 1;
+                    draw.height = tileRect.bottom - tileRect.top + 1;
+                    draw.constantIntensity = light;
+                    draw.expected = expected;
+                    double start = tileRenderClockMs();
+                    hdLayerDrawLit(gTileHd.layer, gTileWindowBuffer, gTileWindowPitch, draw, gTileHd.basePalette8);
+                    gTileRenderStats.hdTilesMs += tileRenderClockMs() - start;
+                }
+            }
         }
     }
 
@@ -1534,6 +1845,8 @@ void tileRenderFloorsInRect(Rect* rect, MapElevation elevation)
     }
 
     lightGetAmbientIntensity();
+
+    tileHdBegin();
 
     int baseSquareTile = gSquareGridWidth * minY;
 
@@ -1588,6 +1901,8 @@ void tileRenderEdgeBlackSquares(Rect* rect, MapElevation elevation, bool drawOnT
 
     constexpr TileFrmId kEdgeFrmId = TileFrameId::Grid;
     int baseSquareTile = gSquareGridWidth * minY;
+
+    tileHdBegin();
 
     for (int y = minY; y < maxY; y++) {
         for (int x = minX; x < maxX; x++) {
@@ -1717,6 +2032,38 @@ static void _draw_grid(int tile, MapElevation elevation, Rect* rect)
         _commonGrayTable);
 }
 
+// CE: the HD side of a floor tile draw: the frame part at (frameX, frameY),
+// width x height, just drawn at (x, y) with per-pixel `intensity` (pitch 80)
+// or the constant `light`.
+static void tileHdDrawFloor(const TileFrmId& frmId, Art* art, int frameX, int frameY, int x, int y, int width, int height, const int* intensity, int light)
+{
+    if (gTileHd.layer == nullptr) {
+        return;
+    }
+
+    const HdImage* image = tileHdImage(frmId, art);
+    if (image == nullptr) {
+        return;
+    }
+
+    HdLitDraw draw;
+    draw.frame = artGetFrameData(art);
+    draw.framePitch = artGetWidth(art);
+    draw.image = image;
+    draw.frameX = frameX;
+    draw.frameY = frameY;
+    draw.x = x;
+    draw.y = y;
+    draw.width = width;
+    draw.height = height;
+    draw.intensity = intensity;
+    draw.intensityPitch = 80;
+    draw.constantIntensity = light;
+    double start = tileRenderClockMs();
+    hdLayerDrawLit(gTileHd.layer, gTileWindowBuffer, gTileWindowPitch, draw, gTileHd.basePalette8);
+    gTileRenderStats.hdTilesMs += tileRenderClockMs() - start;
+}
+
 // 0x4B30C4 floor_draw
 static void tileRenderFloor(const TileFrmId& frmId, int x, int y, Rect* rect)
 {
@@ -1816,6 +2163,7 @@ static void tileRenderFloor(const TileFrmId& frmId, int x, int y, Rect* rect)
         if (v23 == 9) {
             unsigned char* buf = artGetFrameData(art);
             _dark_trans_buf_to_buf(buf + frameWidth * v78 + v79, v77, v76, frameWidth, gTileWindowBuffer, x, y, gTileWindowPitch, _verticies[0].intensity);
+            tileHdDrawFloor(frmId, art, v79, v78, x, y, v77, v76, nullptr, _verticies[0].intensity);
             goto out;
         }
 
@@ -1933,6 +2281,7 @@ static void tileRenderFloor(const TileFrmId& frmId, int x, int y, Rect* rect)
         int v86 = frameWidth - v77;
         int v85 = gTileWindowPitch - v77;
         int v87 = 80 - v77;
+        int drawnHeight = v76;
 
         while (--v76 != -1) {
             for (int kk = 0; kk < v77; kk++) {
@@ -1947,6 +2296,8 @@ static void tileRenderFloor(const TileFrmId& frmId, int x, int y, Rect* rect)
             v68 += v87;
             v67 += v86;
         }
+
+        tileHdDrawFloor(frmId, art, v79, v78, x, y, v77, drawnHeight, &(_intensity_map[160 + 80 * v78]) + v79, 0);
     }
 
 out:

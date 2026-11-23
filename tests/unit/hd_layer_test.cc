@@ -301,6 +301,165 @@ static void testClipAndSource()
     CHECK(staging.hd(1, 1, 1, 1) == 0xFF0000);
 }
 
+// Phase 2.7: lit tile draws, invalidation, scrolling.
+static void testLight()
+{
+    CHECK(hdLight(0x804020, 0x10000) == 0x804020);
+    CHECK(hdLight(0x804020, 0x8000) == 0x402010);
+    CHECK(hdLight(0x804020, 0) == 0);
+    CHECK(hdLight(0x804020, -5) == 0);
+    CHECK(hdLight(0x00FF80, 0x20000) == 0xFFFFFF);
+    // Half way to white.
+    CHECK(hdLight(0x000000, 0x18000) == 0x808080);
+    // Smooth: neighbouring intensities give neighbouring colours.
+    CHECK(hdLight(0xC8C8C8, 0x8000 + 512) == 0x666666);
+    // Every channel value and a spread of intensities against the plain
+    // per-channel formula.
+    for (uint32_t value = 0; value < 256; value++) {
+        for (int intensity = 0; intensity < 0x10000; intensity += 257) {
+            uint32_t expected = (value * intensity + 0x8000) >> 16;
+            uint32_t lit = hdLight((value << 16) | ((255 - value) << 8) | value, intensity);
+            CHECK(lit == ((expected << 16) | ((((255 - value) * intensity + 0x8000) >> 16) << 8) | expected));
+        }
+    }
+}
+
+static void testDrawLit()
+{
+    std::vector<unsigned char> palette = makePalette();
+    HdLayer layer;
+    hdLayerInit(&layer, 4, 2);
+    Staging staging(4, 2);
+
+    // A 3x2 frame: index 0 at (0, 0) is transparent, index 230 at (2, 1)
+    // is colour-cycling (alpha 0 in the HD art).
+    const unsigned char frame[6] = { 0, 50, 50, 50, 50, 230 };
+    HdImage image = solidImage(6, 4, 0xFFC8C8C8);
+    for (int sy = 2; sy < 4; sy++) {
+        for (int sx = 4; sx < 6; sx++) {
+            image.pixels[sy * 6 + sx] = 0;
+        }
+    }
+
+    // Buffer after the legacy draw at (1, 0): lit index 25, 230 kept.
+    std::vector<unsigned char> buffer = { 9, 9, 25, 25, 9, 25, 25, 230 };
+    layer.valid[7] = 1; // stale HD pixel under the cycling pixel
+    layer.shadow[7] = 230;
+
+    // Per-pixel intensities (pitch 3): right column darker.
+    const int intensity[6] = { 0x10000, 0x10000, 0x8000, 0x10000, 0x10000, 0x8000 };
+    HdLitDraw draw;
+    draw.frame = frame;
+    draw.framePitch = 3;
+    draw.image = &image;
+    draw.x = 1;
+    draw.width = 3;
+    draw.height = 2;
+    draw.intensity = intensity;
+    draw.intensityPitch = 3;
+    hdLayerDrawLit(&layer, buffer.data(), 4, draw, palette.data());
+    staging.compose(&layer, buffer, 4);
+
+    CHECK(staging.at(0, 0) == 0); // outside the draw
+    CHECK(staging.at(1, 0) == 0); // transparent frame pixel
+    CHECK(staging.at(2, 0) == 1 && staging.hd(2, 0) == 0xC8C8C8);
+    CHECK(staging.at(3, 0) == 1 && staging.hd(3, 0, 1, 1) == 0x646464);
+    CHECK(staging.at(1, 1) == 1 && staging.hd(1, 1) == 0xC8C8C8);
+    CHECK(staging.at(3, 1) == 0); // cycling: legacy, stale pixel dropped
+    CHECK(layer.valid[7] == 0);
+
+    // Legacy drawing over it wins; an object pixel of the same index too,
+    // once invalidated.
+    buffer[2] = 40;
+    const unsigned char objectMask[2] = { 0, 1 };
+    hdLayerInvalidateMasked(&layer, 1, 1, 2, 1, objectMask, 2);
+    staging.compose(&layer, buffer, 4);
+    CHECK(staging.at(2, 0) == 0);
+    CHECK(staging.at(1, 1) == 1);
+    CHECK(staging.at(2, 1) == 0);
+
+    // Constant intensity with an expected-colour check: pixels the legacy
+    // code drew differently (blended) keep what the layer had.
+    hdLayerClear(&layer);
+    std::fill(buffer.begin(), buffer.end(), 20);
+    buffer[4] = 21; // "blended"
+    unsigned char expected[256];
+    for (int index = 0; index < 256; index++) {
+        expected[index] = 20;
+    }
+    draw.intensity = nullptr;
+    draw.constantIntensity = 0x8000;
+    draw.expected = expected;
+    draw.x = 0;
+    draw.height = 2;
+    hdLayerDrawLit(&layer, buffer.data(), 4, draw, palette.data());
+    staging.compose(&layer, buffer, 4);
+    CHECK(staging.at(1, 0) == 1 && staging.hd(1, 0) == 0x646464);
+    CHECK(staging.at(0, 1) == 0);
+    CHECK(staging.at(1, 1) == 1);
+
+    // A frame part outside the image is rejected.
+    draw.frameX = 1;
+    hdLayerClear(&layer);
+    hdLayerDrawLit(&layer, buffer.data(), 4, draw, palette.data());
+    staging.compose(&layer, buffer, 4);
+    CHECK(staging.at(1, 0) == 0);
+}
+
+static void testScrollAndInvalidate()
+{
+    std::vector<unsigned char> palette = makePalette();
+    HdLayer layer;
+    hdLayerInit(&layer, 4, 3);
+
+    // Logical pixel (x, y) holds colour x * 16 + y, shadow 1, valid.
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x < 4; x++) {
+            for (int sy = 0; sy < kHdScale; sy++) {
+                for (int sx = 0; sx < kHdScale; sx++) {
+                    layer.pixels[(y * kHdScale + sy) * 4 * kHdScale + x * kHdScale + sx] = x * 16 + y;
+                }
+            }
+            layer.shadow[y * 4 + x] = 1;
+            layer.valid[y * 4 + x] = 1;
+        }
+    }
+
+    hdLayerScroll(&layer, 1, -1);
+    std::vector<unsigned char> buffer(12, 1);
+    Staging staging(4, 3);
+    staging.compose(&layer, buffer, 4);
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x < 4; x++) {
+            bool hasSource = x + 1 < 4 && y - 1 >= 0;
+            CHECK(staging.at(x, y) == (hasSource ? 1 : 0));
+            if (hasSource) {
+                CHECK(staging.hd(x, y, 1, 1) == static_cast<uint32_t>((x + 1) * 16 + y - 1));
+            }
+        }
+    }
+
+    hdLayerScroll(&layer, -2, 1);
+    staging.compose(&layer, buffer, 4);
+    CHECK(staging.at(0, 0) == 0 && staging.at(1, 0) == 0);
+    CHECK(staging.at(2, 0) == 1 && staging.hd(2, 0) == 0x10);
+    CHECK(staging.at(2, 1) == 1 && staging.hd(2, 1) == 0x11);
+    CHECK(staging.at(2, 2) == 0); // came from the vacated bottom row
+
+    hdLayerScroll(&layer, 0, 5);
+    staging.compose(&layer, buffer, 4);
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x < 4; x++) {
+            CHECK(staging.at(x, y) == 0);
+        }
+    }
+
+    std::fill(layer.valid.begin(), layer.valid.end(), 1);
+    hdLayerInvalidateRect(&layer, -1, 1, 3, 9);
+    staging.compose(&layer, buffer, 4);
+    CHECK(staging.at(0, 0) == 1 && staging.at(1, 1) == 0 && staging.at(1, 2) == 0 && staging.at(2, 1) == 1);
+}
+
 int main()
 {
     testShadowValidation();
@@ -312,6 +471,9 @@ int main()
     testResampleOnScaledDraw();
     testModulation();
     testFromIndexed();
+    testLight();
+    testDrawLit();
+    testScrollAndInvalidate();
 
     if (gFailures != 0) {
         fprintf(stderr, "hd_layer_test: %d check(s) failed\n", gFailures);

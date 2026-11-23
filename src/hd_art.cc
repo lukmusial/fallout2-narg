@@ -41,6 +41,7 @@ namespace {
     struct HdArtState {
         bool initialized = false;
         std::string pack;
+        unsigned int generation = 0;
 
         // Manifest of the active pack: art path -> pack ("*" = default).
         std::unordered_map<std::string, std::string> manifest;
@@ -241,6 +242,7 @@ void hdArtSetPack(const char* pack)
 {
     gHdArt.initialized = true;
     gHdArt.pack = pack != nullptr ? pack : "";
+    gHdArt.generation++;
     clearCache();
     loadManifest();
     debugPrint("HD: pack set to '%s'\n", gHdArt.pack.c_str());
@@ -250,6 +252,11 @@ const std::string& hdArtGetPack()
 {
     ensureInitialized();
     return gHdArt.pack;
+}
+
+unsigned int hdArtGeneration()
+{
+    return gHdArt.generation;
 }
 
 std::shared_ptr<const HdImage> hdArtFindFrame(const char* artPath, int frame, int direction)

@@ -1,0 +1,32 @@
+# Phase 2.7 floors and roofs (run with --dev-load-game=N, [graphics]hd=1 and
+# an hd_pack; with hd=0 fbshot writes the plain legacy frame as reference).
+# hdcheck compares the iso window's HD layer with a fresh redraw (stale
+# pixels) and with a redraw without objects (objects must stay legacy).
+until game 30000
+dump state
+wait 2000
+fbshot game
+hdcheck check
+# Scroll with the keyboard in all four directions, then by holding the
+# cursor in a screen corner (diagonal edge scrolling).
+key right
+wait 150
+key right
+wait 150
+key right
+wait 150
+key down
+wait 150
+key down
+wait 150
+key left
+wait 150
+key up
+wait 150
+move 639 0
+wait 1200
+move 320 200
+wait 500
+hdcheck scrolled
+fbshot scrolled_fb
+quit 0

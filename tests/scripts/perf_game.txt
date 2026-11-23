@@ -1,5 +1,6 @@
-# Presenter timing on a live map (use with --dev-load-game=N): idle, then
-# scroll right and left by holding the cursor at the screen edges.
+# Presenter and map redraw timing on a live map (use with --dev-load-game=N):
+# idle, then scroll right and left by holding the cursor at the screen edges,
+# then whole-map redraws.
 until game 30000
 wait 1000
 perf reset
@@ -11,4 +12,20 @@ move 0 200
 wait 3000
 move 320 200
 perf scroll
+# Whole-map redraws (as after an elevation change or combat start).
+wait 500
+perf reset
+refresh
+wait 200
+refresh
+wait 200
+refresh
+wait 200
+refresh
+wait 200
+refresh
+wait 200
+perf full
+# The same back to back, without frames in between (robust min/median).
+benchrefresh bench 20
 quit 0

@@ -23,6 +23,7 @@ The project uses CMake, so building mostly comes down to picking the right prese
 - `tools/dev/run-tests.sh` builds, then runs `tests/run_tests.py`: every reference save in `testdata/SAVEGAME` is loaded and its state dump and screenshot are compared with `testdata/golden/`. Pass `--update-golden` after an intended visual or state change, `-k <name>` to run a subset.
 - `tools/dev/contact_sheet.py` tiles screenshots into one review image (`docs/screens/<phase>/`).
 - `test_hd_screens_scripted` / `test_hd_screens_ai` need the HD packs in the run directory (`tools/hd/README.md`: enhance, then `install.py`); without them they are reported as SKIP. In HD mode (`[graphics] hd=1`) F12 saves a full-resolution PNG.
+- `test_hd_floors_scripted` / `test_hd_floors_ai` need the area tiles in both packs (`extract.py --areas`, enhance, `install.py`). They load all ten saves with HD floors and roofs and use the `hdcheck` harness command, which compares the map's HD layer with a fresh redraw (stale pixels after scrolling) and with a redraw without objects (objects must stay legacy). `run_tests.py --perf SLOT` also reports map redraw and scroll times; measure with a Release build (`RUN_DIR=out/build/macos-release`).
 
 For Fallout 1/Fo1in2-style endings, use both endgame flags to mirror the script flow:
 

@@ -34,6 +34,9 @@ class FrmImage;
 void hdArtSetPack(const char* pack);
 const std::string& hdArtGetPack();
 
+// Changes whenever the pack changes, so callers can drop images they keep.
+unsigned int hdArtGeneration();
+
 // The pack's HD image for a frame of a legacy art file, or null.
 std::shared_ptr<const HdImage> hdArtFindFrame(const char* artPath, int frame, int direction);
 
