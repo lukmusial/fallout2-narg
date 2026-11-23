@@ -39,6 +39,9 @@ namespace fallout {
 //   hdtextstats <name>        write HD text counters to <name>.json
 //   floattext <text>          floating text over the player (in a game)
 //   monitor <text>            a line in the interface bar's message monitor
+//   hdlights off|colour|glow|shadows|all|<mask>
+//                             switch HD lights live (glow = colour + glow)
+//   hdlights dump <name>      write the HD light emitters to <name>.json
 //   refresh                   redraw the whole map window (in a game)
 //   benchrefresh <name> <n>   redraw it n times in a row; min/median/max ms
 //                             per redraw (and HD tile drawing) to <name>.json

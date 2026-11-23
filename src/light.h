@@ -24,6 +24,10 @@ void lightResetTileIntensity();
 void lightDecreaseAmbient(int val);
 void lightIncreaseAmbient(int val);
 
+// CE: changes whenever the ambient light or any tile's light changes (HD
+// lights rebuild their light field when it does).
+unsigned int lightGetGeneration();
+
 } // namespace fallout
 
 #endif /* LIGHT_H */

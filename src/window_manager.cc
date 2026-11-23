@@ -12,6 +12,7 @@
 #include "draw.h"
 #include "hd_art.h"
 #include "hd_layer.h"
+#include "hd_lights.h"
 #include "input.h"
 #include "memory.h"
 #include "mouse.h"
@@ -814,6 +815,14 @@ void windowRefreshRect(int win, const Rect* rect)
     _GNW_win_refresh(window, &newRect, nullptr);
 }
 
+// CE: see windowHdSetLitWindow.
+static int gHdLitWindow = -1;
+
+void windowHdSetLitWindow(int win)
+{
+    gHdLitWindow = win;
+}
+
 // CE: composites the HD layer of `window` for a screen rectangle into the
 // presenter's staging planes, next to the 8-bit blit into `_screen_buffer`.
 // Window 0 (no buffer) and windows without a layer clear the staging mask.
@@ -857,6 +866,15 @@ static void windowComposeHd(Window* window, const Rect* rect)
         screenWidth * kHdScale,
         (window->flags & WINDOW_TRANSPARENT) != 0,
         hasText ? basePalette8 : nullptr);
+
+    if (window->id == gHdLitWindow && (window->flags & WINDOW_TRANSPARENT) == 0) {
+        for (int y = 0; y < height; y++) {
+            unsigned char* row = maskOrigin + static_cast<size_t>(y) * screenWidth;
+            for (int x = 0; x < width; x++) {
+                row[x] |= kHdMaskLit;
+            }
+        }
+    }
 }
 
 bool windowFindBufferPixel(const unsigned char* ptr, int pitch, int* winPtr, int* xPtr, int* yPtr)

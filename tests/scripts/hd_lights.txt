@@ -1,0 +1,38 @@
+# Phase 2.11 HD lights (run with --dev-load-game=N, [graphics]hd=1, an
+# hd_pack and [graphics]hd_lights=1): the same view with lights off, coloured
+# light only, + glow, + shadows; the field the presenter applies; fire
+# flicker frames; state before and after.
+until game 30000
+dump state
+wait 1500
+hdlights off
+wait 300
+fbshot off
+hdlights colour
+wait 300
+fbshot colour
+hdlights glow
+wait 300
+fbshot glow
+hdlights all
+wait 300
+fbshot all
+hdlights field field
+hdlights dump lights
+fbshot anim01
+wait 60
+fbshot anim02
+wait 60
+fbshot anim03
+wait 60
+fbshot anim04
+wait 60
+fbshot anim05
+wait 60
+fbshot anim06
+wait 60
+fbshot anim07
+wait 60
+fbshot anim08
+dump state_after
+quit 0

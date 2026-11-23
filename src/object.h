@@ -6,6 +6,7 @@
 #include "db.h"
 #include "geometry.h"
 #include "inventory.h"
+#include "light.h"
 #include "map_defs.h"
 #include "obj_types.h"
 
@@ -57,6 +58,10 @@ int objectSetLight(Object* obj, int lightDistance, int lightIntensity, Rect* rec
 int objectGetLightIntensity(Object* obj);
 int _obj_turn_on_light(Object* obj, Rect* rect);
 int _obj_turn_off_light(Object* obj, Rect* rect);
+// CE: calls `visit` for every tile the object's light reaches, with the
+// intensity it adds there (walls block it as in the game), without changing
+// any tile's light. Lights that are off or hidden visit nothing.
+void objectVisitLightTiles(Object* obj, AdjustLightIntensityProc* visit);
 int objectShow(Object* obj, Rect* rect);
 int objectHide(Object* obj, Rect* rect);
 int objectEnableOutline(Object* obj, Rect* rect);
@@ -73,6 +78,10 @@ void _obj_remove_all();
 Object* objectFindFirst();
 Object* objectFindNext();
 Object* objectFindFirstAtElevation(MapElevation elevation);
+// CE: calls `visit` for every object at `elevation` that
+// objectFindFirstAtElevation would return, without touching the find state
+// (safe to call while game code iterates objects, e.g. from the presenter).
+void objectVisitAtElevation(MapElevation elevation, void (*visit)(Object* object, void* context), void* context);
 Object* objectFindNextAtElevation();
 Object* objectFindFirstAtLocation(MapElevation elevation, int tile);
 Object* objectFindNextAtLocation();

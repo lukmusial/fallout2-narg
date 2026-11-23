@@ -84,11 +84,17 @@ struct PresenterStats {
     double paletteMs; // total time applying palette changes
     uint64_t paletteUpdates;
     uint64_t uploadedPixels; // framebuffer pixels uploaded to the texture
+    double lightMs; // total time updating HD lights (field and converting changed areas)
+    uint64_t lightUpdates; // light field rebuilds
     int framebufferWidth;
     int framebufferHeight;
 };
 
 void presenterGetStats(PresenterStats* stats);
+
+// CE: the HD light field the presenter applies (null while lights are off).
+struct HdLightField;
+const HdLightField* presenterGetLightField();
 void presenterResetStats();
 
 } // namespace fallout
