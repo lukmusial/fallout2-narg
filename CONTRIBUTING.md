@@ -22,6 +22,7 @@ The project uses CMake, so building mostly comes down to picking the right prese
 - `tools/dev/setup-run-dir.sh` links an installed copy of Fallout 2 (`FALLOUT2_DATA_DIR`, default `~/Games/Fallout 2`) into the build folder and writes a test `fallout2.cfg`. The installation itself is never modified.
 - `tools/dev/run-tests.sh` builds, then runs `tests/run_tests.py`: every reference save in `testdata/SAVEGAME` is loaded and its state dump and screenshot are compared with `testdata/golden/`. Pass `--update-golden` after an intended visual or state change, `-k <name>` to run a subset.
 - `tools/dev/contact_sheet.py` tiles screenshots into one review image (`docs/screens/<phase>/`).
+- `tools/dev/setup-play-dir.sh` prepares `out/play` for actually playing the modded build: its own copy of your saves (made once), HD on with the `mixed` pack, your display size. Re-run it after a build to update the app; open `out/play/Fallout II Community Edition.app`. The installed game is only read.
 - `test_hd_screens_scripted` / `test_hd_screens_ai` need the HD packs in the run directory (`tools/hd/README.md`: enhance, then `install.py`); without them they are reported as SKIP. In HD mode (`[graphics] hd=1`) F12 saves a full-resolution PNG.
 
 For Fallout 1/Fo1in2-style endings, use both endgame flags to mirror the script flow:
