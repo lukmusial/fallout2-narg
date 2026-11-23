@@ -50,6 +50,15 @@ text 12
 key enter
 wait 500
 shot editor_final
+# Caps: click the third line of the level box, type 5000
+wait 500
+click 60 306
+until input 10000
+key backspace 10
+text 5000
+key enter
+wait 500
+shot editor_caps
 key enter
 wait 800
 shot hub_after

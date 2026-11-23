@@ -23,6 +23,7 @@
 #include "hd_art.h"
 #include "hd_text.h"
 #include "input.h"
+#include "item.h"
 #include "kb.h"
 #include "map.h"
 #include "mouse.h"
@@ -330,7 +331,8 @@ namespace {
             Trait trait1;
             Trait trait2;
             traitsGetSelected(&trait1, &trait2);
-            out << ",\"traits\":[" << static_cast<int>(trait1) << ',' << static_cast<int>(trait2) << "]}";
+            out << ",\"traits\":[" << static_cast<int>(trait1) << ',' << static_cast<int>(trait2) << ']';
+            out << ",\"caps\":" << itemGetTotalCaps(gDude) << '}';
         }
 
         out << ",\n\"party\":[";

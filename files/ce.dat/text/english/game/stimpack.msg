@@ -17,6 +17,8 @@
 {122}{}{EXPERIENCE}
 {123}{}{HIT POINTS (CUR/MAX)}
 {124}{}{SKILL POINTS}
+{125}{}{Caps:}
+{126}{}{CAPS}
 {130}{}{PERKS}
 {131}{}{RANK}
 

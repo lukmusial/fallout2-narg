@@ -74,6 +74,7 @@ namespace fallout {
 #define STIMPACK_EXPERIENCE_BTN_CODE 581
 #define STIMPACK_HIT_POINTS_BTN_CODE 582
 #define STIMPACK_SKILL_POINTS_BTN_CODE 583
+#define STIMPACK_CAPS_BTN_CODE 584
 #define STIMPACK_LEVEL_BOX_X 8
 #define STIMPACK_LEVEL_BOX_Y 268
 #define STIMPACK_LEVEL_BOX_WIDTH 164
@@ -1078,6 +1079,12 @@ static void characterEditorStimpackEditValue(int eventCode)
         }
         break;
     }
+    case STIMPACK_CAPS_BTN_CODE:
+        if (characterEditorAskNumber(stimpackGetMessage(STIMPACK_MSG_EDIT_CAPS, "CAPS"), itemGetTotalCaps(gDude), &value)) {
+            value = std::clamp(value, 0, 999999999);
+            itemCapsAdjust(gDude, value - itemGetTotalCaps(gDude));
+        }
+        break;
     case STIMPACK_SKILL_POINTS_BTN_CODE:
         if (characterEditorAskNumber(stimpackGetMessage(STIMPACK_MSG_EDIT_SKILL_POINTS, "SKILL POINTS"), pcGetStat(PC_STAT_UNSPENT_SKILL_POINTS), &value)) {
             pcSetStat(PC_STAT_UNSPENT_SKILL_POINTS, std::clamp(value, 0, 99));
@@ -1284,7 +1291,7 @@ int characterEditorShow(bool isCreationMode)
         } else if (gCharacterEditorIsStimpackMode && (keyCode == 501 || keyCode == KEY_UPPERCASE_P || keyCode == KEY_LOWERCASE_P)) {
             characterEditorStimpackEditPerks();
             windowRefresh(gCharacterEditorWindow);
-        } else if (gCharacterEditorIsStimpackMode && keyCode >= STIMPACK_LEVEL_BTN_CODE && keyCode <= STIMPACK_SKILL_POINTS_BTN_CODE) {
+        } else if (gCharacterEditorIsStimpackMode && keyCode >= STIMPACK_LEVEL_BTN_CODE && keyCode <= STIMPACK_CAPS_BTN_CODE) {
             characterEditorStimpackEditValue(keyCode);
         } else if ((gCharacterEditorIsCreationMode && (keyCode == 501 || keyCode == KEY_UPPERCASE_O || keyCode == KEY_LOWERCASE_O))
             || (!gCharacterEditorIsCreationMode && (keyCode == 501 || keyCode == KEY_UPPERCASE_P || keyCode == KEY_LOWERCASE_P))) {
@@ -2787,6 +2794,12 @@ static void characterEditorDrawPcStats()
     snprintf(stringBuffer, sizeof(stringBuffer), "%s %s",
         getmsg(&gCharacterEditorMessageList, &gCharacterEditorMessageListItem, expMsgId),
         formattedValue);
+    if (gCharacterEditorIsStimpackMode) {
+        // Stimpack: the third line shows money instead (click to type).
+        snprintf(stringBuffer, sizeof(stringBuffer), "%s %s",
+            stimpackGetMessage(STIMPACK_MSG_CAPS, "Caps:"),
+            _itostndn(itemGetTotalCaps(gDude), formattedValueBuffer));
+    }
     fontDrawText(gCharacterEditorWindowBuffer + 640 * y + 32, stringBuffer, 640, 640, color);
 }
 
@@ -5072,10 +5085,15 @@ static void characterEditorRegisterInfoAreas()
         // Click a value to type a new one: level, exp, hit points, skill points.
         // Created after the info areas that cover the same spots: the newest
         // button under the mouse gets the click.
+        // Same line spacing as characterEditorDrawPcStats (font 101).
+        int oldFont = fontGetCurrent();
+        fontSetCurrent(101);
         int lineHeight = fontGetLineHeight() + 1;
+        fontSetCurrent(oldFont);
         buttonCreate(gCharacterEditorWindow, 28, 280, 124, lineHeight, -1, -1, STIMPACK_LEVEL_BTN_CODE, -1, nullptr, nullptr, nullptr, BUTTON_FLAG_NONE);
         if (!gCharacterEditorIsCompanionMode) {
             buttonCreate(gCharacterEditorWindow, 28, 280 + lineHeight, 124, lineHeight, -1, -1, STIMPACK_EXPERIENCE_BTN_CODE, -1, nullptr, nullptr, nullptr, BUTTON_FLAG_NONE);
+            buttonCreate(gCharacterEditorWindow, 28, 280 + 2 * lineHeight, 124, lineHeight, -1, -1, STIMPACK_CAPS_BTN_CODE, -1, nullptr, nullptr, nullptr, BUTTON_FLAG_NONE);
         }
         buttonCreate(gCharacterEditorWindow, 191, 44, 122, lineHeight + 2, -1, -1, STIMPACK_HIT_POINTS_BTN_CODE, -1, nullptr, nullptr, nullptr, BUTTON_FLAG_NONE);
         if (!gCharacterEditorIsCompanionMode) {

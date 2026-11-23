@@ -727,6 +727,9 @@ def test_stimpack_edit_player(update):
         raise TestFailure(f"slot 11 description is {slot_description(11)!r}")
     out11, _ = run_game("stimpack_edit_load11", "load_slot.txt", ["--dev-load-game=11"])
     notes.append(compare_state(out11 / "state.json", "stimpack_edit_player_state.json", update))
+    caps = json.loads((out11 / "state.json").read_text())["player"]["caps"]
+    if caps != 5000:
+        raise TestFailure(f"saved caps {caps}, expected 5000")
 
     # Everything except the edited player values must still match slot 1.
     original = json.loads((GOLDEN / "slot01_state.json").read_text())
