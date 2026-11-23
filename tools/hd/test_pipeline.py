@@ -141,6 +141,29 @@ class RealArt(unittest.TestCase):
         on_disk = np.asarray(Image.open(hdlib.out_path("scripted", asset)))
         self.assertTrue(np.array_equal(rgba, on_disk))
 
+    def test_area_tiles_complete(self):
+        """Every floor and roof tile on the area maps has an image in both packs."""
+        if not any(a.get("area") for a in hdlib.load_manifest()):
+            self.skipTest("run extract.py --areas first")
+        import extract
+        lst = (hdlib.WORK_DIR / "raw/art/tiles/tiles.lst").read_text(encoding="latin-1").splitlines()
+        names = [line.strip().lower().removesuffix(".frm") for line in lst]
+        used = set()
+        for path in sorted((hdlib.WORK_DIR / "raw/maps").glob("*.map")):
+            if not path.stem.startswith(extract.AREA_PREFIXES):
+                continue
+            for grid in extract.read_map_grids(path).values():
+                for word in grid:
+                    floor, roof = word & 0xFFF, (word >> 16) & 0xFFF
+                    if 1 <= floor < len(names):
+                        used.add(names[floor])
+                    if 2 <= roof < len(names):
+                        used.add(names[roof])
+        self.assertGreater(len(used), 900)
+        for pack in PACKS:
+            missing = sorted(n for n in used if not (hdlib.ASSETS_DIR / pack / f"art/tiles/{n}.png").exists())
+            self.assertEqual(missing, [], pack)
+
     def test_tile_seams(self):
         regions = json.loads(hdlib.MANIFEST.read_text())["regions"]
         self.assertTrue(regions)

@@ -296,6 +296,12 @@ bool windowHdDrawImage(int win, int x, int y, int width, int height, const HdIma
 // Same with a clip rectangle and/or the legacy source art (see HdDrawOptions).
 bool windowHdDrawImageEx(int win, int x, int y, int width, int height, const HdImage& image, const HdDrawOptions& options);
 void windowHdClear(int win);
+// The window's HD layer (created on first use), or null when HD is off or the
+// window has no buffer. For drawing code that writes the layer directly
+// (floor and roof tiles).
+HdLayer* windowHdGetLayer(int win);
+// The base palette (`_cmap`) at 8 bits per channel, R, G, B per entry.
+void windowHdGetBasePalette(unsigned char* palette8);
 // HD side of darkening a whole window by a palette blit (the main menu behind
 // overlay subscreens): Begin keeps a copy of the window's HD layer; Darken,
 // called after each darkening of the window buffer, shows the copy scaled by

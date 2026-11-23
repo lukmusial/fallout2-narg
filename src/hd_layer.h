@@ -94,6 +94,88 @@ void hdLayerDrawImageEx(HdLayer* layer, const unsigned char* buffer, int bufferP
     int x, int y, int width, int height, const HdImage& image, const unsigned char* basePalette8,
     const HdDrawOptions& options);
 
+// Lighting in RGB (Phase 2.7). `intensity` uses the engine's light scale:
+// 0x10000 leaves the colour unchanged, less darkens it towards black
+// (multiplies), more brightens it towards white, as the legacy intensity
+// tables do, but without quantising to 128 steps and the palette.
+inline uint32_t hdLight(uint32_t rgb, int intensity)
+{
+    if (intensity == 0x10000) {
+        return rgb & 0xFFFFFF;
+    }
+
+    uint32_t r = (rgb >> 16) & 0xFF;
+    uint32_t g = (rgb >> 8) & 0xFF;
+    uint32_t b = rgb & 0xFF;
+    if (intensity < 0x10000) {
+        // Each channel times scale / 0x10000, rounded; red and blue share
+        // one 64-bit multiply (red at bit 32, blue at bit 0).
+        uint64_t scale = intensity > 0 ? static_cast<uint64_t>(intensity) : 0;
+        uint64_t redBlue = ((static_cast<uint64_t>(r) << 32) | b) * scale + 0x0000800000008000ull;
+        r = static_cast<uint32_t>(redBlue >> 48) & 0xFF;
+        b = static_cast<uint32_t>(redBlue >> 16) & 0xFF;
+        g = static_cast<uint32_t>((g * scale + 0x8000) >> 16);
+    } else {
+        uint32_t scale = static_cast<uint32_t>(intensity < 0x20000 ? intensity - 0x10000 : 0x10000);
+        r += ((255 - r) * scale + 0x8000) >> 16;
+        g += ((255 - g) * scale + 0x8000) >> 16;
+        b += ((255 - b) * scale + 0x8000) >> 16;
+    }
+    return (r << 16) | (g << 8) | b;
+}
+
+// A lit draw of a legacy frame's HD image (floor and roof tiles): the legacy
+// code has just drawn the frame, with lighting, into the window buffer.
+struct HdLitDraw {
+    // The legacy frame (index 0 transparent) and its HD image, which must be
+    // exactly kHdScale times the frame's size.
+    const unsigned char* frame = nullptr;
+    int framePitch = 0;
+    const HdImage* image = nullptr;
+
+    // The drawn part: frame pixel (frameX, frameY) lands on logical layer
+    // pixel (x, y); width x height logical pixels.
+    int frameX = 0;
+    int frameY = 0;
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+
+    // Per-pixel intensities aligned with the drawn part (row pitch in ints),
+    // or `constantIntensity` when null.
+    const int* intensity = nullptr;
+    int intensityPitch = 0;
+    int constantIntensity = 0x10000;
+
+    // When set, a pixel is drawn only where the window buffer equals
+    // expected[frame index], the colour the plain legacy draw produces there;
+    // pixels the legacy code drew differently (e.g. blended under the roof
+    // cut-out) keep whatever the layer had.
+    const unsigned char* expected = nullptr;
+};
+
+// For every non-transparent frame pixel of the drawn part: the HD block,
+// lit, becomes the layer's pixel with the window buffer's index as shadow.
+// Blocks that are fully transparent in the HD image (colour-cycling source
+// pixels) and pixels whose buffer index is a colour-cycling index are made
+// invalid, so the legacy pixel shows. Partially transparent HD pixels are
+// blended over what the layer shows there (or the base palette colour).
+void hdLayerDrawLit(HdLayer* layer, const unsigned char* buffer, int bufferPitch, const HdLitDraw& draw, const unsigned char* basePalette8);
+
+// Marks a rectangle (logical, clipped to the layer) as having no HD pixels.
+void hdLayerInvalidateRect(HdLayer* layer, int x, int y, int width, int height);
+
+// Same, only where `mask` (aligned with the rectangle) is not 0; used where
+// legacy art (objects) is drawn over HD pixels, so it stays legacy even where
+// its palette index happens to equal the shadow.
+void hdLayerInvalidateMasked(HdLayer* layer, int x, int y, int width, int height, const unsigned char* mask, int maskPitch);
+
+// Moves the layer's content like a scroll of the window buffer: afterwards
+// logical pixel (x, y) holds what was at (x + dx, y + dy). Pixels with no
+// source are invalid.
+void hdLayerScroll(HdLayer* layer, int dx, int dy);
+
 // Whether the HD block of logical pixel (x, y) is shown for buffer value `index`.
 inline bool hdLayerShows(const HdLayer* layer, int x, int y, unsigned char index)
 {

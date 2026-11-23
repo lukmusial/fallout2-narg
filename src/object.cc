@@ -5068,6 +5068,10 @@ static void _obj_render_object(Object* object, Rect* rect, int light)
     int objectWidth = objectRect.right - objectRect.left + 1;
     int objectHeight = objectRect.bottom - objectRect.top + 1;
 
+    // CE: objects stay legacy over HD floors and roofs (Phase 2.7), even
+    // where a pixel's palette index equals the tile pixel under it.
+    tileHdInvalidateMasked(src, frameWidth, objectRect.left, objectRect.top, objectWidth, objectHeight);
+
     if (type == OBJ_TYPE_INTERFACE) {
         blitBufferToBufferTrans(src,
             objectWidth,

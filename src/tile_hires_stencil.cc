@@ -389,6 +389,9 @@ void tile_hires_stencil_draw(Rect* rect, unsigned char* buffer, int windowWidth,
                     intersection.bottom - intersection.top + 1,
                     windowWidth,
                     COLOR_FIRST);
+                // CE: no HD floor shows through the stencil (the iso window's
+                // HD layer, Phase 2.7).
+                tileHdInvalidateRect(&intersection);
             }
         }
     }

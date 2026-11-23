@@ -1,0 +1,13 @@
+# Phase 2.7 proposal sheets (tools/hd/floors_sheet.py; run with
+# --dev-load-game=N and [graphics]hd=1). The three frames are taken in the
+# same tick, switching the pack and redrawing the map in between, so
+# animated critters and lights are identical in all of them.
+until game 30000
+wait 2000
+hdpack -
+fbshot legacy
+hdpack scripted
+fbshot scripted
+hdpack ai
+fbshot ai
+quit 0

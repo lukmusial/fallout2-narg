@@ -641,6 +641,8 @@ int mapScroll(int dx, int dy)
 
     gIsoWindowScrollTimestamp = now;
 
+    double started = tileRenderClockMs();
+
     int screenDx = dx * 32;
     int screenDy = dy * 24;
 
@@ -721,6 +723,9 @@ int mapScroll(int dx, int dy)
         src += step;
     }
 
+    // CE: the HD layer moves with the buffer; the strips are redrawn below.
+    tileHdScroll(screenDx, screenDy);
+
     if (screenDx != 0) {
         _map_scroll_refresh(&r2);
     }
@@ -730,6 +735,8 @@ int mapScroll(int dx, int dy)
     }
 
     windowRefresh(gIsoWindow);
+
+    tileRenderStatsAdd(true, tileRenderClockMs() - started);
 
     return 0;
 }
@@ -943,6 +950,8 @@ static int mapLoad(File* stream)
         windowGetWidth(gIsoWindow),
         windowGetHeight(gIsoWindow),
         COLOR_BLACK);
+    // CE: no HD floors of the previous map behind the black.
+    windowHdClear(gIsoWindow);
     windowRefresh(gIsoWindow);
     animationStop();
     scriptsDisable();
@@ -1686,6 +1695,9 @@ static void isoWindowRefreshRectGame(Rect* rect)
     Rect visArea;
     bool hasVisArea = mapEdgeComputeVisibleArea(gElevation, &visArea);
 
+    // CE: everything in the rectangle is drawn again (HD floors and roofs).
+    tileHdInvalidateRect(&rectToUpdate);
+
     // HRP rect_inside_bound_scroll_clip: always clear srcRect, then clip to mapVisibleArea.
     bufferFill(gIsoWindowBuffer + rectToUpdate.top * rectGetWidth(&gIsoWindowRect) + rectToUpdate.left,
         rectGetWidth(&rectToUpdate),
@@ -1717,6 +1729,9 @@ static void isoWindowRefreshRectMapper(Rect* rect)
 
     Rect visArea;
     bool hasVisArea = mapEdgeComputeVisibleArea(gElevation, &visArea);
+
+    // CE: everything in the rectangle is drawn again (HD floors and roofs).
+    tileHdInvalidateRect(&rectToUpdate);
 
     // HRP rect_inside_bound_scroll_clip: always clear srcRect, then clip to mapVisibleArea.
     bufferFill(gIsoWindowBuffer + rectToUpdate.top * rectGetWidth(&gIsoWindowRect) + rectToUpdate.left,

@@ -864,15 +864,15 @@ bool windowHdDrawImage(int win, int x, int y, int width, int height, const HdIma
     return windowHdDrawImageEx(win, x, y, width, height, image, HdDrawOptions());
 }
 
-bool windowHdDrawImageEx(int win, int x, int y, int width, int height, const HdImage& image, const HdDrawOptions& options)
+HdLayer* windowHdGetLayer(int win)
 {
     if (!windowHdIsActive()) {
-        return false;
+        return nullptr;
     }
 
     Window* window = windowGetWindow(win);
     if (window == nullptr || window->buffer == nullptr) {
-        return false;
+        return nullptr;
     }
 
     if (window->hdLayer == nullptr || window->hdLayer->width != window->width || window->hdLayer->height != window->height) {
@@ -881,12 +881,28 @@ bool windowHdDrawImageEx(int win, int x, int y, int width, int height, const HdI
         hdLayerInit(window->hdLayer, window->width, window->height);
     }
 
-    unsigned char basePalette8[256 * 3];
+    return window->hdLayer;
+}
+
+void windowHdGetBasePalette(unsigned char* palette8)
+{
     for (int index = 0; index < 256 * 3; index++) {
-        basePalette8[index] = colorExpand6(_cmap[index]);
+        palette8[index] = colorExpand6(_cmap[index]);
+    }
+}
+
+bool windowHdDrawImageEx(int win, int x, int y, int width, int height, const HdImage& image, const HdDrawOptions& options)
+{
+    HdLayer* layer = windowHdGetLayer(win);
+    if (layer == nullptr) {
+        return false;
     }
 
-    hdLayerDrawImageEx(window->hdLayer, window->buffer, window->width, x, y, width, height, image, basePalette8, options);
+    unsigned char basePalette8[256 * 3];
+    windowHdGetBasePalette(basePalette8);
+
+    Window* window = windowGetWindow(win);
+    hdLayerDrawImageEx(layer, window->buffer, window->width, x, y, width, height, image, basePalette8, options);
     return true;
 }
 

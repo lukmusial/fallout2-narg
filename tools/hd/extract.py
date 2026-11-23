@@ -13,6 +13,8 @@ Writes into the gitignored work dir (tools/hd/work by default):
 
   extract.py                    # default sample set
   extract.py --extra art/tiles/brick02.frm --extra art/scenery/car2.frm
+  extract.py --areas            # + every floor and roof tile of the save
+                                #   games' areas (AREA_PREFIXES maps)
 """
 
 from __future__ import annotations
@@ -111,6 +113,11 @@ MAP_REGIONS = [
 ]
 
 
+# Phase 2.7: the maps of the areas the reference saves are in (Arroyo,
+# Klamath, Den); every floor and roof tile on any of their elevations.
+AREA_PREFIXES = ("ar", "kla", "den")
+
+
 def tool(name: str) -> Path:
     path = hdlib.BUILD_DIR / name
     if not path.exists():
@@ -176,6 +183,56 @@ class Archives:
         return source
 
 
+def read_map_grids(path: Path) -> dict[int, tuple[int, ...]]:
+    """Return {elevation: 100x100 tile words} for every elevation the map has.
+    Each word is roof << 16 | floor; the low 12 bits of a half are the tile
+    number in tiles.lst, the top 4 bits flags."""
+    b = path.read_bytes()
+    (version, _name, _ent, _elev, _rot, nloc, _sid, flags, _dark, nglob, _idx, _t) = \
+        struct.unpack(">i16s10i", b[:60])
+    if version not in (19, 20):
+        raise ValueError(f"{path}: unsupported map version {version}")
+    off = 236 + 4 * nglob + 4 * nloc
+    grids = {}
+    for e in range(3):
+        if flags & (2 << e):
+            continue
+        grids[e] = struct.unpack(">10000I", b[off:off + 40000])
+        off += 40000
+    return grids
+
+
+def area_tiles(arch: "Archives", raw: Path, tile_names: list[str]) -> tuple[list[str], set[str], set[str], dict]:
+    """(maps, floor tile paths, roof tile paths, per-map stats) for the maps
+    whose names start with AREA_PREFIXES."""
+    names = set()
+    for _label, _dat, entries in arch.layers:
+        names.update(p for p in entries if p.startswith("maps/") and p.endswith(".map"))
+    names.update(p for p in arch.loose if p.startswith("maps/") and p.endswith(".map"))
+    maps = sorted(p for p in names if Path(p).stem.startswith(AREA_PREFIXES))
+    arch.fetch(maps, raw)
+    floors: set[str] = set()
+    roofs: set[str] = set()
+    stats = {}
+    for m in maps:
+        grids = read_map_grids(raw / m)
+        f: set[str] = set()
+        r: set[str] = set()
+        for grid in grids.values():
+            for word in grid:
+                for half, out, first in ((word & 0xFFFF, f, 1), (word >> 16, r, 2)):
+                    number = half & 0xFFF
+                    # 0 is reserved.frm; 1 (grid000) is drawn as a floor
+                    # (black map edge) but means "no roof" on the roof layer.
+                    if number < first or number >= len(tile_names):
+                        continue
+                    out.add(f"art/tiles/{tile_names[number].removesuffix('.frm')}.frm")
+        floors |= f
+        roofs |= r
+        stats[Path(m).stem] = {"elevations": sorted(grids), "floor": len(f), "roof": len(r)}
+    return maps, floors, roofs, stats
+
+
 def read_map_floor(path: Path, elevation: int) -> list[list[int]] | None:
     """Return the 100x100 floor/roof fid grid (32-bit words) of one elevation."""
     b = path.read_bytes()
@@ -198,6 +255,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--extra", action="append", default=[], help="additional art path (e.g. art/tiles/brick02.frm)")
     ap.add_argument("--no-maps", action="store_true", help="skip the map-region tiles")
+    ap.add_argument("--areas", action="store_true",
+                    help="add every floor and roof tile of the Arroyo, Klamath and Den maps")
     args = ap.parse_args()
 
     raw = hdlib.WORK_DIR / "raw"
@@ -221,7 +280,16 @@ def main() -> None:
         regions.append({"map": m, "elevation": elev, "row": r0, "col": c0, "size": n, "tiles": names})
         region_tiles.update(f"art/tiles/{x}.frm" for row in names for x in row)
 
-    art = list(dict.fromkeys(INTERFACE + SCREENS + TILES + OBJECTS + sorted(region_tiles) + [e.lower() for e in args.extra]))
+    area_floor: set[str] = set()
+    area_roof: set[str] = set()
+    if args.areas:
+        maps, area_floor, area_roof, stats = area_tiles(arch, raw, tile_names)
+        for m, st in stats.items():
+            print(f"{m:9} elevations {st['elevations']}  floor {st['floor']:4}  roof {st['roof']:4}")
+        print(f"{len(maps)} maps: {len(area_floor | area_roof)} tiles ({len(area_floor)} floor, {len(area_roof)} roof)")
+
+    art = list(dict.fromkeys(INTERFACE + SCREENS + TILES + OBJECTS + sorted(region_tiles)
+                             + sorted(area_floor | area_roof) + [e.lower() for e in args.extra]))
     sources = arch.fetch(art, raw)
 
     pal = raw / "color.pal"
@@ -238,8 +306,9 @@ def main() -> None:
         subprocess.run([str(tool("ce-frm2png")), str(frm), str(dst), "--palette", str(pal)],
                        check=True, capture_output=True)
         idx, _ = hdlib.load_indexed(dst)
-        if path in TILES or path in region_tiles:
-            kind = "roof" if path in TILES[-3:] else "tile"
+        if path in TILES or path in region_tiles or path in area_floor or path in area_roof:
+            roof = path in TILES[-3:] or (path in area_roof and path not in area_floor)
+            kind = "roof" if roof else "tile"
         elif typ == "intrface":
             kind = "interface"
         else:
@@ -248,6 +317,7 @@ def main() -> None:
             "key": key, "name": name, "type": typ, "kind": kind,
             "width": int(idx.shape[1]), "height": int(idx.shape[0]),
             "source": sources[path], "sample": path in INTERFACE + TILES + OBJECTS,
+            "area": path in area_floor or path in area_roof,
         })
         print(f"{sources[path]:>12}  {key}  {idx.shape[1]}x{idx.shape[0]}")
 

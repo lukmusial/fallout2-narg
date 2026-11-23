@@ -49,6 +49,19 @@ NAMES=$(.venv/bin/python -c "import json;print(' '.join(a['key'] for a in json.l
 .venv/bin/python screens_sheet.py      # runs the game hidden -> docs/screens/phase2.6/
 ```
 
+Floors and roofs (Phase 2.7): every floor and roof tile of the maps of the
+save games' areas (Arroyo `ar*`, Klamath `kla*`, Den `den*`; 941 tiles):
+
+```sh
+cd tools/hd
+.venv/bin/python extract.py --areas     # per-map counts, adds the tiles to the manifest
+NAMES=$(.venv/bin/python -c "import json;print(' '.join(a['key'] for a in json.load(open('work/manifest.json'))['assets'] if a['type']=='tiles'))")
+.venv/bin/python enhance_scripted.py $NAMES   # ~18 s
+.venv/bin/python enhance_ai.py $NAMES         # ~32 s
+.venv/bin/python install.py
+.venv/bin/python floors_sheet.py        # runs the game hidden -> docs/screens/phase2.7/
+```
+
 Select a pack with `[graphics] hd=1` and `[graphics] hd_pack=scripted` (or
 `ai`, or a mixed pack with a `manifest.txt`, see `src/hd_art.h`).
 
@@ -112,6 +125,51 @@ Observations (see `docs/screens/phase2.6/`):
   mixed pack (`* = ai`, the arrow FRMs `= scripted`) fixes that.
 - Scripted is faithful but soft; on the 3440x1440 menu its plates look
   smeared next to AI.
+
+## Floors and roofs in the engine (Phase 2.7)
+
+With `hd=1` and a pack, `src/tile.cc` draws each floor and roof tile into the
+iso window's HD layer right after the legacy draw (`hdLayerDrawLit`): the
+pack image, or the legacy tile expanded 2x when the pack has none, lit in RGB
+from the same intensities the legacy draw uses (per pixel for floors with
+varying light, the ambient level for roofs). The legacy tables quantise light
+to 128 steps and then to the nearest palette colour; in RGB the light falls
+off smoothly. Roofs are drawn in HD only where the buffer holds the plain lit
+roof colour, so the blended cut-out around the player stays legacy.
+
+Objects (scenery, walls, critters, items) stay legacy this phase: every object
+draw marks its non-transparent pixels legacy in the layer, so they win even
+where an object pixel has the same palette index as the floor under it.
+Scrolling moves the HD layer with the window buffer (`hdLayerScroll` next to
+the memmove in `mapScroll`); every redraw of a rectangle, the hi-res stencil
+and the black screen of a map change reset it there first.
+
+Observations (see `docs/screens/phase2.7/`):
+
+- AI gives cleaner ground (desert, dirt, concrete) and much better roofs
+  (Klamath straw, Arroyo tents); the scripted enhancer turns the straw and
+  tent fabric into "worm" patterns.
+- Seams between tiles are not visible with either pack at 1:1.
+- Smooth lighting is the biggest visible change in dark maps (toxic caves,
+  rat caves, the Den at night): the legacy darkening maps to the palette's few
+  dark entries, which are reddish and noisy; RGB darkening keeps the tile's
+  own hue (bluish-grey brick in the toxic caves). Until objects get RGB
+  lighting (Phase 2.8) the legacy-lit walls and scenery keep the reddish cast
+  next to the neutral floors.
+
+Performance (Release, 3440x1440 at scale 2, `run_tests.py --perf N` with
+`RUN_DIR=out/build/macos-release`; slots 1 Klamath day, 8 Den at night with
+lights everywhere, 6 rat caves; machine under other load):
+
+| | legacy (hd=0) | hd=1 scripted | hd=1 ai |
+|---|---|---|---|
+| idle, work per frame | 0.7-1.3 ms | 1.1-2.1 ms | 1.1-2.1 ms |
+| scroll step (32x24 px) | 0.3-0.5 ms | 2.6-5.0 ms (max 7.7) | 2.4-4.8 ms (max 7.6) |
+| whole-map redraw, median | 1.3-1.9 ms | 5.1-8.8 ms | 5.1-9.5 ms |
+| of that, HD tile drawing | - | 2.3-5.3 ms | 2.3-5.6 ms |
+
+Whole-map redraws happen on map and elevation changes and when combat starts;
+ordinary frames redraw only the rectangles that changed.
 
 ## Timings (Apple M5 Pro, 64 GB; per asset, warm)
 
