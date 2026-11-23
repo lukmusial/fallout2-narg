@@ -246,6 +246,8 @@ set(FALLOUT_ENGINE_SOURCES
     "src/sound.h"
     "src/stat_defs.h"
     "src/stat.cc"
+    "src/stimpack.cc"
+    "src/stimpack.h"
     "src/stat.h"
     "src/string_parsers.cc"
     "src/string_parsers.h"

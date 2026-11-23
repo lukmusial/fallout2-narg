@@ -174,7 +174,13 @@ namespace {
 
     std::string outputPath(const std::string& name, const char* extension)
     {
-        compat_mkdir_recursive(gAutomation.outDir.c_str());
+        // compat_mkdir_recursive stops at the first directory that already exists,
+        // so create each level here and ignore "already exists".
+        std::string path = gAutomation.outDir;
+        for (size_t pos = path.find('/', 1); pos != std::string::npos; pos = path.find('/', pos + 1)) {
+            compat_mkdir(path.substr(0, pos).c_str());
+        }
+        compat_mkdir(path.c_str());
         return gAutomation.outDir + "/" + name + extension;
     }
 

@@ -66,7 +66,8 @@ def load_png(path):
     return np.asarray(Image.open(path).convert("RGB"), dtype=np.int16)
 
 
-def compare_image(actual_path, golden_name, update, max_diff=0.0):
+def compare_image(actual_path, golden_name, update, max_diff=0.0, ignore=()):
+    """`ignore`: (x0, y0, x1, y1) rectangles excluded from the comparison."""
     golden_path = GOLDEN / golden_name
     if update or not golden_path.exists():
         golden_path.parent.mkdir(parents=True, exist_ok=True)
@@ -76,7 +77,10 @@ def compare_image(actual_path, golden_name, update, max_diff=0.0):
     golden = load_png(golden_path)
     if actual.shape != golden.shape:
         raise TestFailure(f"{golden_name}: size {actual.shape} != golden {golden.shape}")
-    changed = np.any(actual != golden, axis=2).mean()
+    differs = np.any(actual != golden, axis=2)
+    for x0, y0, x1, y1 in ignore:
+        differs[y0:y1, x0:x1] = False
+    changed = differs.mean()
     if changed > max_diff:
         raise TestFailure(f"{golden_name}: {changed:.1%} of pixels differ (limit {max_diff:.0%})")
     return f"{changed:.1%} pixels differ"
@@ -117,7 +121,8 @@ def compare_state(actual_path, golden_name, update):
 
 def test_main_menu(update):
     out, seconds = run_game("main_menu", "smoke_menu.txt")
-    return compare_image(out / "mainmenu.png", "main_menu.png", update)
+    # Bottom-right footer shows the build hash and date, which change every build.
+    return compare_image(out / "mainmenu.png", "main_menu.png", update, ignore=[(400, 430, 640, 480)])
 
 
 def make_slot_test(slot):
@@ -131,7 +136,25 @@ def make_slot_test(slot):
     return test
 
 
-TESTS = [test_main_menu] + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
+def slot_description(slot):
+    header = (RUN_DIR / f"data/SAVEGAME/SLOT{slot:02d}/SAVE.DAT").read_bytes()[:0x5B]
+    return header[0x3D:0x5B].split(b"\0")[0].decode("latin-1")
+
+
+def test_stimpack_save_unchanged(update):
+    """Stimpack: open slot 3, Save As without edits; the new slot must equal slot 3."""
+    reset_saves()
+    out, seconds = run_game("stimpack_save_as", "stimpack_save_as.txt")
+    notes = [compare_image(out / "hub.png", "stimpack_hub.png", update, LIVE_VIEW_MAX_DIFF)]
+    if slot_description(11) != "stimpack test":
+        raise TestFailure(f"slot 11 description is {slot_description(11)!r}")
+    out11, _ = run_game("stimpack_load11", "load_slot.txt", ["--dev-load-game=11"])
+    # Same golden as slot 3: the re-save must not change any state.
+    notes.append(compare_state(out11 / "state.json", "slot03_state.json", False))
+    return ", ".join(notes) + f" ({seconds:.0f}s)"
+
+
+TESTS = [test_main_menu] + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)] + [test_stimpack_save_unchanged]
 
 
 def main():

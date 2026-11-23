@@ -38,6 +38,7 @@
 #include "settings.h"
 #include "sfall_callbacks.h"
 #include "sfall_global_scripts.h"
+#include "stimpack.h"
 #include "svga.h"
 #include "text_font.h"
 #include "window.h"
@@ -183,6 +184,27 @@ int falloutMain(int argc, char** argv)
                 if (loadGameRc > 0) {
                     mainMenuFinishSubscreen();
                     mainRunGameLoopAndCleanup();
+                    mainMenuWindowInit();
+                } else {
+                    main_unload_new();
+                    mainMenuCancelSubscreen();
+                    if (loadGameRc < 0) {
+                        main_reset_system();
+                    }
+                }
+                break;
+            }
+            case MainMenuOption::Stimpack: {
+                // Same load as LoadGame, but the editor runs instead of the game loop.
+                mainMenuBeginSubscreen();
+                main_loadgame_new();
+                int loadGameRc = lsgLoadGame(LoadSaveMode::FromMainMenu);
+                if (loadGameRc > 0) {
+                    mainMenuFinishSubscreen();
+                    stimpackRun();
+                    paletteFadeTo(gPaletteBlack);
+                    main_unload_new();
+                    main_reset_system();
                     mainMenuWindowInit();
                 } else {
                     main_unload_new();
