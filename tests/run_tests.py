@@ -307,11 +307,32 @@ def test_menu_fades(update):
     return f"framebuffer matches, fades captured ({seconds:.0f}s)"
 
 
+def test_stimpack_edit_companion(update):
+    """Stimpack: level Sulik (slot 1) up once, then edit ST, Melee, HP; saved as slot 11."""
+    reset_saves()
+    out, seconds = run_game("stimpack_edit_companion", "stimpack_edit_companion.txt")
+    notes = [compare_image(out / "companion_final.png", "stimpack_companion_final.png", update, 0.01)]
+    out11, _ = run_game("stimpack_companion_load11", "load_slot.txt", ["--dev-load-game=11"])
+    state = json.loads((out11 / "state.json").read_text())
+    sulik = state["party"][0]
+    if (sulik["name"], sulik["level"], sulik["hp"], sulik["base_stats"][0], sulik["stats"][7]) != ("Sulik", 1, 70, 8, 90):
+        raise TestFailure(f"companion not saved as edited: {sulik['name']} level {sulik['level']} hp {sulik['hp']} "
+                          f"ST {sulik['base_stats'][0]} max hp {sulik['stats'][7]}")
+    notes.append(compare_state(out11 / "state.json", "stimpack_edit_companion_state.json", update))
+    original = json.loads((GOLDEN / "slot01_state.json").read_text())
+    edited = stable_state(state)
+    for key in ("player", "world", "gvars"):
+        if original[key] != edited[key]:
+            raise TestFailure(f"companion edit changed {key}")
+    return ", ".join(notes) + f" ({seconds:.0f}s)"
+
+
 TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_art, test_main_menu_hd_fhd,
           test_hd_art_lookup]
          + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
          + [make_slot_test(slot, hd=True) for slot in HD_SLOTS]
-         + [test_stimpack_save_unchanged, test_character_screens, test_stimpack_edit_player, test_stimpack_cancel])
+         + [test_stimpack_save_unchanged, test_character_screens, test_stimpack_edit_player, test_stimpack_cancel,
+            test_stimpack_edit_companion])
 
 
 PERF_CONFIGS = [

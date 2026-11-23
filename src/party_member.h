@@ -40,6 +40,12 @@ bool partyMemberProtoIdCanEquipArmor(const ProtoId& protoId);
 int _getPartyMemberCount();
 int _partyMemberPrepItemSaveAll();
 int partyMemberGetCurrentLevel(Object* object);
+// Stimpack: companion level stage (0 = as hired) and the number of level-ups its
+// party.txt entry allows. Returns false for critters without levels.
+bool partyMemberGetLevelInfo(Object* object, int* level, int* maxLevel);
+// Stimpack: applies the companion's next level now, as the game does when it
+// levels up with the player (stats and skills from the next level template).
+int partyMemberLevelUpNow(Object* object);
 Skill partyMemberGetBestSkill(Object* object);
 Object* partyMemberGetBestInSkill(Skill skill);
 int partyGetBestSkillValue(Skill skill);

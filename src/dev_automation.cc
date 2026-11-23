@@ -335,6 +335,10 @@ namespace {
             first = false;
             out << "\n{";
             dumpCritter(out, member);
+            int level = -1;
+            int maxLevel = -1;
+            partyMemberGetLevelInfo(member, &level, &maxLevel);
+            out << ",\"level\":" << level << ",\"max_level\":" << maxLevel;
             out << '}';
         }
         out << ']';

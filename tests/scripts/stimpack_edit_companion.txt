@@ -1,0 +1,56 @@
+# Stimpack: level Sulik (slot 1) up once, then edit him, save as slot 11.
+until mainmenu 20000
+wait 300
+key s
+wait 1200
+key home
+key enter
+until stimpack 30000
+wait 500
+key o
+wait 800
+shot picker
+key 1
+wait 1500
+shot companion_open
+# Level up now (click the level line, confirm)
+click 60 283
+wait 800
+shot levelup_confirm
+key enter
+wait 800
+shot companion_levelled
+# Strength +1, Melee Weapons +5 points (select row, then slider +)
+click 155 42
+click 420 74
+click 620 68
+click 620 68
+click 620 68
+click 620 68
+click 620 68
+# Hit points: type 70/90
+click 230 48
+wait 800
+key backspace
+key backspace
+key backspace
+key backspace
+key backspace
+key backspace
+text 70/90
+key enter
+wait 500
+shot companion_final
+key enter
+wait 800
+shot picker_after
+key esc
+wait 800
+key s
+wait 1200
+key enter
+wait 800
+text stimpack companion
+key enter
+until mainmenu 30000
+quit 0

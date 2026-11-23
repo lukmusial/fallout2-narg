@@ -2,6 +2,9 @@
 
 #include <string.h>
 
+#include <string>
+#include <vector>
+
 #include "art.h"
 #include "character_editor.h"
 #include "color.h"
@@ -23,6 +26,8 @@
 #include "message.h"
 #include "mouse.h"
 #include "object.h"
+#include "party_member.h"
+#include "proto.h"
 #include "scripts.h"
 #include "svga.h"
 #include "text_font.h"
@@ -56,7 +61,7 @@ namespace {
 
     constexpr HubEntrySpec kHubEntries[HUB_ENTRY_COUNT] = {
         { STIMPACK_MSG_CHARACTER, "CHARACTER", KEY_LOWERCASE_C, true },
-        { STIMPACK_MSG_COMPANIONS, "COMPANIONS", KEY_LOWERCASE_O, false },
+        { STIMPACK_MSG_COMPANIONS, "COMPANIONS", KEY_LOWERCASE_O, true },
         { STIMPACK_MSG_ROSTER, "ROSTER", KEY_LOWERCASE_R, false },
         { STIMPACK_MSG_QUESTS, "QUESTS", KEY_LOWERCASE_Q, false },
         { STIMPACK_MSG_LOCATION, "LOCATION", KEY_LOWERCASE_L, false },
@@ -75,6 +80,16 @@ namespace {
     MessageList gStimpackMessageList;
     bool gStimpackMessageListLoaded = false;
 
+    constexpr int kPanelMaxEntries = 7;
+
+    // One plate of a panel: a button, or a dimmed plate when not enabled.
+    struct PanelEntry {
+        std::string label;
+        bool enabled;
+    };
+
+    // Options-style panel: header slot with two text lines, then up to seven
+    // plate buttons sending eventBase + index. Used by the hub and its pickers.
     struct Hub {
         int window = -1;
         unsigned char* buffer = nullptr;
@@ -82,7 +97,7 @@ namespace {
         FrmImage buttonUp;
         FrmImage buttonDown;
         // Normal and pressed images for each entry, with the label drawn in.
-        unsigned char* images[HUB_ENTRY_COUNT][2] = {};
+        unsigned char* images[kPanelMaxEntries][2] = {};
         int oldFont = 0;
         bool cursorWasHidden = false;
         bool mouseObjectsWereVisible = false;
@@ -115,18 +130,15 @@ namespace {
         }
     }
 
-    // Header slot: character name and current location.
-    void hubDrawHeader(Hub& hub)
+    // Header slot: two short lines (for the hub: character name and location).
+    void hubDrawHeader(Hub& hub, const char* line1, const char* line2)
     {
         int width = hub.background.getWidth();
         fontSetCurrent(kHeaderFont);
         int lineHeight = fontGetLineHeight();
         int top = kPanelFirstSlotY + (kPanelSlotPitch - 3 - 2 * lineHeight) / 2;
 
-        const char* lines[2] = {
-            critterGetName(gDude),
-            mapGetCityName(mapGetCurrentMap()),
-        };
+        const char* lines[2] = { line1, line2 };
         for (int index = 0; index < 2; index++) {
             const char* text = lines[index] != nullptr ? lines[index] : "";
             int textWidth = fontGetStringWidth(text);
@@ -135,7 +147,7 @@ namespace {
         }
     }
 
-    bool hubInit(Hub& hub)
+    bool hubInit(Hub& hub, const char* header1, const char* header2, const std::vector<PanelEntry>& entries, int eventBase)
     {
         hub.oldFont = fontGetCurrent();
 
@@ -150,8 +162,14 @@ namespace {
         int buttonHeight = hub.buttonUp.getHeight();
         size_t buttonSize = static_cast<size_t>(buttonWidth) * buttonHeight;
 
+        // Panels with fewer entries drop the unused slots: the art's top part
+        // down to the last used slot, then its bottom border.
+        int entryCount = std::min(static_cast<int>(entries.size()), kPanelMaxEntries);
         int panelWidth = hub.background.getWidth();
-        int panelHeight = hub.background.getHeight();
+        int artHeight = hub.background.getHeight();
+        int keptTop = kPanelFirstSlotY + (entryCount + 1) * kPanelSlotPitch;
+        int border = artHeight - (kPanelFirstSlotY + (kPanelMaxEntries + 1) * kPanelSlotPitch);
+        int panelHeight = std::min(artHeight, keptTop + border);
         int x = (screenGetWidth() - panelWidth) / 2;
         int y = (screenGetHeight() - panelHeight) / 2;
         hub.window = windowCreate(x, y, panelWidth, panelHeight, static_cast<ColorWithFlags>(256), WINDOW_MODAL | WINDOW_DONT_MOVE_TOP);
@@ -160,18 +178,20 @@ namespace {
         }
 
         hub.buffer = windowGetBuffer(hub.window);
-        memcpy(hub.buffer, hub.background.getData(), static_cast<size_t>(panelWidth) * panelHeight);
-        hubDrawHeader(hub);
+        memcpy(hub.buffer, hub.background.getData(), static_cast<size_t>(panelWidth) * (panelHeight - border));
+        memcpy(hub.buffer + static_cast<size_t>(panelWidth) * (panelHeight - border),
+            hub.background.getData() + static_cast<size_t>(panelWidth) * (artHeight - border),
+            static_cast<size_t>(panelWidth) * border);
+        hubDrawHeader(hub, header1, header2);
 
         fontSetCurrent(kButtonFont);
-        for (int entry = 0; entry < HUB_ENTRY_COUNT; entry++) {
-            const HubEntrySpec& spec = kHubEntries[entry];
-            const char* label = stimpackGetMessage(spec.messageId, spec.fallback);
+        for (int entry = 0; entry < entryCount; entry++) {
+            const char* label = entries[entry].label.c_str();
             int textX = std::max(0, (buttonWidth - fontGetStringWidth(label)) / 2);
             int textY = (buttonHeight - fontGetLineHeight()) / 2 + 1;
             int slotY = kPanelFirstSlotY + (entry + 1) * kPanelSlotPitch;
 
-            if (!spec.implemented) {
+            if (!entries[entry].enabled) {
                 // Not available yet: draw the plate with a dim label and no button.
                 blitBufferToBufferTrans(hub.buttonUp.getData(), buttonWidth, buttonHeight, buttonWidth,
                     hub.buffer + panelWidth * slotY + kPanelSlotX, panelWidth);
@@ -200,7 +220,7 @@ namespace {
                 -1,
                 -1,
                 -1,
-                kHubEventBase + entry,
+                eventBase + entry,
                 hub.images[entry][0],
                 hub.images[entry][1],
                 nullptr,
@@ -265,6 +285,72 @@ namespace {
         return -1;
     }
 
+    constexpr int kPickerEventBase = 640;
+
+    // Companions in the party (alive, on the map), at most six so BACK fits.
+    std::vector<Object*> stimpackCompanions()
+    {
+        std::vector<Object*> companions;
+        for (Object* member : get_all_party_members_objects(false)) {
+            if (member != gDude && ProtoId(member).objectType() == OBJ_TYPE_CRITTER && companions.size() < kPanelMaxEntries - 1) {
+                companions.push_back(member);
+            }
+        }
+        return companions;
+    }
+
+    // COMPANIONS: pick a party member, edit it, come back to the list.
+    // Returns true when anything was changed.
+    bool runCompanions()
+    {
+        std::vector<Object*> companions = stimpackCompanions();
+        if (companions.empty()) {
+            showMessage(STIMPACK_MSG_NO_COMPANIONS, "There are no companions in this game.");
+            return false;
+        }
+
+        bool edited = false;
+        for (;;) {
+            std::vector<PanelEntry> entries;
+            for (Object* companion : companions) {
+                entries.push_back({ critterGetName(companion), true });
+            }
+            entries.push_back({ stimpackGetMessage(STIMPACK_MSG_BACK, "BACK"), true });
+            int backIndex = static_cast<int>(entries.size()) - 1;
+
+            Hub picker;
+            if (!hubInit(picker, stimpackGetMessage(STIMPACK_MSG_COMPANIONS, "COMPANIONS"), critterGetName(gDude), entries, kPickerEventBase)) {
+                hubFree(picker);
+                return edited;
+            }
+
+            int chosen = -1;
+            while (chosen == -1) {
+                sharedFpsLimiter.mark();
+                int keyCode = inputGetInput();
+                if (keyCode >= kPickerEventBase && keyCode < kPickerEventBase + static_cast<int>(entries.size())) {
+                    chosen = keyCode - kPickerEventBase;
+                } else if (keyCode == KEY_ESCAPE) {
+                    chosen = backIndex;
+                } else if (keyCode >= '1' && keyCode < '1' + backIndex) {
+                    chosen = keyCode - '1';
+                }
+                renderPresent();
+                sharedFpsLimiter.throttle();
+            }
+            hubFree(picker);
+            windowRefreshAll(&_scr_size);
+
+            if (chosen == backIndex) {
+                return edited;
+            }
+            if (characterEditorShowStimpackCompanion(companions[chosen]) == 0) {
+                edited = true;
+            }
+            windowRefreshAll(&_scr_size);
+        }
+    }
+
 } // namespace
 
 const char* stimpackGetMessage(int messageId, const char* fallback)
@@ -297,8 +383,13 @@ bool stimpackRun()
     scriptsDisable();
     shadeMapView();
 
+    std::vector<PanelEntry> entries;
+    for (const HubEntrySpec& spec : kHubEntries) {
+        entries.push_back({ stimpackGetMessage(spec.messageId, spec.fallback), spec.implemented });
+    }
+
     Hub hub;
-    if (!hubInit(hub)) {
+    if (!hubInit(hub, critterGetName(gDude), mapGetCityName(mapGetCurrentMap()), entries, kHubEventBase)) {
         hubFree(hub);
         return false;
     }
@@ -317,6 +408,14 @@ bool stimpackRun()
             // Sub-screens open above the hub; hide it so it does not show around them.
             windowHide(hub.window);
             if (characterEditorShowStimpack() == 0) {
+                edited = true;
+            }
+            windowShow(hub.window);
+            windowRefreshAll(&_scr_size);
+            break;
+        case HUB_ENTRY_COMPANIONS:
+            windowHide(hub.window);
+            if (runCompanions()) {
                 edited = true;
             }
             windowShow(hub.window);
