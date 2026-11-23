@@ -66,7 +66,12 @@ def load_png(path):
     return np.asarray(Image.open(path).convert("RGB"), dtype=np.int16)
 
 
-def compare_image(actual_path, golden_name, update, max_diff=0.0):
+# The main menu footer prints the build hash and build date, which change with
+# every commit; that strip is excluded from the comparison (logical 640x480 coords).
+MAIN_MENU_MASK = [(300, 446, 640, 472)]
+
+
+def compare_image(actual_path, golden_name, update, max_diff=0.0, mask=()):
     golden_path = GOLDEN / golden_name
     if update or not golden_path.exists():
         golden_path.parent.mkdir(parents=True, exist_ok=True)
@@ -76,7 +81,11 @@ def compare_image(actual_path, golden_name, update, max_diff=0.0):
     golden = load_png(golden_path)
     if actual.shape != golden.shape:
         raise TestFailure(f"{golden_name}: size {actual.shape} != golden {golden.shape}")
-    changed = np.any(actual != golden, axis=2).mean()
+    differs = np.any(actual != golden, axis=2)
+    scale = actual.shape[1] / 640
+    for left, top, right, bottom in mask:
+        differs[int(top * scale):int(bottom * scale), int(left * scale):int(right * scale)] = False
+    changed = differs.mean()
     if changed > max_diff:
         raise TestFailure(f"{golden_name}: {changed:.1%} of pixels differ (limit {max_diff:.0%})")
     return f"{changed:.1%} pixels differ"
@@ -117,7 +126,7 @@ def compare_state(actual_path, golden_name, update):
 
 def test_main_menu(update):
     out, seconds = run_game("main_menu", "smoke_menu.txt")
-    return compare_image(out / "mainmenu.png", "main_menu.png", update)
+    return compare_image(out / "mainmenu.png", "main_menu.png", update, mask=MAIN_MENU_MASK)
 
 
 def make_slot_test(slot):
