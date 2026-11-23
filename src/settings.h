@@ -108,6 +108,8 @@ struct GraphicsSettings {
     // Presents at twice the logical resolution (needs [screen] scale=2):
     // legacy pixels are doubled and HD layers show at full resolution.
     bool hd = false;
+    // Folder under hd/ holding the HD art pack (empty: no HD art).
+    std::string hd_pack;
 };
 
 struct UISettings {

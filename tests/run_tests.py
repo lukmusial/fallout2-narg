@@ -72,6 +72,8 @@ MAIN_MENU_MASK = [(300, 446, 640, 472)]
 
 
 HD_ARGS = ["[graphics]hd=1"]
+# Placeholder HD art made by tools/dev/make_test_hd_art.py (main menu background).
+HD_ART_ARGS = [*HD_ARGS, "[graphics]hd_pack=test"]
 
 
 def compare_image(actual_path, golden_name, update, max_diff=0.0, mask=(), upscale=1):
@@ -141,6 +143,37 @@ def test_main_menu_hd(update):
     return compare_image(out / "mainmenu.png", "main_menu.png", False, mask=MAIN_MENU_MASK, upscale=2)
 
 
+def nonuniform_blocks(image):
+    """Fraction of 2x2 output blocks that are not a single colour (HD detail)."""
+    h, w = image.shape[0] // 2, image.shape[1] // 2
+    blocks = image[:h * 2, :w * 2].reshape(h, 2, w, 2, 3)
+    return float((np.abs(blocks - blocks[:, :1, :, :1, :]).sum(axis=(1, 3, 4)) > 0).mean())
+
+
+def test_main_menu_hd_art(update):
+    """HD layer + compositor: menu background from a 2x PNG, legacy buttons and
+    text on top, cursor composited over HD, fade-out modulates HD pixels."""
+    out, seconds = run_game("main_menu_hd_art", "menu_fades.txt", HD_ART_ARGS)
+    menu = load_png(out / "menu_fb.png")
+    detail = nonuniform_blocks(menu)
+    if detail < 0.5:
+        raise TestFailure(f"HD background not shown ({detail:.0%} of 2x2 blocks have detail)")
+    # Cursor rectangle at logical (320, 240): HD must survive around the cursor.
+    cursor = nonuniform_blocks(menu[480:530, 640:690])
+    if cursor < 0.2:
+        raise TestFailure(f"cursor area lost its HD pixels ({cursor:.0%})")
+    # Button label "INTRO" (logical 90..160 x 18..38) is legacy text over HD:
+    # its text pixels are pixel-doubled.
+    label = menu[36:76, 180:320]
+    if nonuniform_blocks(label) > 0.9:
+        raise TestFailure("button label shows no legacy (pixel-doubled) text")
+    ratio = load_png(out / "fade_out_50.png").mean() / menu.mean()
+    if not 0.4 < ratio < 0.6:
+        raise TestFailure(f"fade-out frame is {ratio:.2f} of full brightness, expected ~0.5")
+    note = compare_image(out / "menu_fb.png", "main_menu_hd_art.png", update, mask=MAIN_MENU_MASK)
+    return f"{note}, detail {detail:.0%}, cursor {cursor:.0%}, fade {ratio:.2f} ({seconds:.0f}s)"
+
+
 def make_slot_test(slot, hd=False):
     def test(update):
         reset_saves()
@@ -161,7 +194,7 @@ HD_SLOTS = (1, 5, 9)
 
 def test_menu_fades(update):
     """The presenter's framebuffer matches the window composition, and fades run
-    at 8-bit precision (within one 6-bit step of the old presenter)."""
+    at 8-bit precision (within the 6-bit quantisation of the old presenter)."""
     out, seconds = run_game("menu_fades", "menu_fades.txt")
     for fb, shot in (("menu_fb", "menu"), ("load_fb", "load")):
         if not np.array_equal(load_png(out / f"{fb}.png"), load_png(out / f"{shot}.png")):
@@ -171,15 +204,17 @@ def test_menu_fades(update):
         legacy = load_png(out / f"{name}_6bit.png")
         if fade.shape != legacy.shape:
             raise TestFailure(f"{name}: size {fade.shape} != {legacy.shape}")
+        # 6-bit steps truncate (< 4 levels at 8 bits) and lack bit replication
+        # (<= 3 levels), so the two may differ by up to 6.
         worst = int(np.abs(fade - legacy).max())
-        if worst > 4:
+        if worst > 6:
             raise TestFailure(f"{name}: differs from the 6-bit fade by {worst} levels")
         if fade.max() < 16:
             raise TestFailure(f"{name}: frame is black, fade not captured mid-way")
     return f"framebuffer matches, fades captured ({seconds:.0f}s)"
 
 
-TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd]
+TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_art]
          + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
          + [make_slot_test(slot, hd=True) for slot in HD_SLOTS])
 
@@ -187,7 +222,7 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd]
 PERF_CONFIGS = [
     ("1280x960 scale 2", ["[screen]resolution_x=1280", "[screen]resolution_y=960", "[screen]scale=2"]),
     ("3440x1440 scale 2", ["[screen]resolution_x=3440", "[screen]resolution_y=1440", "[screen]scale=2"]),
-    ("3440x1440 hd=1", ["[screen]resolution_x=3440", "[screen]resolution_y=1440", "[screen]scale=2", *HD_ARGS]),
+    ("3440x1440 hd=1", ["[screen]resolution_x=3440", "[screen]resolution_y=1440", "[screen]scale=2", *HD_ART_ARGS]),
 ]
 
 

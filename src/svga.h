@@ -48,6 +48,15 @@ void directDrawSetPalette8InRange(const unsigned char* palette, int start, int c
 const unsigned char* directDrawGetPalette8();
 void _GNW95_ShowRect(unsigned char* src, int src_pitch, int unused, int src_x, int src_y, int src_width, int src_height, int dest_x, int dest_y);
 void _GNW95_zero_vid_mem();
+void _GNW95_ShowCursorRect(unsigned char* src, int src_pitch, int unused, int src_x, int src_y, int src_width, int src_height, int dest_x, int dest_y);
+
+// CE: HD composition staging, screen-sized: a logical mask and kHdScale x
+// RGB pixels, filled by the window manager next to its `_screen_buffer`.
+// Returns false when HD is not active.
+bool presenterGetHdStaging(unsigned char** maskPtr, uint32_t** rgbPtr);
+// While set, `_GNW95_ShowRect` treats its source as the window manager's
+// screen buffer and takes HD pixels from the staging planes.
+void presenterSetHdSource(bool staging);
 
 int screenGetWidth();
 int screenGetHeight();

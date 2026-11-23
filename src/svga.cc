@@ -16,6 +16,7 @@
 #include "dinput.h"
 #include "draw.h"
 #include "game.h"
+#include "hd_layer.h"
 #include "interface.h"
 #include "memory.h"
 #include "mouse.h"
@@ -87,9 +88,70 @@ static Rect gDirty = { INT_MAX, INT_MAX, INT_MIN, INT_MIN };
 
 static PresenterCounters gStats;
 
+// HD composition (only when the framebuffer is at kHdScale).
+//
+// The window manager composites HD layers into the staging planes alongside
+// its 8-bit `_screen_buffer` (screen coordinates), then blits rectangles of
+// that buffer here with the HD source flag set; those rectangles copy the
+// staging mask into `gHdMask`. Every other blit (cursor, movies, splash)
+// clears `gHdMask`. Wherever `gHdMask` is set, the screen index plane holds
+// the shadow index of an HD block whose colours are in `gHdStagingRgb`.
+static bool gHdActive = false;
+static std::vector<unsigned char> gHdMask;
+static std::vector<unsigned char> gHdStagingMask;
+static std::vector<uint32_t> gHdStagingRgb;
+static bool gHdSourceIsStaging = false;
+
+// Base palette (`_cmap` at 8 bits) HD colours are authored against, and the
+// mapping from it to the presented palette.
+static unsigned char gHdBase8[256 * 3];
+static HdModulation gHdModulation;
+
 static void presenterAllocateFramebuffer()
 {
     gFramebuffer.assign(static_cast<size_t>(gScreenWidth) * gFramebufferScale * gScreenHeight * gFramebufferScale, 0);
+
+    gHdActive = gFramebufferScale == kHdScale;
+    size_t logical = gHdActive ? static_cast<size_t>(gScreenWidth) * gScreenHeight : 0;
+    gHdMask.assign(logical, 0);
+    gHdStagingMask.assign(logical, 0);
+    gHdStagingRgb.assign(logical * kHdScale * kHdScale, 0);
+    if (gHdActive) {
+        for (int index = 0; index < 256 * 3; index++) {
+            gHdBase8[index] = colorExpand6(_cmap[index]);
+        }
+        hdModulationBuild(&gHdModulation, gHdBase8, gPalette8);
+    }
+}
+
+// Keeps the modulation in step with the presented palette and `_cmap`.
+// Entries whose base colour changed are flagged so their pixels are redrawn.
+static void presenterUpdateHdModulation(int start, int count)
+{
+    if (!gHdActive) {
+        return;
+    }
+
+    for (int index = 0; index < 256; index++) {
+        unsigned char* base = gHdBase8 + index * 3;
+        unsigned char r = colorExpand6(_cmap[index * 3]);
+        unsigned char g = colorExpand6(_cmap[index * 3 + 1]);
+        unsigned char b = colorExpand6(_cmap[index * 3 + 2]);
+        bool inRange = index >= start && index < start + count;
+        if (base[0] != r || base[1] != g || base[2] != b) {
+            base[0] = r;
+            base[1] = g;
+            base[2] = b;
+            if (!gPaletteChanged[index]) {
+                gPaletteChanged[index] = true;
+                gPaletteChangedCount++;
+            }
+            inRange = true;
+        }
+        if (inRange) {
+            hdModulationUpdate(&gHdModulation, gHdBase8, gPalette8, index, 1);
+        }
+    }
 }
 
 static void presenterMarkDirty(int left, int top, int width, int height)
@@ -104,6 +166,26 @@ static void presenterMarkAllDirty()
 {
     if (gScreenWidth > 0 && gScreenHeight > 0) {
         presenterMarkDirty(0, 0, gScreenWidth, gScreenHeight);
+    }
+}
+
+// Writes the 2x2 output block of logical pixel (x, y) in HD mode.
+static inline void presenterWriteBlock(int x, int y, uint32_t* dest, int fbWidth)
+{
+    size_t offset = static_cast<size_t>(y) * gScreenWidth + x;
+    unsigned char index = gScreenIndex[offset];
+    if (gHdMask[offset]) {
+        const uint32_t* hd = gHdStagingRgb.data() + static_cast<size_t>(y) * kHdScale * fbWidth + x * kHdScale;
+        dest[0] = hdModulate(&gHdModulation, hd[0], index);
+        dest[1] = hdModulate(&gHdModulation, hd[1], index);
+        dest[fbWidth] = hdModulate(&gHdModulation, hd[fbWidth], index);
+        dest[fbWidth + 1] = hdModulate(&gHdModulation, hd[fbWidth + 1], index);
+    } else {
+        uint32_t color = gPaletteRgb[index];
+        dest[0] = color;
+        dest[1] = color;
+        dest[fbWidth] = color;
+        dest[fbWidth + 1] = color;
     }
 }
 
@@ -122,7 +204,11 @@ static void presenterConvertRect(int left, int top, int width, int height)
     for (int y = top; y < top + height; y++) {
         const unsigned char* src = gScreenIndex.data() + static_cast<size_t>(y) * gScreenWidth + left;
         uint32_t* dest = gFramebuffer.data() + static_cast<size_t>(y) * scale * fbWidth + left * scale;
-        if (scale == 1) {
+        if (gHdActive) {
+            for (int x = 0; x < width; x++) {
+                presenterWriteBlock(left + x, y, dest + x * kHdScale, fbWidth);
+            }
+        } else if (scale == 1) {
             for (int x = 0; x < width; x++) {
                 dest[x] = gPaletteRgb[src[x]];
             }
@@ -166,21 +252,33 @@ static void presenterApplyPaletteChanges()
         const unsigned char* src = gScreenIndex.data() + static_cast<size_t>(y) * gScreenWidth;
         uint32_t* dest = gFramebuffer.data() + static_cast<size_t>(y) * scale * fbWidth;
         bool rowChanged = false;
-        for (int x = 0; x < gScreenWidth; x++) {
-            unsigned char index = src[x];
-            if (gPaletteChanged[index]) {
-                uint32_t color = gPaletteRgb[index];
-                for (int k = 0; k < scale; k++) {
-                    dest[x * scale + k] = color;
+        if (gHdActive) {
+            for (int x = 0; x < gScreenWidth; x++) {
+                if (gPaletteChanged[src[x]]) {
+                    presenterWriteBlock(x, y, dest + x * kHdScale, fbWidth);
+                    rowChanged = true;
                 }
-                rowChanged = true;
+            }
+        } else {
+            for (int x = 0; x < gScreenWidth; x++) {
+                unsigned char index = src[x];
+                if (gPaletteChanged[index]) {
+                    uint32_t color = gPaletteRgb[index];
+                    for (int k = 0; k < scale; k++) {
+                        dest[x * scale + k] = color;
+                    }
+                    rowChanged = true;
+                }
+            }
+
+            if (rowChanged) {
+                for (int k = 1; k < scale; k++) {
+                    memcpy(dest + k * fbWidth, dest, sizeof(uint32_t) * fbWidth);
+                }
             }
         }
 
         if (rowChanged) {
-            for (int k = 1; k < scale; k++) {
-                memcpy(dest + k * fbWidth, dest, sizeof(uint32_t) * fbWidth);
-            }
             changedTop = std::min(changedTop, y);
             changedBottom = std::max(changedBottom, y);
         }
@@ -195,6 +293,25 @@ static void presenterApplyPaletteChanges()
 
     gStats.paletteTicks += SDL_GetPerformanceCounter() - startCounter;
     gStats.paletteUpdates++;
+}
+
+// Updates `gHdMask` for a rectangle about to be converted: copied from the
+// staging mask when the blit comes from the window manager's screen buffer,
+// cleared otherwise.
+static void presenterUpdateHdMask(int left, int top, int width, int height)
+{
+    if (!gHdActive) {
+        return;
+    }
+
+    for (int y = top; y < top + height; y++) {
+        unsigned char* mask = gHdMask.data() + static_cast<size_t>(y) * gScreenWidth + left;
+        if (gHdSourceIsStaging) {
+            memcpy(mask, gHdStagingMask.data() + static_cast<size_t>(y) * gScreenWidth + left, width);
+        } else {
+            memset(mask, 0, width);
+        }
+    }
 }
 
 // TODO: Remove once migration to update-render cycle is completed.
@@ -305,7 +422,7 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
     _mouse_blit_trans = nullptr;
     _scr_blit = _GNW95_ShowRect;
     _zero_mem = _GNW95_zero_vid_mem;
-    _mouse_blit = _GNW95_ShowRect;
+    _mouse_blit = gFramebufferScale == kHdScale ? _GNW95_ShowCursorRect : _GNW95_ShowRect;
 
     return 0;
 }
@@ -418,6 +535,8 @@ void directDrawSetPalette8InRange(const unsigned char* palette, int start, int c
     }
 
     gPaletteValid = true;
+
+    presenterUpdateHdModulation(start, count);
 }
 
 // 0x4CB310 GNW95_SetPaletteEntries
@@ -487,7 +606,65 @@ void _GNW95_ShowRect(unsigned char* src, int srcPitch, int unused, int srcX, int
     }
 
     blitBufferToBuffer(src + srcPitch * srcY + srcX, srcWidth, srcHeight, srcPitch, gScreenIndex.data() + gScreenWidth * destY + destX, gScreenWidth);
+    presenterUpdateHdMask(destX, destY, srcWidth, srcHeight);
     presenterConvertRect(destX, destY, srcWidth, srcHeight);
+}
+
+// CE: cursor blit in HD mode. `src` is the window content under the cursor
+// with the cursor drawn over it (see `mouseShowCursor`); the screen already
+// shows that window content, so pixels that are unchanged keep their HD
+// block and only the cursor's own pixels become legacy.
+void _GNW95_ShowCursorRect(unsigned char* src, int srcPitch, int unused, int srcX, int srcY, int srcWidth, int srcHeight, int destX, int destY)
+{
+    if (!gHdActive) {
+        _GNW95_ShowRect(src, srcPitch, unused, srcX, srcY, srcWidth, srcHeight, destX, destY);
+        return;
+    }
+
+    if (destX < 0) {
+        srcX -= destX;
+        srcWidth += destX;
+        destX = 0;
+    }
+    if (destY < 0) {
+        srcY -= destY;
+        srcHeight += destY;
+        destY = 0;
+    }
+    srcWidth = std::min(srcWidth, gScreenWidth - destX);
+    srcHeight = std::min(srcHeight, gScreenHeight - destY);
+    if (srcWidth <= 0 || srcHeight <= 0) {
+        return;
+    }
+
+    for (int y = 0; y < srcHeight; y++) {
+        const unsigned char* srcRow = src + static_cast<size_t>(srcY + y) * srcPitch + srcX;
+        size_t offset = static_cast<size_t>(destY + y) * gScreenWidth + destX;
+        for (int x = 0; x < srcWidth; x++) {
+            if (gScreenIndex[offset + x] != srcRow[x]) {
+                gScreenIndex[offset + x] = srcRow[x];
+                gHdMask[offset + x] = 0;
+            }
+        }
+    }
+
+    presenterConvertRect(destX, destY, srcWidth, srcHeight);
+}
+
+bool presenterGetHdStaging(unsigned char** maskPtr, uint32_t** rgbPtr)
+{
+    if (!gHdActive) {
+        return false;
+    }
+
+    *maskPtr = gHdStagingMask.data();
+    *rgbPtr = gHdStagingRgb.data();
+    return true;
+}
+
+void presenterSetHdSource(bool staging)
+{
+    gHdSourceIsStaging = staging && gHdActive;
 }
 
 // Clears drawing surface.
@@ -500,6 +677,7 @@ void _GNW95_zero_vid_mem()
     }
 
     std::fill(gScreenIndex.begin(), gScreenIndex.end(), 0);
+    std::fill(gHdMask.begin(), gHdMask.end(), 0);
     presenterConvertRect(0, 0, gScreenWidth, gScreenHeight);
 }
 
@@ -622,6 +800,7 @@ void renderFpsCounter()
 
     unsigned char* pixels = gScreenIndex.data();
     bufferFill(pixels, width, height, gScreenWidth, COLOR_BLACK);
+    presenterUpdateHdMask(0, 0, width, height);
     if (width > kPadding * 2 && height > kPadding * 2) {
         fontDrawText(pixels + gScreenWidth * kPadding + kPadding, text, width - kPadding * 2, gScreenWidth, COLOR_LIGHT_GREY);
     }

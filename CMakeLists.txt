@@ -140,6 +140,10 @@ set(FALLOUT_ENGINE_SOURCES
     "src/geometry.h"
     "src/graph_lib.cc"
     "src/graph_lib.h"
+    "src/hd_art.cc"
+    "src/hd_art.h"
+    "src/hd_layer.cc"
+    "src/hd_layer.h"
     "src/heap.cc"
     "src/heap.h"
     "src/input.cc"
@@ -621,6 +625,18 @@ if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
             GENERATED TRUE
             MACOSX_PACKAGE_LOCATION "Resources")
     endif()
+endif()
+
+# Unit tests that need no game data (run with ctest).
+if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
+    enable_testing()
+
+    add_executable(hd_layer_test
+        "tests/unit/hd_layer_test.cc"
+        "src/hd_layer.cc"
+    )
+    target_include_directories(hd_layer_test PRIVATE "src")
+    add_test(NAME hd_layer_test COMMAND hd_layer_test)
 endif()
 
 if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))

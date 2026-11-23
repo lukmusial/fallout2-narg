@@ -274,6 +274,7 @@ void initSettingsRegistry(bool isMapper)
 
 #define SECT graphics
     SETTING(hd);
+    SETTING(hd_pack);
 #undef SECT
 
 #define SECT ui

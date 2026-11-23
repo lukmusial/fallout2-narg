@@ -15,6 +15,7 @@
 #include "game.h"
 #include "game_sound.h"
 #include "geometry.h"
+#include "hd_art.h"
 #include "input.h"
 #include "kb.h"
 #include "mouse.h"
@@ -303,6 +304,11 @@ static void mainMenuDrawBackground(const MainMenuLayout& layout)
             layout.backgroundWidth,
             layout.backgroundHeight);
     }
+
+    // CE: HD background over the legacy one (buttons and text stay legacy);
+    // resampled to the same rectangle when the menu is scaled.
+    const char* artPath = layout.art == MenuArt::Vanilla ? "art/intrface/mainmenu.frm" : "art/intrface/hr_mainmenu.frm";
+    hdArtDrawInterface(gMainMenuWindow, artPath, layout.backgroundX, layout.backgroundY, layout.backgroundWidth, layout.backgroundHeight);
 }
 
 static MainMenuOffsets mainMenuReadOffsets(const MainMenuLayout& layout)
