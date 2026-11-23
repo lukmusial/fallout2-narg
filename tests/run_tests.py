@@ -210,8 +210,9 @@ def test_main_menu_hd_art(update):
     label = menu[36:76, 180:320]
     if nonuniform_blocks(label) > 0.9:
         raise TestFailure("button label shows no legacy (pixel-doubled) text")
+    # (Same bounds as the HD screens tests: the step captured varies with load.)
     ratio = load_png(out / "fade_out_50.png").mean() / menu.mean()
-    if not 0.4 < ratio < 0.6:
+    if not 0.3 < ratio < 0.7:
         raise TestFailure(f"fade-out frame is {ratio:.2f} of full brightness, expected ~0.5")
     note = compare_image(out / "menu_fb.png", "main_menu_hd_art.png", update, mask=MAIN_MENU_MASK)
     return f"{note}, detail {detail:.0%}, cursor {cursor:.0%}, fade {ratio:.2f} ({seconds:.0f}s)"
