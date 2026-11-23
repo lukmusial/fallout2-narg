@@ -14,6 +14,9 @@ for the fire flicker. Writes to docs/screens/phase2.11_lights/:
                                             is not degraded
   crop_fire.png, crop_neon.png              1:1 output-pixel crops, all
                                             variants side by side
+  crop_neon_spill.png                       with --previous FRAME (an earlier
+                                            den_3_shadows.png): current HD |
+                                            that frame | now, at the sign
   fire_flicker.png                          animated PNG (APNG) of the fire
   fire_flicker_strip.png                    the same frames side by side
   den_field.png                             the light field the presenter
@@ -148,6 +151,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", type=Path, default=hdlib.REPO_ROOT / "docs/screens/phase2.11_lights")
     ap.add_argument("--reuse", action="store_true", help="reuse game runs from an earlier invocation")
+    ap.add_argument("--previous", type=Path, help="an earlier den_3_shadows.png to compare the neon sign with")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
 
@@ -168,6 +172,14 @@ def main() -> None:
     nx, ny, nw, nh = NEON_CROP
     cells = [Image.open(den / f"{shot}.png").convert("RGB").crop((nx, ny, nx + nw, ny + nh)) for shot, _, _ in VARIANTS]
     save(side_by_side("Den: Becky's neon sign, 1:1 output pixels (3440x1440)", cells, labels), args.out / "crop_neon.png")
+
+    if args.previous is not None:
+        crop = (nx, ny, nx + nw, ny + nh)
+        cells = [Image.open(den / "off.png").convert("RGB").crop(crop), Image.open(args.previous).convert("RGB").crop(crop),
+                 Image.open(den / "all.png").convert("RGB").crop(crop)]
+        save(side_by_side("Den: Becky's neon sign, 1:1 output pixels: the sign now also lights the wall around it",
+                          cells, ["current HD (hd_lights=0)", "before: glow only (first proposal)", "now: glow + neon light spill"]),
+             args.out / "crop_neon_spill.png")
 
     frames = [Image.open(den / f"anim{i:02d}.png").convert("RGB").crop((x, y, x + w, y + h)) for i in range(1, 9)]
     save(frames[0], args.out / "fire_flicker.png", save_all=True, append_images=frames[1:], duration=120, loop=0)

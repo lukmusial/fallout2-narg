@@ -115,8 +115,13 @@ namespace {
     // colour-cycling lights always; at night also bright, strongly saturated
     // colours (neon signs, lamps, lit windows: at night only what a light
     // reaches or what glows by itself is bright) and near-white pixels.
-    void emissiveWeights(const unsigned char* palette8, float night, float* weights)
+    // `neonWeights` (optional) receives the neon part alone: the signs that
+    // also spill their colour onto the surfaces around them.
+    void emissiveWeights(const unsigned char* palette8, float night, float* weights, float* neonWeights)
     {
+        if (neonWeights != nullptr) {
+            std::fill(neonWeights, neonWeights + 256, 0.0f);
+        }
         for (int index = 0; index < 256; index++) {
             switch (cycleGroup(index)) {
             case kGroupFire:
@@ -143,6 +148,9 @@ namespace {
             float neon = std::clamp((high - 140.0f) / 60.0f, 0.0f, 1.0f) * std::clamp(((high - low) / std::max(high, 1.0f) - 0.65f) / 0.2f, 0.0f, 1.0f);
             float white = std::clamp((luminance(rgb) - 215.0f) / 30.0f, 0.0f, 1.0f);
             weights[index] = night * std::max(neon, 0.35f * white);
+            if (neonWeights != nullptr) {
+                neonWeights[index] = night * neon;
+            }
         }
     }
 
@@ -155,6 +163,13 @@ namespace {
     constexpr int kPoolRadiusY = 5;
     constexpr float kGlowGain = 1.2f;
     constexpr float kPoolGain = 28.0f;
+    // Neon spill: the sign's colour on the wall it hangs on and nearby
+    // surfaces (radius about 35 px), as extra light and a little additive
+    // light so it shows on dark walls too.
+    constexpr int kSpillRadiusX = 8;
+    constexpr int kSpillRadiusY = 6;
+    constexpr float kSpillMulGain = 40.0f;
+    constexpr float kSpillAddGain = 6.0f;
 
     // Pixel counts of each cycling group in a frame, and the most used
     // index of each (the light flickers with that index's colour).
@@ -206,6 +221,9 @@ namespace {
 
         std::vector<float> emissive;
         HdLightBox emissiveBox;
+        // Neon pixels only (night), for the spill.
+        std::vector<float> neon;
+        HdLightBox neonBox;
         std::vector<float> blurred;
 
         HdLightsStats stats;
@@ -603,7 +621,7 @@ namespace {
 
     // The hex cursor is drawn into the map window; its red outline is not a
     // light.
-    void excludeHexCursor(int cellsX, int cellsY)
+    void excludeHexCursor(std::vector<float>* grid, int cellsX, int cellsY)
     {
         if (gGameMouseHexCursor == nullptr || (gGameMouseHexCursor->flags & OBJECT_HIDDEN) != 0
             || gGameMouseHexCursor->elevation != gElevation) {
@@ -617,7 +635,7 @@ namespace {
         int y1 = std::min(rect.bottom / kHdLightCell, cellsY - 1);
         for (int y = y0; y <= y1; y++) {
             for (int x = x0; x <= x1; x++) {
-                float* cell = &gState.emissive[(static_cast<size_t>(y) * cellsX + x) * 3];
+                float* cell = &(*grid)[(static_cast<size_t>(y) * cellsX + x) * 3];
                 cell[0] = cell[1] = cell[2] = 0.0f;
             }
         }
@@ -742,10 +760,17 @@ bool hdLightsMapUpdate(const HdLightScreen& screen, HdLightField* field)
 
     if ((effects & (kHdLightColour | kHdLightGlow)) != 0) {
         float weights[256];
-        emissiveWeights(screen.palette8, night, weights);
+        float neonWeights[256];
+        emissiveWeights(screen.palette8, night, weights, neonWeights);
         hdLightEmissive(screen.index, screen.mask, screen.width, screen.width, screen.height, screen.palette8, weights, &gState.emissive,
             &gState.emissiveBox);
-        excludeHexCursor(field->cellsX, field->cellsY);
+        excludeHexCursor(&gState.emissive, field->cellsX, field->cellsY);
+        gState.neonBox = HdLightBox();
+        if ((effects & kHdLightColour) != 0 && night > 0.0f) {
+            hdLightEmissive(screen.index, screen.mask, screen.width, screen.width, screen.height, screen.palette8, neonWeights, &gState.neon,
+                &gState.neonBox);
+            excludeHexCursor(&gState.neon, field->cellsX, field->cellsY);
+        }
     }
 
     if ((effects & kHdLightColour) != 0) {
@@ -766,6 +791,13 @@ bool hdLightsMapUpdate(const HdLightScreen& screen, HdLightField* field)
         HdLightBox box = gState.emissiveBox;
         hdLightBlur(&gState.blurred, field->cellsX, field->cellsY, kPoolRadiusX, kPoolRadiusY, 3, &box);
         hdLightFieldAddGrid(field, gState.blurred, box, kPoolGain * lightScale, false);
+
+        if (!gState.neonBox.empty()) {
+            box = gState.neonBox;
+            hdLightBlur(&gState.neon, field->cellsX, field->cellsY, kSpillRadiusX, kSpillRadiusY, 3, &box);
+            hdLightFieldAddGrid(field, gState.neon, box, kSpillMulGain, false);
+            hdLightFieldAddGrid(field, gState.neon, box, kSpillAddGain * 255.0f, true);
+        }
     }
 
     if ((effects & kHdLightGlow) != 0) {
