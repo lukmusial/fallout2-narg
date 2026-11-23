@@ -11,6 +11,11 @@ written as an RGBA PNG to RUN_DIR/data/hd/test/<art path>.png, where the game
 finds it through its normal file layering. Index 0 stays opaque here because
 the menu background is drawn without transparency.
 
+It also writes two packs that exercise the other lookup routes with the same
+images: hd/testfhd/ (each image as a one-frame .fhd container, built with
+tools/dev/fhd.py) and hd/testmixed/ (only a manifest.txt that takes the main
+menu background from the "test" pack and everything else from a missing pack).
+
 This is test art only (a simple filter, no enhancement); the real packs come
 from tools/hd/. Output stays in the gitignored run directory.
 """
@@ -69,7 +74,8 @@ def main():
     colors = palette8()
     for art in args.art:
         out = RUN_DIR / "data/hd/test" / Path(art.lower()).with_suffix(".png")
-        if out.exists() and not args.force:
+        fhd = RUN_DIR / "data/hd/testfhd" / Path(art.lower()).with_suffix(".fhd")
+        if out.exists() and fhd.exists() and not args.force:
             continue
         entry = art.replace("/", "\\")
         with tempfile.TemporaryDirectory() as tmp:
@@ -79,7 +85,18 @@ def main():
         image = image.resize((image.width * 2, image.height * 2), Image.LANCZOS).convert("RGBA")
         out.parent.mkdir(parents=True, exist_ok=True)
         image.save(out)
-        print(f"wrote {out}")
+        print(f"wrote {out}", flush=True)
+
+        fhd.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run([sys.executable, str(ROOT / "tools/dev/fhd.py"), "build", str(fhd), str(out)], check=True)
+
+    manifest = RUN_DIR / "data/hd/testmixed/manifest.txt"
+    if not manifest.exists() or args.force:
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text("# Test manifest (tools/dev/make_test_hd_art.py)\n"
+                            "* = missing-pack\n"
+                            "art/intrface/mainmenu.frm = test\n")
+        print(f"wrote {manifest}")
 
 
 if __name__ == "__main__":

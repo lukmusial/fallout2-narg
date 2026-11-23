@@ -142,6 +142,8 @@ set(FALLOUT_ENGINE_SOURCES
     "src/graph_lib.h"
     "src/hd_art.cc"
     "src/hd_art.h"
+    "src/hd_format.cc"
+    "src/hd_format.h"
     "src/hd_layer.cc"
     "src/hd_layer.h"
     "src/heap.cc"
@@ -637,6 +639,15 @@ if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
     )
     target_include_directories(hd_layer_test PRIVATE "src")
     add_test(NAME hd_layer_test COMMAND hd_layer_test)
+
+    add_executable(hd_format_test
+        "tests/unit/hd_format_test.cc"
+        "src/hd_format.cc"
+        "src/hd_layer.cc"
+        "third_party/lodepng/lodepng.cpp"
+    )
+    target_include_directories(hd_format_test PRIVATE "src" "third_party/lodepng")
+    add_test(NAME hd_format_test COMMAND hd_format_test)
 endif()
 
 if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))

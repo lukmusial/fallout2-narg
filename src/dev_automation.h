@@ -27,6 +27,10 @@ namespace fallout {
 //                             palette, out: to black) write the framebuffer at
 //                             <pct>% of the fade, plus <name>_6bit.png rendered
 //                             through the 6-bit palette as the old presenter did
+//   hdpack <pack|->           switch the HD art pack live (- = none)
+//   hdprobe <art path> <name> look up the HD image of frame 0 (2x legacy
+//                             fallback); write <name>.png and <name>.json
+//   hdstats <name>            write HD art cache counters to <name>.json
 //   perf reset|<name>         reset presenter timing counters, or write them to
 //                             <out>/<name>.json and reset
 //   log <text>                write a line to the debug log

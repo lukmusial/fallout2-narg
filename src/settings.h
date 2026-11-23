@@ -110,6 +110,8 @@ struct GraphicsSettings {
     bool hd = false;
     // Folder under hd/ holding the HD art pack (empty: no HD art).
     std::string hd_pack;
+    // Memory for decoded HD frames (LRU), in MiB.
+    int hd_cache_mb = 256;
 };
 
 struct UISettings {

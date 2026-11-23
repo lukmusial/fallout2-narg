@@ -1,0 +1,15 @@
+# HD art lookup (run with [graphics]hd=1 [graphics]hd_pack=test): PNG, .fhd and
+# manifest routes, the 2x legacy fallback and the frame cache.
+until mainmenu 20000
+hdprobe art/intrface/mainmenu.frm probe_png
+hdprobe art/intrface/hr_menu_bg.frm probe_fallback
+hdpack testfhd
+hdprobe art/intrface/mainmenu.frm probe_fhd
+hdpack testmixed
+hdprobe art/intrface/mainmenu.frm probe_mixed
+hdprobe art/intrface/mainmenu.frm probe_mixed_again
+hdprobe art/intrface/hr_mainmenu.frm probe_mixed_missing
+hdstats stats
+hdpack -
+hdprobe art/intrface/mainmenu.frm probe_none
+quit 0

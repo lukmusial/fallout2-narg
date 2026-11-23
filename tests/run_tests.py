@@ -174,6 +174,40 @@ def test_main_menu_hd_art(update):
     return f"{note}, detail {detail:.0%}, cursor {cursor:.0%}, fade {ratio:.2f} ({seconds:.0f}s)"
 
 
+def test_main_menu_hd_fhd(update):
+    """The menu background found as a one-frame .fhd container instead of a PNG."""
+    out, seconds = run_game("main_menu_hd_fhd", "smoke_menu.txt", [*HD_ARGS, "[graphics]hd_pack=testfhd"])
+    return compare_image(out / "mainmenu.png", "main_menu_hd_art.png", False, mask=MAIN_MENU_MASK) + f" ({seconds:.0f}s)"
+
+
+def test_hd_art_lookup(update):
+    """Pack lookup routes (PNG, .fhd, manifest), legacy 2x fallback, cache."""
+    out, seconds = run_game("hd_art_lookup", "hd_art_lookup.txt", HD_ART_ARGS)
+    probe = {name: json.loads((out / f"{name}.json").read_text())
+             for name in ("probe_png", "probe_fallback", "probe_fhd", "probe_mixed", "probe_mixed_again",
+                          "probe_mixed_missing", "probe_none")}
+    png = probe["probe_png"]
+    if not png["found"] or png["from_legacy"] or (png["width"], png["height"]) != (1280, 960):
+        raise TestFailure(f"PNG lookup: {png}")
+    reference = np.asarray(Image.open(RUN_DIR / "data/hd/test/art/intrface/mainmenu.png").convert("RGBA"))
+    for name in ("probe_png", "probe_fhd", "probe_mixed", "probe_mixed_again"):
+        if probe[name]["from_legacy"]:
+            raise TestFailure(f"{name}: fell back to legacy ({probe[name]})")
+        if not np.array_equal(np.asarray(Image.open(out / f"{name}.png").convert("RGBA")), reference):
+            raise TestFailure(f"{name}: image differs from the pack PNG")
+    for name in ("probe_fallback", "probe_mixed_missing", "probe_none"):
+        p = probe[name]
+        if not p["from_legacy"] or (p["width"], p["height"]) != (2 * p["legacy_width"], 2 * p["legacy_height"]):
+            raise TestFailure(f"{name}: expected a 2x legacy fallback, got {p}")
+    fallback = load_png(out / "probe_fallback.png")
+    if nonuniform_blocks(fallback) != 0.0:
+        raise TestFailure("legacy fallback is not a pixel-doubled image")
+    stats = json.loads((out / "stats.json").read_text())
+    if stats["hits"] < 1 or stats["assets_with_hd"] < 1:
+        raise TestFailure(f"cache not used: {stats}")
+    return f"png/fhd/manifest/fallback ok, cache {stats} ({seconds:.0f}s)"
+
+
 def make_slot_test(slot, hd=False):
     def test(update):
         reset_saves()
@@ -214,7 +248,8 @@ def test_menu_fades(update):
     return f"framebuffer matches, fades captured ({seconds:.0f}s)"
 
 
-TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_art]
+TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_art, test_main_menu_hd_fhd,
+          test_hd_art_lookup]
          + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
          + [make_slot_test(slot, hd=True) for slot in HD_SLOTS])
 

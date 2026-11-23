@@ -12,10 +12,14 @@
 
 #include <lodepng.h>
 
+#include <algorithm>
+
+#include "art.h"
 #include "color.h"
 #include "critter.h"
 #include "debug.h"
 #include "game.h"
+#include "hd_art.h"
 #include "input.h"
 #include "kb.h"
 #include "map.h"
@@ -452,6 +456,74 @@ namespace {
                 fail(command, "framebuffer screenshot failed");
             }
             debugPrint("AUTOMATION: wrote %s\n", path.c_str());
+            return true;
+        }
+
+        if (name == "hdpack") {
+            // Switches the HD pack live ("-" = none); later HD draws use it.
+            if (args.empty()) {
+                fail(command, "missing pack name");
+            }
+            hdArtSetPack(args[0] == "-" ? "" : args[0].c_str());
+            return true;
+        }
+
+        if (name == "hdprobe") {
+            // Looks up the HD image for frame 0 of an art file (with the 2x
+            // legacy fallback) and writes it as <name>.png plus <name>.json.
+            if (args.size() < 2) {
+                fail(command, "usage: hdprobe <art path> <name>");
+            }
+            std::string artPath = args[0];
+            std::replace(artPath.begin(), artPath.end(), '/', '\\');
+            FrmImage legacy;
+            bool haveLegacy = legacy.lock(artPath.c_str());
+            bool fromLegacy = false;
+            std::shared_ptr<const HdImage> image = hdArtGetFrame(args[0].c_str(), 0, 0,
+                haveLegacy ? legacy.getData() : nullptr,
+                haveLegacy ? legacy.getWidth() : 0,
+                haveLegacy ? legacy.getHeight() : 0,
+                haveLegacy ? legacy.getWidth() : 0,
+                &fromLegacy);
+
+            if (image != nullptr) {
+                std::vector<unsigned char> rgba(image->pixels.size() * 4);
+                for (size_t i = 0; i < image->pixels.size(); i++) {
+                    uint32_t pixel = image->pixels[i];
+                    rgba[i * 4] = (pixel >> 16) & 0xFF;
+                    rgba[i * 4 + 1] = (pixel >> 8) & 0xFF;
+                    rgba[i * 4 + 2] = pixel & 0xFF;
+                    rgba[i * 4 + 3] = pixel >> 24;
+                }
+                lodepng::encode(outputPath(args[1], ".png"), rgba, image->width, image->height, LCT_RGBA, 8);
+            }
+
+            std::ofstream out(outputPath(args[1], ".json"));
+            out << "{\"found\": " << (image != nullptr ? "true" : "false")
+                << ", \"from_legacy\": " << (fromLegacy ? "true" : "false")
+                << ", \"width\": " << (image != nullptr ? image->width : 0)
+                << ", \"height\": " << (image != nullptr ? image->height : 0)
+                << ", \"legacy_width\": " << (haveLegacy ? legacy.getWidth() : 0)
+                << ", \"legacy_height\": " << (haveLegacy ? legacy.getHeight() : 0)
+                << ", \"pack\": ";
+            jsonString(out, hdArtGetPack().c_str());
+            out << "}\n";
+            return true;
+        }
+
+        if (name == "hdstats") {
+            if (args.empty()) {
+                fail(command, "missing name");
+            }
+            HdArtStats stats;
+            hdArtGetStats(&stats);
+            std::ofstream out(outputPath(args[0], ".json"));
+            out << "{\"assets_resolved\": " << stats.assetsResolved
+                << ", \"assets_with_hd\": " << stats.assetsWithHd
+                << ", \"frames_cached\": " << stats.framesCached
+                << ", \"bytes_cached\": " << stats.bytesCached
+                << ", \"hits\": " << stats.hits
+                << ", \"misses\": " << stats.misses << "}\n";
             return true;
         }
 
