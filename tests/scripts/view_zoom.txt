@@ -1,0 +1,47 @@
+# Phase 2.13 map zoom (run with --dev-load-game=N, [graphics]hd=1, an
+# hd_pack, [graphics]zoom=1): full frames at zoom 1, 2 and 0.5 (animated
+# zoom, then settled), the view, and hit-tests at each zoom: what the game
+# picks under the cursor over the player's sprite and over his
+# player's hex, as shown. Zoom keys: 431 = Ctrl+=, 430 = Ctrl+-, 432 = Ctrl+0.
+until game 30000
+wait 1500
+fbshot zoom100
+viewdump v100
+mousetoparty 0
+wait 200
+pick party100
+mousetotile dude
+wait 200
+pick hex100
+move 860 200
+key 431 3
+viewsettle
+wait 300
+fbshot zoom200
+viewdump v200
+mousetoparty 0
+wait 200
+pick party200
+mousetotile dude
+wait 200
+pick hex200
+move 860 200
+key 432
+viewsettle
+viewdump vkeyreset
+key 430 2
+viewsettle
+wait 300
+fbshot zoom050
+viewdump v050
+mousetoparty 0
+wait 200
+pick party050
+mousetotile dude
+wait 200
+pick hex050
+zoom reset
+viewsettle
+viewdump vreset
+dump state
+quit 0

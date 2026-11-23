@@ -37,6 +37,7 @@
 #include "kb.h"
 #include "loadsave.h"
 #include "map.h"
+#include "map_view.h"
 #include "memory.h"
 #include "mouse.h"
 #include "movie.h"
@@ -578,7 +579,19 @@ int gameHandleKey(int eventCode, bool isInCombatMode)
                 dy = 1;
             }
 
-            mapScroll(dx, dy);
+            // CE: with the map zoom on, the vertical wheel over the map zooms
+            // (see map_view.h); the horizontal wheel still scrolls.
+            int mouseX;
+            int mouseY;
+            mouseGetPosition(&mouseX, &mouseY);
+            if (dy != 0 && mapViewZoomEnabled() && windowGetAtPoint(mouseX, mouseY) == gIsoWindow) {
+                mapViewZoomStep(-dy);
+                if (dx != 0) {
+                    mapScroll(dx, 0);
+                }
+            } else {
+                mapScroll(dx, dy);
+            }
         }
         return 0;
     }
@@ -957,6 +970,15 @@ int gameHandleKey(int eventCode, bool isInCombatMode)
             displayMonitorAddMessage(_aBuildHash);
             displayMonitorAddMessage(_aBuildDate);
         }
+        break;
+    case KEY_CTRL_EQUAL:
+        mapViewZoomStep(1);
+        break;
+    case KEY_CTRL_MINUS:
+        mapViewZoomStep(-1);
+        break;
+    case KEY_CTRL_0:
+        mapViewZoomReset();
         break;
     case KEY_ARROW_LEFT:
         mapScroll(-1, 0);

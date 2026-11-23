@@ -5,6 +5,7 @@
 #include "geometry.h"
 #include "map.h"
 #include "map_defs.h"
+#include "map_view.h"
 #include "platform_compat.h"
 #include "settings.h"
 #include "svga.h"
@@ -542,7 +543,13 @@ bool mapEdgeComputeVisibleArea(MapElevation elevation, Rect* outRect)
     // screenOrigin = pixel-space coord of the screen's top-left corner.
     // X is inverted in pixel-space: screenX = screenOriginX - pixelX.
     // Matches sfall EdgeClipping::rect_inside_bound_clip mapVisibleArea computation.
-    const auto [winWidth, winHeight] = getIsoWindowSize();
+    // CE: in the coordinates the map is drawn in (the map view's surface,
+    // centred on the same point, when it is on).
+    auto [winWidth, winHeight] = getIsoWindowSize();
+    if (mapViewIsActive()) {
+        winWidth = mapViewSurfaceWidth();
+        winHeight = mapViewSurfaceHeight();
+    }
     const int screenOriginX = px + winWidth / 2 - 1;
     const int screenOriginY = py - (winHeight / 2 - 1);
 
@@ -560,7 +567,10 @@ bool mapEdgeIsOverClippedArea(int screenX, int screenY)
 {
     if (!mapEdgeIsEnabled()) return false;
 
-    if (screenX >= gMapVisibleArea.left && screenX <= gMapVisibleArea.right && screenY >= gMapVisibleArea.top && screenY < gMapVisibleArea.bottom) return false;
+    int mapX = screenX;
+    int mapY = screenY;
+    mapViewScreenToSurface(&mapX, &mapY);
+    if (mapX >= gMapVisibleArea.left && mapX <= gMapVisibleArea.right && mapY >= gMapVisibleArea.top && mapY < gMapVisibleArea.bottom) return false;
 
     return windowGetAtPoint(screenX, screenY) == gIsoWindow;
 }

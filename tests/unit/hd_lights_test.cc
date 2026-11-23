@@ -3,6 +3,7 @@
 #include "hd_lights.h"
 
 #include <math.h>
+#include <algorithm>
 #include <stdio.h>
 
 #include <vector>
@@ -226,6 +227,82 @@ static void testDiffAndClear()
     }
 }
 
+// Phase 2.13: a light carried by a walking critter follows the sprite.
+static void testMovedLight()
+{
+    const int width = 320;
+    const int height = 192;
+    const float ambient = 16384.0f;
+    const float maximum = 65536.0f;
+    const float lightX = 160.0f;
+    const float lightY = 96.0f;
+
+    // Hex centres (32 px apart, rows 12 px apart and offset by 16): the
+    // engine's light falls off linearly over 4 hexes (screen y foreshortened).
+    std::vector<HdMovedLightHex> hexes;
+    for (int row = 0; row < height / 12; row++) {
+        for (int column = 0; column < width / 32; column++) {
+            float x = column * 32.0f + (row % 2 != 0 ? 16.0f : 0.0f);
+            float y = row * 12.0f;
+            float distance = sqrtf((x - lightX) * (x - lightX) + 4.0f * (y - lightY) * (y - lightY)) / 32.0f;
+            float own = distance < 4.0f ? 49152.0f * (1.0f - distance / 4.0f) : 0.0f;
+            hexes.push_back({ x, y, 655.0f + own, own });
+        }
+    }
+
+    HdLightField field;
+    hdLightFieldInit(&field, width, height);
+    hdLightFieldAddMovedLight(&field, hexes, 0.0f, 0.0f, ambient, maximum, 32.0f, 20.0f);
+    CHECK(field.lightBox.empty());
+
+    const float dx = 16.0f;
+    const float dy = 6.0f;
+    hdLightFieldAddMovedLight(&field, hexes, dx, dy, ambient, maximum, 32.0f, 20.0f);
+    CHECK(!field.lightBox.empty());
+
+    // The corrected light (drawn light times 1 + mul) equals the light moved
+    // to the sprite, and its centre moves with the sprite.
+    double sumDrawn = 0.0;
+    double sumDrawnX = 0.0;
+    double sumDrawnY = 0.0;
+    double sumCorrected = 0.0;
+    double sumCorrectedX = 0.0;
+    double sumCorrectedY = 0.0;
+    float worst = 0.0f;
+    for (int cy = 0; cy < field.cellsY; cy++) {
+        for (int cx = 0; cx < field.cellsX; cx++) {
+            float x = (cx + 0.5f) * kHdLightCell;
+            float y = (cy + 0.5f) * kHdLightCell;
+            float drawn = hdMovedLightAt(hexes, x, y, 0.0f, 0.0f, ambient, maximum, 32.0f, 20.0f);
+            float moved = hdMovedLightAt(hexes, x, y, dx, dy, ambient, maximum, 32.0f, 20.0f);
+            float corrected = drawn * (1.0f + field.mul[(static_cast<size_t>(cy) * field.cellsX + cx) * 3]);
+            if (drawn > 0.0f) {
+                worst = std::max(worst, fabsf(corrected - moved) / maximum);
+            }
+            // Away from the screen edge (where hexes are missing).
+            if (x > 40.0f && x < width - 40.0f && y > 30.0f && y < height - 30.0f) {
+                sumDrawn += drawn - ambient;
+                sumDrawnX += (drawn - ambient) * x;
+                sumDrawnY += (drawn - ambient) * y;
+                sumCorrected += corrected - ambient;
+                sumCorrectedX += (corrected - ambient) * x;
+                sumCorrectedY += (corrected - ambient) * y;
+            }
+        }
+    }
+    CHECK(worst < 0.01f);
+    CHECK(sumDrawn > 0.0 && sumCorrected > 0.0);
+    double shiftX = sumCorrectedX / sumCorrected - sumDrawnX / sumDrawn;
+    double shiftY = sumCorrectedY / sumCorrected - sumDrawnY / sumDrawn;
+    CHECK(fabs(shiftX - dx) < 2.0);
+    CHECK(fabs(shiftY - dy) < 2.0);
+
+    // The moved light at the sprite equals the unmoved light at the hex.
+    float atHex = hdMovedLightAt(hexes, lightX, lightY, 0.0f, 0.0f, ambient, maximum, 32.0f, 20.0f);
+    float atSprite = hdMovedLightAt(hexes, lightX + dx, lightY + dy, dx, dy, ambient, maximum, 32.0f, 20.0f);
+    CHECK(fabsf(atHex - atSprite) < 0.02f * maximum);
+}
+
 int main()
 {
     testNeutral();
@@ -234,6 +311,7 @@ int main()
     testGlowAndBlur();
     testShadow();
     testDiffAndClear();
+    testMovedLight();
 
     if (gFailures != 0) {
         fprintf(stderr, "%d check(s) failed\n", gFailures);

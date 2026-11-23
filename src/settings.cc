@@ -279,7 +279,11 @@ void initSettingsRegistry(bool isMapper)
     SETTING(hd_text);
     SETTING(hd_text_style);
     SETTING(hd_lights);
-    SETTING_P(hd_lights_effects, clamp(0, 7));
+    SETTING_P(hd_lights_effects, clamp(0, 15));
+    SETTING(hd_lights_follow);
+    SETTING(smooth_scroll);
+    SETTING_P(scroll_speed, clamp(25, 400));
+    SETTING(zoom);
 #undef SECT
 
 #define SECT ui

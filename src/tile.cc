@@ -20,6 +20,7 @@
 #include "light.h"
 #include "map.h"
 #include "map_edge.h"
+#include "map_view.h"
 #include "object.h"
 #include "platform_compat.h"
 #include "settings.h"
@@ -235,6 +236,9 @@ static int _square_offy;
 // 0x66BDF4 blit
 static TileWindowRefreshProc* gTileWindowRefreshProc;
 
+// CE: told when the centre changes how far the map content moved.
+static TileCenterMovedProc* gTileCenterMovedProc = nullptr;
+
 // 0x66BDF8 tile_offy
 static int _tile_offy;
 
@@ -323,9 +327,16 @@ namespace {
 } // namespace
 
 // The iso window's existing HD layer (never creates one).
+// The window whose buffer the map is drawn into: the map window, or the map
+// view's surface (Phase 2.13, map_view.h).
+static int tileHdWindow()
+{
+    return mapViewIsActive() ? mapViewSurfaceWindow() : gIsoWindow;
+}
+
 static HdLayer* tileHdExistingLayer()
 {
-    Window* window = windowGetWindow(gIsoWindow);
+    Window* window = windowGetWindow(tileHdWindow());
     if (window == nullptr || window->hdLayer == nullptr || window->buffer != gTileWindowBuffer
         || window->hdLayer->width != gTileWindowPitch || window->hdLayer->height != gTileWindowHeight) {
         return nullptr;
@@ -341,9 +352,9 @@ static void tileHdBegin()
         return;
     }
 
-    HdLayer* layer = windowHdGetLayer(gIsoWindow);
+    HdLayer* layer = windowHdGetLayer(tileHdWindow());
     if (layer == nullptr || layer->width != gTileWindowPitch || layer->height != gTileWindowHeight
-        || windowGetBuffer(gIsoWindow) != gTileWindowBuffer) {
+        || windowGetBuffer(tileHdWindow()) != gTileWindowBuffer) {
         return;
     }
 
@@ -427,6 +438,24 @@ void tileHdScroll(int dx, int dy)
     if (layer != nullptr) {
         hdLayerScroll(layer, dx, dy);
     }
+}
+
+void tileHdScrollRect(const Rect* rect, int dx, int dy)
+{
+    HdLayer* layer = tileHdExistingLayer();
+    if (layer != nullptr) {
+        hdLayerScrollRect(layer, rect->left, rect->top, rect->right - rect->left + 1, rect->bottom - rect->top + 1, dx, dy);
+    }
+}
+
+void tileSetWindowRegion(const Rect* rect)
+{
+    gTileWindowRect = *rect;
+}
+
+void tileSetCenterMovedProc(TileCenterMovedProc* proc)
+{
+    gTileCenterMovedProc = proc;
 }
 
 double tileRenderClockMs()
@@ -916,6 +945,13 @@ int tileSetCenter(int tile, int flags)
     int tile_x = gHexGridWidth - 1 - tile % gHexGridWidth;
     int tile_y = tile / gHexGridWidth;
 
+    // CE: where the new centre is drawn now (see gTileCenterMovedProc).
+    int movedFromX = 0;
+    int movedFromY = 0;
+    if (gTileCenterMovedProc != nullptr) {
+        tileToScreenXY(tile, &movedFromX, &movedFromY);
+    }
+
     // Legacy global borders are for maps without EDG data. EDG maps use their
     // own boundary/clamp logic above, which can validly land on this border.
     if ((!edgeActive || !mapEdgeZoneIsSelected()) && gTileBorderInitialized && gTileScrollBlockingEnabled) {
@@ -945,6 +981,15 @@ int tileSetCenter(int tile, int flags)
     }
 
     gCenterTile = tile;
+
+    if (gTileCenterMovedProc != nullptr) {
+        int movedToX;
+        int movedToY;
+        tileToScreenXY(tile, &movedToX, &movedToY);
+        if (movedToX != movedFromX || movedToY != movedFromY) {
+            gTileCenterMovedProc(movedToX - movedFromX, movedToY - movedFromY);
+        }
+    }
 
     tile_hires_stencil_on_center_tile_or_elevation_change();
 

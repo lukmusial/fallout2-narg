@@ -32,6 +32,7 @@
 #include "kb.h"
 #include "lips.h"
 #include "map.h"
+#include "map_view.h"
 #include "memory.h"
 #include "mouse.h"
 #include "object.h"
@@ -2813,6 +2814,9 @@ static void gameDialogBlitIsoWindowToDisplayBuffer()
 
 static void gameDialogRenderMapInDisplayBuffer()
 {
+    // CE: the picture is taken at zoom 1 without panning (map_view.h).
+    mapViewBeginSnapshot();
+
     int oldCenterTile = gCenterTile;
     bool changedCenter = false;
     bool mapRefreshed = false;
@@ -2845,6 +2849,8 @@ static void gameDialogRenderMapInDisplayBuffer()
         tileSetCenter(oldCenterTile,
             TILE_SET_CENTER_REFRESH_WINDOW | TILE_SET_CENTER_FLAG_IGNORE_SCROLL_RESTRICTIONS);
     }
+
+    mapViewEndSnapshot();
 }
 
 // 0x447598

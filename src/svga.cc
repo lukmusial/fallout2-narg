@@ -919,6 +919,7 @@ void renderPresent()
     SDL_RenderPresent(gSdlRenderer);
 
     uint64_t elapsed = SDL_GetPerformanceCounter() - startCounter;
+    devAutomationOnPresent();
     gStats.presents++;
     gStats.presentTicks += elapsed;
     gStats.presentMaxTicks = std::max(gStats.presentMaxTicks, elapsed);

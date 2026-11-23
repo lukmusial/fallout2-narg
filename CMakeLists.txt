@@ -185,6 +185,10 @@ set(FALLOUT_ENGINE_SOURCES
     "src/map.h"
     "src/map_edge.cc"
     "src/map_edge.h"
+    "src/map_view.cc"
+    "src/map_view.h"
+    "src/map_view_core.cc"
+    "src/map_view_core.h"
     "src/memory_defs.h"
     "src/memory_manager.cc"
     "src/memory_manager.h"
@@ -666,6 +670,15 @@ if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
     )
     target_include_directories(hd_lights_test PRIVATE "src")
     add_test(NAME hd_lights_test COMMAND hd_lights_test)
+
+    add_executable(map_view_test
+        "tests/unit/map_view_test.cc"
+        "src/hd_glyph.cc"
+        "src/hd_layer.cc"
+        "src/map_view_core.cc"
+    )
+    target_include_directories(map_view_test PRIVATE "src")
+    add_test(NAME map_view_test COMMAND map_view_test)
 endif()
 
 if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))

@@ -362,6 +362,12 @@ void hdLayerInvalidateMasked(HdLayer* layer, int x, int y, int width, int height
 // source are invalid.
 void hdLayerScroll(HdLayer* layer, int dx, int dy);
 
+// The same within the logical rectangle (left, top, width, height) only
+// (Phase 2.13: the map surface scrolls its rendered region): afterwards
+// (x, y) holds what was at (x + dx, y + dy) when that is inside the
+// rectangle, else it is invalid. Pixels outside the rectangle are untouched.
+void hdLayerScrollRect(HdLayer* layer, int left, int top, int width, int height, int dx, int dy);
+
 // Whether the HD block of logical pixel (x, y) is shown for buffer value `index`.
 inline bool hdLayerShows(const HdLayer* layer, int x, int y, unsigned char index)
 {

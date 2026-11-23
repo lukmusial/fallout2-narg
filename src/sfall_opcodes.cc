@@ -25,6 +25,7 @@
 #include "item.h"
 #include "light.h"
 #include "map.h"
+#include "map_view.h"
 #include "memory.h"
 #include "message.h"
 #include "mouse.h"
@@ -1410,6 +1411,7 @@ static void op_tile_under_cursor(Program* program)
     int x;
     int y;
     mouseGetPosition(&x, &y);
+    mapViewScreenToSurface(&x, &y);
 
     int tile = tileFromScreenXY(x, y);
     programStackPushInteger(program, tile);

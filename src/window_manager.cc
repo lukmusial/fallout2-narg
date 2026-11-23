@@ -342,11 +342,13 @@ int windowCreate(int x, int y, int width, int height, ColorWithFlags color, Wind
         return -1;
     }
 
-    if (width > rectGetWidth(&_scr_size)) {
+    bool offscreen = (flags & WINDOW_OFFSCREEN) != 0;
+
+    if (width > rectGetWidth(&_scr_size) && !offscreen) {
         return -1;
     }
 
-    if (height > rectGetHeight(&_scr_size)) {
+    if (height > rectGetHeight(&_scr_size) && !offscreen) {
         return -1;
     }
 
@@ -402,6 +404,15 @@ int windowCreate(int x, int y, int width, int height, ColorWithFlags color, Wind
     window->flags |= WINDOW_HIDDEN;
     _win_move(id, x, y);
     window->flags = flags;
+
+    if (offscreen) {
+        // Far outside the screen: no hit-test or refresh ever touches it.
+        window->flags |= WINDOW_HIDDEN;
+        window->rect.left = -(1 << 28);
+        window->rect.top = -(1 << 28);
+        window->rect.right = window->rect.left + width - 1;
+        window->rect.bottom = window->rect.top + height - 1;
+    }
 
     if ((flags & WINDOW_MOVE_ON_TOP) == 0) {
         topWindowIndex = gWindowsLength - 2;
@@ -679,6 +690,10 @@ void windowShow(int win)
     int index = gWindowIndexes[window->id];
 
     if (!gWindowSystemInitialized) {
+        return;
+    }
+
+    if ((window->flags & WINDOW_OFFSCREEN) != 0) {
         return;
     }
 

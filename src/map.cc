@@ -29,6 +29,7 @@
 #include "loadsave.h"
 #include "map_defs.h"
 #include "map_edge.h"
+#include "map_view.h"
 #include "memory.h"
 #include "object.h"
 #include "party_member.h"
@@ -59,6 +60,7 @@ int _map_save(bool isInGame);
 static int replaceDeadCritter(Object* critter);
 static void mapMakeMapsDirectory();
 static void isoWindowRefreshRect(Rect* rect);
+static int mapScrollStep(int dx, int dy);
 static void isoWindowRefreshRectGame(Rect* rect);
 static void isoWindowRefreshRectMapper(Rect* rect);
 static int mapGlobalVariablesInit(int count);
@@ -213,6 +215,20 @@ int isoInit()
         return -1;
     }
 
+    // CE: with the map view (smooth scrolling, zoom) the map is drawn into an
+    // off-screen surface that the map window shows (see map_view.h).
+    int isoWidth = screenGetWidth();
+    int isoHeight = screenGetVisibleHeight();
+    if (mapViewInit(gIsoWindow)) {
+        gIsoWindowBuffer = mapViewSurfaceBuffer();
+        isoWidth = mapViewSurfaceWidth();
+        isoHeight = mapViewSurfaceHeight();
+        gIsoWindowRect.left = 0;
+        gIsoWindowRect.top = 0;
+        gIsoWindowRect.right = isoWidth - 1;
+        gIsoWindowRect.bottom = isoHeight - 1;
+    }
+
     if (artInit() != 0) {
         debugPrint("art_init failed in iso_init\n");
         return -1;
@@ -220,14 +236,22 @@ int isoInit()
 
     debugPrint(">art_init\t\t");
 
-    if (tileInit(_square, SQUARE_GRID_WIDTH, SQUARE_GRID_HEIGHT, HEX_GRID_WIDTH, HEX_GRID_HEIGHT, gIsoWindowBuffer, screenGetWidth(), screenGetVisibleHeight(), screenGetWidth(), isoWindowRefreshRect) != 0) {
+    if (tileInit(_square, SQUARE_GRID_WIDTH, SQUARE_GRID_HEIGHT, HEX_GRID_WIDTH, HEX_GRID_HEIGHT, gIsoWindowBuffer, isoWidth, isoHeight, isoWidth, isoWindowRefreshRect) != 0) {
         debugPrint("tile_init failed in iso_init\n");
         return -1;
     }
 
     debugPrint(">tile_init\t\t");
 
-    if (objectsInit(gIsoWindowBuffer, screenGetWidth(), screenGetVisibleHeight(), screenGetWidth()) != 0) {
+    if (mapViewIsActive()) {
+        Rect region;
+        mapViewGetRegion(&region);
+        tileSetWindowRegion(&region);
+        tileSetCenterMovedProc(mapViewContentMoved);
+        mapViewSetScrollStepProc(mapScrollStep);
+    }
+
+    if (objectsInit(gIsoWindowBuffer, isoWidth, isoHeight, isoWidth) != 0) {
         debugPrint("obj_init failed in iso_init\n");
         return -1;
     }
@@ -293,6 +317,8 @@ void isoExit()
     tileExit();
     artExit();
 
+    tileSetCenterMovedProc(nullptr);
+    mapViewExit();
     windowDestroy(gIsoWindow);
 
     // NOTE: Uninline.
@@ -635,12 +661,24 @@ Map mapGetCurrentMap()
 int mapScroll(int dx, int dy)
 {
     unsigned int now = getRealTicks();
-    if (getTicksBetween(now, gIsoWindowScrollTimestamp) < 33) {
+    if (getTicksBetween(now, gIsoWindowScrollTimestamp) < static_cast<unsigned int>(mapViewScrollInterval())) {
         return -2;
     }
 
     gIsoWindowScrollTimestamp = now;
 
+    // CE: with smooth scrolling the view travels the step and the steps are
+    // made as it goes (map_view.h).
+    if (mapViewSmoothScrolling()) {
+        return mapViewScroll(dx, dy);
+    }
+
+    return mapScrollStep(dx, dy);
+}
+
+// The scroll step itself: moves the centre and the map window content.
+static int mapScrollStep(int dx, int dy)
+{
     double started = tileRenderClockMs();
 
     int screenDx = dx * 32;
@@ -667,15 +705,25 @@ int mapScroll(int dx, int dy)
         return -1;
     }
 
+    // CE: with the map view, the drawn region of the surface scrolls (else
+    // the whole map window, as before).
+    Rect region;
+    if (mapViewIsActive()) {
+        mapViewGetRegion(&region);
+    } else {
+        rectCopy(&region, &gIsoWindowRect);
+    }
+
     Rect r1;
-    rectCopy(&r1, &gIsoWindowRect);
+    rectCopy(&r1, &region);
 
     Rect r2;
     rectCopy(&r2, &r1);
 
-    int width = screenGetWidth();
-    int pitch = width;
-    int height = screenGetVisibleHeight();
+    int width = rectGetWidth(&region);
+    int pitch = rectGetWidth(&gIsoWindowRect);
+    int height = rectGetHeight(&region);
+    unsigned char* origin = gIsoWindowBuffer + pitch * region.top + region.left;
 
     if (screenDx != 0) {
         width -= 32;
@@ -696,8 +744,8 @@ int mapScroll(int dx, int dy)
     int step;
     if (screenDy < 0) {
         r1.bottom = r1.top - screenDy;
-        src = gIsoWindowBuffer + pitch * (height - 1);
-        dest = gIsoWindowBuffer + pitch * (screenGetVisibleHeight() - 1);
+        src = origin + pitch * (height - 1);
+        dest = origin + pitch * (rectGetHeight(&region) - 1);
         if (screenDx < 0) {
             dest -= screenDx;
         } else {
@@ -706,8 +754,8 @@ int mapScroll(int dx, int dy)
         step = -pitch;
     } else {
         r1.top = r1.bottom - screenDy;
-        dest = gIsoWindowBuffer;
-        src = gIsoWindowBuffer + pitch * screenDy;
+        dest = origin;
+        src = origin + pitch * screenDy;
 
         if (screenDx < 0) {
             dest -= screenDx;
@@ -724,7 +772,11 @@ int mapScroll(int dx, int dy)
     }
 
     // CE: the HD layer moves with the buffer; the strips are redrawn below.
-    tileHdScroll(screenDx, screenDy);
+    if (mapViewIsActive()) {
+        tileHdScrollRect(&region, screenDx, screenDy);
+    } else {
+        tileHdScroll(screenDx, screenDy);
+    }
 
     if (screenDx != 0) {
         _map_scroll_refresh(&r2);
@@ -734,7 +786,13 @@ int mapScroll(int dx, int dy)
         _map_scroll_refresh(&r1);
     }
 
-    windowRefresh(gIsoWindow);
+    if (mapViewIsActive()) {
+        // The view pans over the step (see map_view.h).
+        Rect strips[2] = { r2, r1 };
+        mapViewSurfaceScrolled(screenDx, screenDy, screenDx != 0 ? strips : strips + 1, (screenDx != 0) + (screenDy != 0));
+    } else {
+        windowRefresh(gIsoWindow);
+    }
 
     tileRenderStatsAdd(true, tileRenderClockMs() - started);
 
@@ -953,6 +1011,10 @@ static int mapLoad(File* stream)
     // CE: no HD floors of the previous map behind the black.
     windowHdClear(gIsoWindow);
     windowRefresh(gIsoWindow);
+    if (mapViewIsActive()) {
+        mapViewReset();
+        windowHdClear(mapViewSurfaceWindow());
+    }
     animationStop();
     scriptsDisable();
 
@@ -1681,6 +1743,10 @@ static void mapMakeMapsDirectory()
 // 0x483ED0
 static void isoWindowRefreshRect(Rect* rect)
 {
+    if (mapViewIsActive()) {
+        mapViewSurfaceChanged(rect);
+        return;
+    }
     windowRefreshRect(gIsoWindow, rect);
 }
 

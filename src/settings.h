@@ -122,6 +122,15 @@ struct GraphicsSettings {
     // (1 coloured light, 2 glow, 4 shadows).
     bool hd_lights = false;
     int hd_lights_effects = 7;
+    // With hd_lights=1: the light a walking critter carries follows the
+    // drawn sprite instead of jumping hex by hex (Phase 2.13).
+    bool hd_lights_follow = true;
+    // Map view (Phase 2.13, see map_view.h): smooth, per-frame map panning
+    // (scroll_speed in percent of the original speed) and zooming the map
+    // (mouse wheel, Ctrl+= / Ctrl+- / Ctrl+0).
+    bool smooth_scroll = false;
+    int scroll_speed = 100;
+    bool zoom = false;
 };
 
 struct UISettings {

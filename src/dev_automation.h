@@ -53,6 +53,24 @@ namespace fallout {
 //                             <name>.json counts, <name>.png classes
 //   perf reset|<name>         reset presenter and map redraw timing counters, or
 //                             write them to <out>/<name>.json and reset
+//                             (map view counters to <name>_view.json)
+//   walk <rotation> <hexes> [run]
+//                             the player walks (runs) in a straight line
+//   scrollhold <dx> <dy> <ms> scroll the map as a held arrow key would; the
+//                             next commands run meanwhile
+//   frames <name> <count> [<x> <y> <w> <h> [<every>]]
+//                             the next <count> presented frames (every
+//                             <every>th, default 1; a crop in
+//                             output pixels) to <name>_NN.png and the view
+//                             per frame to <name>.json; runs meanwhile
+//   framesdone                wait until the `frames` captures are written
+//   zoom <level> [now] | in | out | reset
+//                             map view zoom ([graphics] zoom=1)
+//   viewsettle                wait until the map view stops panning/zooming
+//   viewdump <name>           the map view and player positions to <name>.json
+//   mousetoparty <n>          the cursor to party member n's sprite as shown
+//   mousetotile <tile|dude>   the cursor to the centre of a hex as shown
+//   pick <name>               the object and hex under the cursor to <name>.json
 //   log <text>                write a line to the debug log
 //   quit [<code>]             exit the process
 
@@ -73,6 +91,9 @@ void devAutomationTick();
 
 // Replaces the hardware mouse state while a script is active.
 bool devAutomationOverrideMouse(MouseData* mouseData);
+
+// Called after every present, for `frames` captures.
+void devAutomationOnPresent();
 
 // Called by palette fades for `fadeshot` captures.
 void devAutomationOnFadeStep(int step, int steps, bool toBlack);

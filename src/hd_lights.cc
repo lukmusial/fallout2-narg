@@ -608,4 +608,139 @@ void hdLightFieldAddShadow(HdLightField* field, float cx, float cy, float axisX,
     }
 }
 
+
+namespace {
+
+    // Tent weight of a sample at distance (dx, dy).
+    inline float tentWeight(float dx, float dy, float kernelX, float kernelY)
+    {
+        float wx = 1.0f - fabsf(dx) / kernelX;
+        float wy = 1.0f - fabsf(dy) / kernelY;
+        return wx > 0.0f && wy > 0.0f ? wx * wy : 0.0f;
+    }
+
+} // namespace
+
+float hdMovedLightAt(const std::vector<HdMovedLightHex>& hexes, float x, float y, float dx, float dy,
+    float ambient, float maximum, float kernelX, float kernelY)
+{
+    float sumTotal = 0.0f;
+    float sumOwn = 0.0f;
+    float norm = 0.0f;
+    float sumMoved = 0.0f;
+    float normMoved = 0.0f;
+    for (const HdMovedLightHex& hex : hexes) {
+        float w = tentWeight(x - hex.x, y - hex.y, kernelX, kernelY);
+        if (w > 0.0f) {
+            sumTotal += w * hex.total;
+            sumOwn += w * hex.own;
+            norm += w;
+        }
+        float wm = tentWeight(x - hex.x - dx, y - hex.y - dy, kernelX, kernelY);
+        if (wm > 0.0f) {
+            sumMoved += wm * hex.own;
+            normMoved += wm;
+        }
+    }
+    if (norm <= 0.0f) {
+        return 0.0f;
+    }
+    float moved = normMoved > 0.0f ? sumMoved / normMoved : 0.0f;
+    return std::clamp((sumTotal - sumOwn) / norm + moved, ambient, maximum);
+}
+
+void hdLightFieldAddMovedLight(HdLightField* field, const std::vector<HdMovedLightHex>& hexes, float dx, float dy,
+    float ambient, float maximum, float kernelX, float kernelY)
+{
+    if (hexes.empty() || (dx == 0.0f && dy == 0.0f) || maximum <= 0.0f) {
+        return;
+    }
+
+    float minX = hexes[0].x;
+    float maxX = hexes[0].x;
+    float minY = hexes[0].y;
+    float maxY = hexes[0].y;
+    for (const HdMovedLightHex& hex : hexes) {
+        minX = std::min(minX, hex.x);
+        maxX = std::max(maxX, hex.x);
+        minY = std::min(minY, hex.y);
+        maxY = std::max(maxY, hex.y);
+    }
+
+    int x0 = std::max(static_cast<int>(floorf((minX - kernelX - fabsf(dx)) / kHdLightCell)), 0);
+    int y0 = std::max(static_cast<int>(floorf((minY - kernelY - fabsf(dy)) / kHdLightCell)), 0);
+    int x1 = std::min(static_cast<int>(ceilf((maxX + kernelX + fabsf(dx)) / kHdLightCell)) + 1, field->cellsX);
+    int y1 = std::min(static_cast<int>(ceilf((maxY + kernelY + fabsf(dy)) / kHdLightCell)) + 1, field->cellsY);
+    if (x0 >= x1 || y0 >= y1) {
+        return;
+    }
+
+    int cellsX = x1 - x0;
+    int cellsY = y1 - y0;
+    size_t cells = static_cast<size_t>(cellsX) * cellsY;
+    // Per cell: total, own and weight at the hexes; own and weight at the
+    // hexes moved by (dx, dy).
+    std::vector<float> sums(cells * 5, 0.0f);
+
+    for (int pass = 0; pass < 2; pass++) {
+        float ox = pass == 0 ? 0.0f : dx;
+        float oy = pass == 0 ? 0.0f : dy;
+        for (const HdMovedLightHex& hex : hexes) {
+            float hx = hex.x + ox;
+            float hy = hex.y + oy;
+            int cx0 = std::max(static_cast<int>(ceilf((hx - kernelX) / kHdLightCell - 0.5f)), x0);
+            int cx1 = std::min(static_cast<int>(floorf((hx + kernelX) / kHdLightCell - 0.5f)), x1 - 1);
+            int cy0 = std::max(static_cast<int>(ceilf((hy - kernelY) / kHdLightCell - 0.5f)), y0);
+            int cy1 = std::min(static_cast<int>(floorf((hy + kernelY) / kHdLightCell - 0.5f)), y1 - 1);
+            for (int cy = cy0; cy <= cy1; cy++) {
+                for (int cx = cx0; cx <= cx1; cx++) {
+                    float w = tentWeight((cx + 0.5f) * kHdLightCell - hx, (cy + 0.5f) * kHdLightCell - hy, kernelX, kernelY);
+                    if (w <= 0.0f) {
+                        continue;
+                    }
+                    float* cell = &sums[(static_cast<size_t>(cy - y0) * cellsX + (cx - x0)) * 5];
+                    if (pass == 0) {
+                        cell[0] += w * hex.total;
+                        cell[1] += w * hex.own;
+                        cell[2] += w;
+                    } else {
+                        cell[3] += w * hex.own;
+                        cell[4] += w;
+                    }
+                }
+            }
+        }
+    }
+
+    bool any = false;
+    for (int cy = y0; cy < y1; cy++) {
+        float* mul = &field->mul[static_cast<size_t>(cy) * field->cellsX * 3];
+        for (int cx = x0; cx < x1; cx++) {
+            const float* cell = &sums[(static_cast<size_t>(cy - y0) * cellsX + (cx - x0)) * 5];
+            if (cell[2] <= 0.0f) {
+                continue;
+            }
+            float total = cell[0] / cell[2];
+            float others = total - cell[1] / cell[2];
+            float moved = cell[4] > 0.0f ? cell[3] / cell[4] : 0.0f;
+            float drawn = std::clamp(total, ambient, maximum);
+            float wanted = std::clamp(others + moved, ambient, maximum);
+            if (drawn <= 0.0f) {
+                continue;
+            }
+            float extra = wanted / drawn - 1.0f;
+            if (extra == 0.0f) {
+                continue;
+            }
+            mul[cx * 3] += extra;
+            mul[cx * 3 + 1] += extra;
+            mul[cx * 3 + 2] += extra;
+            any = true;
+        }
+    }
+    if (any) {
+        field->lightBox.add({ x0, y0, x1, y1 });
+    }
+}
+
 } // namespace fallout

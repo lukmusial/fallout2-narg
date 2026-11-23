@@ -1082,6 +1082,188 @@ def test_hd_lights(update):
             f"({seconds:.0f}s)")
 
 
+# Phase 2.13: map view (smooth panning, zoom) and lights that follow walking
+# critters, at the user's 3440x1440 (logical 1720x720). The map view is off
+# by default (and in the other tests), so their goldens are unaffected.
+VIEW_SCREEN = ["[screen]resolution_x=3440", "[screen]resolution_y=1440", "[screen]scale=2"]
+VIEW_HD = [*VIEW_SCREEN, *HD_ARGS, "[graphics]hd_pack=mixed"]
+VIEW_ON = ["[graphics]smooth_scroll=1", "[graphics]zoom=1"]
+VIEW_SLOT = 8
+
+
+def compare_state_after_play(out, slot):
+    """The state dumped after some play equals the slot's golden, except
+    global var 104, which the Den's scripts advance with game time."""
+    golden = json.loads((GOLDEN / f"slot{slot:02d}_state.json").read_text())
+    actual = stable_state(json.loads((out / "state.json").read_text()))
+    for state in (golden, actual):
+        state["gvars"] = [v for i, v in enumerate(state["gvars"]) if i not in HD_LIGHTS_TIME_GVARS]
+    if json.loads(json.dumps(actual)) != golden:
+        raise TestFailure("state changed: " + str([k for k in golden if golden[k] != actual.get(k)]))
+
+
+def view_frames(out, name):
+    return json.loads((out / f"{name}.json").read_text())["frames"]
+
+
+def test_view_identity(update):
+    """Map view on at zoom 1 at rest: the same frame as without it (the map
+    is drawn into the surface and copied, HD pixels included)."""
+    if not map_pack_installed("mixed"):
+        raise TestSkipped("pack 'mixed' lacks the area art")
+    frames = {}
+    for label, extra in (("off", []), ("on", VIEW_ON)):
+        reset_saves()
+        out, seconds = run_game(f"view_identity_{label}", "load_slot.txt", ["--dev-load-game=3", *VIEW_HD, *extra])
+        frames[label] = load_png(out / "game.png")
+    differs = np.any(frames["off"] != frames["on"], axis=2)
+    # (Arroyo's people walk about between the two runs.)
+    if differs.mean() > 0.01:
+        raise TestFailure(f"{differs.mean():.3%} of the pixels differ with the map view on")
+    return f"{differs.mean():.4%} pixels differ ({seconds:.0f}s)"
+
+
+def test_view_pan(update):
+    """Held scroll, original vs smooth: the same scroll limits and end
+    position; the original moves in whole 32 px steps, smooth panning in
+    sub-step amounts every frame and comes to rest on the centre."""
+    results = {}
+    for label, extra in (("steps", []), ("smooth", ["[graphics]smooth_scroll=1"])):
+        reset_saves()
+        # At the test resolution (640x480 logical) the debug build presents
+        # often enough to see the motion between frames.
+        out, seconds = run_game(f"view_pan_{label}", "view_pan.txt", [f"--dev-load-game={VIEW_SLOT}", *HD_ARGS,
+                                                                       "[graphics]hd_pack=mixed", *extra])
+        xs = [f["dude"]["feet_screen"][0] for f in view_frames(out, "pan")]
+        moves = [abs(b - a) for a, b in zip(xs, xs[1:]) if abs(b - a) > 0.01]
+        after = json.loads((out / "after.json").read_text())
+        before = json.loads((out / "before.json").read_text())
+        results[label] = (moves, before, after)
+        compare_state_after_play(out, VIEW_SLOT)
+    steps, smooth = results["steps"][0], results["smooth"][0]
+    if not steps or any(m % 32 != 0 for m in steps):
+        raise TestFailure(f"original scrolling should move in 32 px steps: {steps}")
+    partial = [m for m in smooth if abs(m - 32 * round(m / 32)) > 0.6]
+    if len(smooth) < 10 or len(partial) < len(smooth) * 0.5:
+        raise TestFailure(f"smooth panning should move by parts of a step every frame: {smooth}")
+    if max(smooth) > 48:
+        raise TestFailure(f"smooth panning jumped {max(smooth)} px in a frame")
+    if results["steps"][2]["centre_tile"] != results["smooth"][2]["centre_tile"]:
+        raise TestFailure("smooth panning ended on another centre than the original scroll: "
+                          f"{results['steps'][2]['centre_tile']} vs {results['smooth'][2]['centre_tile']}")
+    if results["smooth"][2]["pan_x"] != 0 or results["smooth"][2]["pan_y"] != 0:
+        raise TestFailure("the view did not come to rest on the centre")
+    return (f"original {len(steps)} steps of 32 px, smooth {len(smooth)} frames of {min(smooth):.1f}..{max(smooth):.1f} px, "
+            f"same end centre {results['smooth'][2]['centre_tile']}")
+
+
+def check_view_zoom(out, hd):
+    views = {z: json.loads((out / f"v{z}.json").read_text()) for z in ("100", "200", "050", "keyreset", "reset")}
+    for name, zoom in (("100", 1.0), ("200", 2.0), ("050", 0.5), ("keyreset", 1.0), ("reset", 1.0)):
+        if abs(views[name]["zoom"] - zoom) > 1e-6:
+            raise TestFailure(f"zoom at {name}: {views[name]['zoom']} (expected {zoom}; keys Ctrl+= / Ctrl+- / Ctrl+0)")
+    dude = views["100"]["dude"]["tile"]
+    maps = []
+    for z in ("100", "200", "050"):
+        sprite = json.loads((out / f"party{z}.json").read_text())
+        hexes = json.loads((out / f"hex{z}.json").read_text())
+        if sprite["critter"] is None or sprite["critter"]["tile"] != dude:
+            raise TestFailure(f"zoom {z}: clicking the player's sprite picks {sprite['critter']}")
+        if hexes["tile"] != dude or hexes["hex_cursor_tile"] != dude:
+            raise TestFailure(f"zoom {z}: the hex under the cursor is {hexes['tile']} (cursor {hexes['hex_cursor_tile']}), "
+                              f"the player stands on {dude}")
+        maps.append(sprite["map"])
+    if any(abs(a - b) > 1 for m in maps for a, b in zip(m, maps[0])):
+        raise TestFailure(f"the same sprite point maps to different map pixels at different zooms: {maps}")
+    frames = {z: load_png(out / f"zoom{z}.png") for z in ("100", "200", "050")}
+    height = frames["100"].shape[0]
+    bar = height * 100 // 720  # the interface bar (100 logical rows) keeps its size
+    for z in ("200", "050"):
+        if np.any(frames[z][-bar:] != frames["100"][-bar:], axis=2).mean() > 0.02:
+            raise TestFailure(f"zoom {z}: the interface bar changed")
+        if np.any(frames[z][:-bar] != frames["100"][:-bar], axis=2).mean() < 0.5:
+            raise TestFailure(f"zoom {z}: the map view hardly changed")
+    return maps[0]
+
+
+def test_view_zoom(update):
+    """Zoom 1, 2 (Ctrl+= x3) and 0.5 (Ctrl+- x2 after Ctrl+0), animated; the
+    player's sprite and hex are hit at every zoom, the interface bar keeps
+    its size, state unchanged."""
+    if not map_pack_installed("mixed"):
+        raise TestSkipped("pack 'mixed' lacks the area art")
+    reset_saves()
+    out, seconds = run_game("view_zoom", "view_zoom.txt", [f"--dev-load-game={VIEW_SLOT}", *VIEW_HD, *VIEW_ON])
+    compare_state_after_play(out, VIEW_SLOT)
+    point = check_view_zoom(out, True)
+    return f"zoom 1/2/0.5 reached, sprite and hex hit at every zoom (map point {point}) ({seconds:.0f}s)"
+
+
+def test_view_zoom_hd0(update):
+    """The map view with hd=0 (nearest pixel): zoom and hit-testing work,
+    state unchanged."""
+    reset_saves()
+    out, seconds = run_game("view_zoom_hd0", "view_zoom.txt", [f"--dev-load-game={VIEW_SLOT}", *VIEW_SCREEN, *VIEW_ON])
+    compare_state_after_play(out, VIEW_SLOT)
+    check_view_zoom(out, False)
+    return f"hd=0: zoom and hit-testing ok ({seconds:.0f}s)"
+
+
+def light_track(out):
+    """Per frame: the player's feet x and the x centroid of the light on the
+    floor around him (his sprite masked out), logical pixels."""
+    meta = json.loads((out / "walk.json").read_text())
+    left, top, width, height = meta["crop"]
+    yy, xx = np.mgrid[0:height, 0:width]
+    rows = []
+    for index, frame in enumerate(meta["frames"]):
+        lum = load_png(out / f"walk_{index:02d}.png").mean(axis=2)
+        fx, fy = frame["dude"]["feet_screen"]
+        fx, fy = fx * 2 - left, fy * 2 - top
+        r = np.sqrt((xx - fx) ** 2 + ((yy - fy) * 2) ** 2)
+        mask = (r > 70) & (r < 300) & ~((np.abs(xx - fx) < 60) & (yy < fy + 10) & (yy > fy - 200))
+        weight = np.clip(lum - np.percentile(lum[mask], 30), 0, None) * mask
+        rows.append((fx / 2, float((weight * xx).sum() / weight.sum()) / 2, frame))
+    return rows
+
+
+def test_view_light_follow(update):
+    """Den at night, the player walks east: with hd_lights_follow the light
+    on the floor tracks his sprite smoothly (follows it linearly), without
+    it it jumps hex by hex; the light reported for him sits at the sprite."""
+    if not map_pack_installed("mixed"):
+        raise TestSkipped("pack 'mixed' lacks the area art")
+    residual = {}
+    for label, extra in (("hex", ["[graphics]hd_lights_follow=0"]), ("follow", [])):
+        reset_saves()
+        out, seconds = run_game(f"view_light_{label}", "view_light_walk.txt",
+                                [f"--dev-load-game={HD_LIGHTS_SLOT}", *VIEW_HD, "[graphics]hd_lights=1", *extra])
+        compare_state_after_play(out, HD_LIGHTS_SLOT)
+        rows = light_track(out)
+        x = np.array([r[0] for r in rows])
+        c = np.array([r[1] for r in rows])
+        moving = (x > x[0] + 1) & (x < x[-1] - 1)
+        if moving.sum() < 6:
+            raise TestFailure(f"{label}: the player hardly moved ({x[0]:.0f} -> {x[-1]:.0f})")
+        slope, offset = np.polyfit(x[moving], c[moving], 1)
+        residual[label] = float((c[moving] - (slope * x[moving] + offset)).std())
+        if label == "follow":
+            lights = [m for r in rows for m in r[2].get("moving_lights", [])]
+            if not lights:
+                raise TestFailure("no light was placed at a walking sprite")
+            for light in lights:
+                # The light moves from the hex towards the sprite (other
+                # lights and the clamping to full light keep it from moving
+                # all the way).
+                shift = light["moved_x"] - light["centre_x"]
+                if abs(light["dx"]) >= 8 and (shift * light["dx"] <= 0 or abs(shift) > abs(light["dx"]) + 4):
+                    raise TestFailure(f"moved light not towards the sprite: {light}")
+    if residual["follow"] > 3.0 or residual["follow"] > 0.6 * residual["hex"]:
+        raise TestFailure(f"the light does not follow the sprite smoothly: residual {residual['follow']:.2f} px "
+                          f"(hex by hex {residual['hex']:.2f} px)")
+    return f"light vs sprite residual {residual['follow']:.2f} px (hex by hex {residual['hex']:.2f} px)"
+
+
 TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_art, test_main_menu_hd_fhd,
           test_hd_art_lookup]
          + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
@@ -1094,7 +1276,8 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
          + [test_hd_mixed_pack]
          + [make_hd_text_screens_test(style) for style in HD_TEXT_STYLES]
          + [test_hd_text_game, test_hd_lights]
-         + [make_hd_inventory_test(pack) for pack in HD_INVENTORY_PACKS])
+         + [make_hd_inventory_test(pack) for pack in HD_INVENTORY_PACKS]
+         + [test_view_identity, test_view_pan, test_view_zoom, test_view_zoom_hd0, test_view_light_follow])
 
 
 PERF_CONFIGS = [

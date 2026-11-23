@@ -14,12 +14,14 @@
 
 #include <algorithm>
 
+#include "animation.h"
 #include "art.h"
 #include "color.h"
 #include "critter.h"
 #include "debug.h"
 #include "display_monitor.h"
 #include "game.h"
+#include "game_mouse.h"
 #include "hd_art.h"
 #include "hd_lights.h"
 #include "hd_lights_map.h"
@@ -28,6 +30,7 @@
 #include "item.h"
 #include "kb.h"
 #include "map.h"
+#include "map_view.h"
 #include "mouse.h"
 #include "object.h"
 #include "party_member.h"
@@ -99,6 +102,30 @@ namespace {
             int direction; // 0 = any, 1 = fade in, -1 = fade out (to black)
         };
         std::vector<FadeCapture> fadeCaptures;
+
+        // `frames`: crops of consecutive presented frames, kept in memory and
+        // written when the last one is taken (writing PNGs would stall the
+        // game between frames).
+        struct FrameCapture {
+            std::string name;
+            int count = 0;
+            int every = 1;
+            int seen = 0;
+            int left = 0;
+            int top = 0;
+            int width = 0;
+            int height = 0;
+            std::vector<std::vector<unsigned char>> images;
+            std::vector<std::string> meta;
+            unsigned int started = 0;
+        };
+        std::vector<FrameCapture> frameCaptures;
+
+        // `scrollhold`: scroll every poll until the deadline.
+        bool scrolling = false;
+        int scrollDx = 0;
+        int scrollDy = 0;
+        unsigned int scrollUntil = 0;
     };
 
     AutomationState gAutomation;
@@ -376,6 +403,120 @@ namespace {
         out << "\n}\n";
 
         return out.good();
+    }
+
+    // The map window position of an object's sprite centre (through the map
+    // view's pan and zoom).
+    bool objectScreenCentre(Object* object, float* x, float* y)
+    {
+        if (object == nullptr || object->tile == -1) {
+            return false;
+        }
+        Rect rect;
+        objectGetRect(object, &rect);
+        *x = (rect.left + rect.right + 1) * 0.5f;
+        *y = (rect.top + rect.bottom + 1) * 0.5f;
+        mapViewSurfaceToScreen(x, y);
+        return true;
+    }
+
+    // The map view and the player as JSON (`viewdump`, `frames` metadata).
+    std::string describeView()
+    {
+        std::ostringstream out;
+        MapViewTransform t;
+        mapViewGetTransform(&t);
+        Rect region = { 0, 0, -1, -1 };
+        if (mapViewIsActive()) {
+            mapViewGetRegion(&region);
+        }
+        out << "{\"active\": " << (mapViewIsActive() ? "true" : "false") << ", \"zoom\": " << t.zoom
+            << ", \"target_zoom\": " << mapViewGetTargetZoom() << ", \"pan_x\": " << t.panX << ", \"pan_y\": " << t.panY
+            << ", \"screen\": [" << t.screenWidth << ", " << t.screenHeight << "], \"surface\": [" << t.surfaceWidth << ", "
+            << t.surfaceHeight << "], \"region\": [" << region.left << ", " << region.top << ", " << region.right << ", "
+            << region.bottom << "], \"centre_tile\": " << gCenterTile << ", \"ticks\": " << getRealTicks();
+        if (gDude != nullptr && gDude->tile != -1) {
+            int hexX;
+            int hexY;
+            tileToScreenXY(gDude->tile, &hexX, &hexY);
+            float sx = hexX + 16.0f + gDude->x;
+            float sy = hexY + 8.0f + gDude->y;
+            mapViewSurfaceToScreen(&sx, &sy);
+            float hx = hexX + 16.0f;
+            float hy = hexY + 8.0f;
+            mapViewSurfaceToScreen(&hx, &hy);
+            out << ", \"dude\": {\"tile\": " << gDude->tile << ", \"offset\": [" << gDude->x << ", " << gDude->y
+                << "], \"hex_screen\": [" << hx << ", " << hy << "], \"feet_screen\": [" << sx << ", " << sy << "]}";
+        }
+        out << ", \"moving_lights\": " << hdLightsMapDescribeMoving();
+        out << ", \"party\": [";
+        bool first = true;
+        for (Object* member : get_all_party_members_objects(false)) {
+            float x;
+            float y;
+            if (!objectScreenCentre(member, &x, &y)) {
+                continue;
+            }
+            if (!first) {
+                out << ", ";
+            }
+            first = false;
+            out << "{\"pid\": " << member->pid << ", \"tile\": " << member->tile << ", \"screen\": [" << x << ", " << y << "]}";
+        }
+        out << "]}";
+        return out.str();
+    }
+
+    // Takes the due `frames` captures (called every poll).
+    void captureFrames()
+    {
+        auto& captures = gAutomation.frameCaptures;
+        for (auto it = captures.begin(); it != captures.end();) {
+            if (it->seen++ % it->every != 0) {
+                ++it;
+                continue;
+            }
+            const uint32_t* framebuffer = screenGetFramebuffer();
+            int fbWidth = screenGetFramebufferWidth();
+            int fbHeight = screenGetFramebufferHeight();
+            if (framebuffer != nullptr) {
+                int left = std::clamp(it->left, 0, fbWidth);
+                int top = std::clamp(it->top, 0, fbHeight);
+                int width = std::clamp(it->width, 0, fbWidth - left);
+                int height = std::clamp(it->height, 0, fbHeight - top);
+                std::vector<unsigned char> image(static_cast<size_t>(width) * height * 3);
+                for (int y = 0; y < height; y++) {
+                    const uint32_t* row = framebuffer + static_cast<size_t>(top + y) * fbWidth + left;
+                    for (int x = 0; x < width; x++) {
+                        unsigned char* pixel = &image[(static_cast<size_t>(y) * width + x) * 3];
+                        pixel[0] = (row[x] >> 16) & 0xFF;
+                        pixel[1] = (row[x] >> 8) & 0xFF;
+                        pixel[2] = row[x] & 0xFF;
+                    }
+                }
+                it->images.push_back(std::move(image));
+                it->meta.push_back(describeView());
+                it->width = width;
+                it->height = height;
+                it->left = left;
+                it->top = top;
+            }
+            if (static_cast<int>(it->images.size()) < it->count) {
+                ++it;
+                continue;
+            }
+            std::ofstream meta(outputPath(it->name, ".json"));
+            meta << "{\"crop\": [" << it->left << ", " << it->top << ", " << it->width << ", " << it->height << "], \"frames\": [\n";
+            for (size_t index = 0; index < it->images.size(); index++) {
+                char suffix[16];
+                snprintf(suffix, sizeof(suffix), "_%02d", static_cast<int>(index));
+                lodepng::encode(outputPath(it->name + suffix, ".png"), it->images[index], it->width, it->height, LCT_RGB, 8);
+                meta << it->meta[index] << (index + 1 < it->images.size() ? ",\n" : "\n");
+            }
+            meta << "]}\n";
+            debugPrint("AUTOMATION: wrote %d frames %s\n", static_cast<int>(it->images.size()), it->name.c_str());
+            it = captures.erase(it);
+        }
     }
 
     // Returns true when the command has finished.
@@ -694,6 +835,205 @@ namespace {
             return true;
         }
 
+        if (name == "walk") {
+            // `walk <rotation 0..5> <hexes> [run]`: the player walks (or
+            // runs) that far in a straight line, as a click would make him.
+            if (args.size() < 2 || strcmp(devAutomationGetState(), "game") != 0 || gDude == nullptr) {
+                fail(command, "usage: walk <rotation> <hexes> [run] (in a game)");
+            }
+            int tile = tileGetTileInDirection(gDude->tile, static_cast<Rotation>(atoi(args[0].c_str()) % ROTATION_COUNT), atoi(args[1].c_str()));
+            reg_anim_begin(ANIMATION_REQUEST_RESERVED);
+            if (args.size() > 2 && args[2] == "run") {
+                animationRegisterRunToTile(gDude, tile, gDude->elevation, -1, 0);
+            } else {
+                animationRegisterMoveToTile(gDude, tile, gDude->elevation, -1, 0);
+            }
+            reg_anim_end();
+            return true;
+        }
+
+        if (name == "scrollhold") {
+            // `scrollhold <dx> <dy> <ms>`: scroll the map as a held arrow key
+            // or the mouse at the screen edge would (a step whenever the
+            // scroll interval allows); later commands run meanwhile.
+            if (args.size() < 3) {
+                fail(command, "usage: scrollhold <dx> <dy> <ms>");
+            }
+            gAutomation.scrolling = true;
+            gAutomation.scrollDx = atoi(args[0].c_str());
+            gAutomation.scrollDy = atoi(args[1].c_str());
+            gAutomation.scrollUntil = now + static_cast<unsigned int>(atoi(args[2].c_str()));
+            return true;
+        }
+
+        if (name == "frames") {
+            // `frames <name> <count> [<x> <y> <w> <h> [<every>]]`: the next
+            // <count> presented frames (every <every>th; a crop in output
+            // pixels, default all) to
+            // <name>_NN.png, with the view and player per frame in
+            // <name>.json; later commands run meanwhile.
+            if (args.size() < 2) {
+                fail(command, "usage: frames <name> <count> [<x> <y> <w> <h>]");
+            }
+            AutomationState::FrameCapture capture;
+            capture.name = args[0];
+            capture.count = std::max(atoi(args[1].c_str()), 1);
+            capture.width = screenGetFramebufferWidth();
+            capture.height = screenGetFramebufferHeight();
+            if (args.size() >= 6) {
+                capture.left = atoi(args[2].c_str());
+                capture.top = atoi(args[3].c_str());
+                capture.width = atoi(args[4].c_str());
+                capture.height = atoi(args[5].c_str());
+            }
+            if (args.size() >= 7) {
+                capture.every = std::max(atoi(args[6].c_str()), 1);
+            }
+            capture.started = now;
+            gAutomation.frameCaptures.push_back(std::move(capture));
+            return true;
+        }
+
+        if (name == "framesdone") {
+            // Waits until every `frames` capture has been written.
+            return gAutomation.frameCaptures.empty();
+        }
+
+        if (name == "zoom") {
+            // `zoom <level> [now]` (map view, [graphics] zoom=1) or
+            // `zoom in|out|reset` as the keys do.
+            if (args.empty()) {
+                fail(command, "usage: zoom <level> [now] | in | out | reset");
+            }
+            if (args[0] == "in") {
+                mapViewZoomStep(1);
+            } else if (args[0] == "out") {
+                mapViewZoomStep(-1);
+            } else if (args[0] == "reset") {
+                mapViewZoomReset();
+            } else {
+                mapViewSetZoom(static_cast<float>(atof(args[0].c_str())), !(args.size() > 1 && args[1] == "now"));
+            }
+            return true;
+        }
+
+        if (name == "viewsettle") {
+            // Waits until the map view stops moving (pan and zoom), at most
+            // 5 s.
+            if (!gAutomation.waiting) {
+                gAutomation.waiting = true;
+                gAutomation.untilDeadline = now + 5000;
+            }
+            if (mapViewIsMoving()) {
+                if (now >= gAutomation.untilDeadline) {
+                    std::string view = describeView();
+                    fail(command, ("the map view keeps moving: " + view).c_str());
+                }
+                return false;
+            }
+            gAutomation.waiting = false;
+            return true;
+        }
+
+        if (name == "viewdump") {
+            if (args.empty()) {
+                fail(command, "missing name");
+            }
+            std::ofstream out(outputPath(args[0], ".json"));
+            out << describeView() << "\n";
+            return true;
+        }
+
+        if (name == "mousetoparty") {
+            // `mousetoparty <n>`: the cursor to the middle of party member
+            // n's sprite as shown (through pan and zoom).
+            std::vector<Object*> party = get_all_party_members_objects(false);
+            int index = args.empty() ? 1 : atoi(args[0].c_str());
+            float x;
+            float y;
+            if (index < 0 || index >= static_cast<int>(party.size()) || !objectScreenCentre(party[index], &x, &y)) {
+                fail(command, "no such party member on the map");
+            }
+            // The opaque sprite pixel nearest the middle of the sprite (the
+            // middle itself can be between the legs).
+            Rect rect;
+            objectGetRect(party[index], &rect);
+            int middleX = (rect.left + rect.right) / 2;
+            int middleY = (rect.top + rect.bottom) / 2;
+            bool found = false;
+            for (int radius = 0; radius < 24 && !found; radius++) {
+                for (int dy = -radius; dy <= radius && !found; dy++) {
+                    for (int dx = -radius; dx <= radius && !found; dx++) {
+                        if (std::max(std::abs(dx), std::abs(dy)) == radius
+                            && _obj_intersects_with(party[index], middleX + dx, middleY + dy) != 0) {
+                            // The middle of that surface pixel, as shown.
+                            x = middleX + dx + 0.5f;
+                            y = middleY + dy + 0.5f;
+                            mapViewSurfaceToScreen(&x, &y);
+                            found = true;
+                        }
+                    }
+                }
+            }
+            gAutomation.mouseX = static_cast<int>(x);
+            gAutomation.mouseY = static_cast<int>(y);
+            return true;
+        }
+
+        if (name == "mousetotile") {
+            // `mousetotile <tile|dude>`: the cursor to the centre of a hex as
+            // shown (through pan and zoom).
+            if (args.empty() || gDude == nullptr) {
+                fail(command, "usage: mousetotile <tile|dude>");
+            }
+            int tile = args[0] == "dude" ? gDude->tile : atoi(args[0].c_str());
+            int hexX;
+            int hexY;
+            if (tileToScreenXY(tile, &hexX, &hexY) != 0) {
+                fail(command, "invalid tile");
+            }
+            float x = hexX + 16.0f;
+            float y = hexY + 8.0f;
+            mapViewSurfaceToScreen(&x, &y);
+            gAutomation.mouseX = static_cast<int>(x);
+            gAutomation.mouseY = static_cast<int>(y);
+            return true;
+        }
+
+        if (name == "pick") {
+            // `pick <name>`: what the game finds under the cursor (the
+            // object the player would click, the hex under the cursor) to
+            // <name>.json.
+            if (args.empty() || strcmp(devAutomationGetState(), "game") != 0) {
+                fail(command, "usage: pick <name> (in a game)");
+            }
+            int x;
+            int y;
+            mouseGetPosition(&x, &y);
+            int mapX = x;
+            int mapY = y;
+            mapViewScreenToSurface(&mapX, &mapY);
+            Object* object = gameMouseGetObjectUnderCursor(OBJ_TYPE_INVALID, true, gElevation);
+            Object* critter = gameMouseGetObjectUnderCursor(OBJ_TYPE_CRITTER, true, gElevation);
+            std::ofstream out(outputPath(args[0], ".json"));
+            out << "{\"mouse\": [" << x << ", " << y << "], \"map\": [" << mapX << ", " << mapY << "], \"tile\": "
+                << tileFromScreenXY(mapX, mapY) << ", \"hex_cursor_tile\": "
+                << (gGameMouseHexCursor != nullptr ? gGameMouseHexCursor->tile : -1) << ", \"object\": ";
+            if (object != nullptr) {
+                out << "{\"pid\": " << object->pid << ", \"tile\": " << object->tile << ", \"type\": " << FrmId(object).objectType() << "}";
+            } else {
+                out << "null";
+            }
+            out << ", \"critter\": ";
+            if (critter != nullptr) {
+                out << "{\"pid\": " << critter->pid << ", \"tile\": " << critter->tile << "}";
+            } else {
+                out << "null";
+            }
+            out << "}\n";
+            return true;
+        }
+
         if (name == "refresh") {
             // Redraws the whole map window (timed by `perf`).
             if (strcmp(devAutomationGetState(), "game") == 0) {
@@ -775,7 +1115,7 @@ namespace {
                 << ", \"cut_out_draws\": " << cutOuts << "}\n";
             if (ok) {
                 static const unsigned char kColors[7][3] = { { 0, 0, 0 }, { 128, 128, 128 }, { 0, 0, 255 }, { 255, 0, 0 }, { 255, 255, 0 }, { 0, 255, 255 }, { 0, 200, 0 } };
-                int width = windowGetWidth(gIsoWindow);
+                int width = mapViewIsActive() ? mapViewSurfaceWidth() : windowGetWidth(gIsoWindow);
                 int height = static_cast<int>(check.mask.size()) / std::max(width, 1);
                 std::vector<unsigned char> rgb(check.mask.size() * 3);
                 for (size_t i = 0; i < check.mask.size(); i++) {
@@ -861,8 +1201,16 @@ namespace {
                     static_cast<unsigned long long>(stats.uploadedPixels), stats.lightMs, static_cast<unsigned long long>(stats.lightUpdates),
                     lights.updateMs, lights.updateMaxMs, lights.rebuilds, lights.rebuildMs);
                 fclose(stream);
+                MapViewStats view;
+                mapViewGetStats(&view);
+                std::ofstream viewOut(outputPath(args[0] + "_view", ".json"));
+                viewOut << "{\"presents\": " << view.presents << ", \"present_total_ms\": " << view.presentMs
+                        << ", \"present_max_ms\": " << view.presentMaxMs << ", \"resample_total_ms\": " << view.resampleMs << ", \"composes\": " << view.composes
+                        << ", \"compose_total_ms\": " << view.composeMs << ", \"scrolls\": " << view.scrolls
+                        << ", \"scroll_total_ms\": " << view.scrollMs << "}\n";
                 debugPrint("AUTOMATION: wrote %s\n", path.c_str());
             }
+            mapViewResetStats();
             presenterResetStats();
             tileResetRenderStats();
             hdLightsMapResetStats();
@@ -960,6 +1308,14 @@ void devAutomationTick()
         return;
     }
 
+    if (gAutomation.scrolling) {
+        if (getTicks() >= gAutomation.scrollUntil || strcmp(devAutomationGetState(), "game") != 0) {
+            gAutomation.scrolling = false;
+        } else {
+            mapScroll(gAutomation.scrollDx, gAutomation.scrollDy);
+        }
+    }
+
     // Run every command that completes immediately, stop at the first one that waits.
     gAutomation.inputSent = false;
     while (gAutomation.next < gAutomation.commands.size()) {
@@ -991,6 +1347,13 @@ void devAutomationOnFadeStep(int step, int steps, bool toBlack)
         } else {
             ++it;
         }
+    }
+}
+
+void devAutomationOnPresent()
+{
+    if (gAutomation.active && !gAutomation.frameCaptures.empty()) {
+        captureFrames();
     }
 }
 

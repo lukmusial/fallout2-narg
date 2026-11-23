@@ -23,6 +23,7 @@
 #include "item.h"
 #include "kb.h"
 #include "map.h"
+#include "map_view.h"
 #include "mouse.h"
 #include "obj_types.h"
 #include "object.h"
@@ -3175,6 +3176,7 @@ int _check_move(int* actionPointsPtr)
     int x;
     int y;
     mouseGetPosition(&x, &y);
+    mapViewScreenToSurface(&x, &y);
 
     int tile = tileFromScreenXY(x, y);
     if (tile == -1) {

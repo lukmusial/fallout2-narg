@@ -62,6 +62,11 @@ enum WindowFlags : unsigned int {
     // Specifies that the window is draggable by clicking and moving anywhere in its background.
     WINDOW_DRAGGABLE_BY_BACKGROUND = 0x80,
     WINDOW_MANAGED = 0x100,
+
+    // CE (Phase 2.13): an off-screen drawing surface (the map view's): may be
+    // larger than the screen, is never shown and lies outside the screen, so
+    // hit-tests and refreshes never reach it.
+    WINDOW_OFFSCREEN = 0x200,
 };
 
 constexpr inline WindowFlags operator&(WindowFlags lhs, WindowFlags rhs)

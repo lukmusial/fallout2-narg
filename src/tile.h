@@ -18,6 +18,8 @@ struct HdLayer;
 #define TILE_MAX_DISTANCE 9999
 
 typedef void(TileWindowRefreshProc)(Rect* rect);
+// CE: the map content moved by (dx, dy) window pixels (the centre changed).
+typedef void(TileCenterMovedProc)(int dx, int dy);
 typedef void(TileWindowRefreshElevationProc)(Rect* rect, MapElevation elevation);
 
 // Optional overlay drawn over the mapper iso view each refresh (e.g. the edge editor).
@@ -91,6 +93,14 @@ void tileHdInvalidateMasked(const unsigned char* src, int srcPitch, int x, int y
 HdLayer* tileHdCurrentLayer(const unsigned char** basePalette8);
 // The iso window buffer was scrolled: pixel (x, y) now holds (x + dx, y + dy).
 void tileHdScroll(int dx, int dy);
+// The same within `rect` only (map view, Phase 2.13).
+void tileHdScrollRect(const Rect* rect, int dx, int dy);
+
+// CE (Phase 2.13, map view): the part of the map buffer that is drawn
+// (tileWindowRefresh, refresh clipping); the whole buffer by default.
+void tileSetWindowRegion(const Rect* rect);
+// Called by tileSetCenter with the content shift whenever the centre moves.
+void tileSetCenterMovedProc(TileCenterMovedProc* proc);
 
 // Self-check for tests (dev automation `hdcheck`), all in one tick so nothing
 // animates in between: the current iso window is compared with a fresh full

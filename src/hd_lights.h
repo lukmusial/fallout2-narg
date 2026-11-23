@@ -41,7 +41,10 @@ enum : unsigned {
     kHdLightColour = 1,
     kHdLightGlow = 2,
     kHdLightShadows = 4,
-    kHdLightAll = 7,
+    // Phase 2.13: lights carried by walking critters follow the drawn sprite
+    // (see hdLightFieldAddMovedLight).
+    kHdLightFollow = 8,
+    kHdLightAll = 15,
 };
 
 // A rectangle of cells, right and bottom exclusive (empty when x0 >= x1).
@@ -158,6 +161,35 @@ void hdLightFieldAddFootprint(HdLightField* field, const HdLightFootprint& footp
 // darkness at the centre `darkness`, smooth to 0 at the edge. Shadows
 // combine as 1 - (1 - a)(1 - b).
 void hdLightFieldAddShadow(HdLightField* field, float cx, float cy, float axisX, float axisY, float minor, float darkness);
+
+// A light carried by a walking critter (Phase 2.13). The engine lights hexes:
+// its light sits on the critter's hex while the sprite is drawn up to a hex
+// away from it during walk frames, so the lit circle would jump hex by hex.
+// Per hex (logical position of its centre) `total` is the engine's summed
+// light (lightGetTrueTileIntensity, before clamping) and `own` this light's
+// part of it; include the ring of unlit hexes around the light (own 0).
+// The field gets the factor that turns the light the floors were drawn with,
+//   clamp(total, ambient, maximum),
+// into the light with this light moved by (dx, dy) to the drawn sprite,
+//   clamp(total - own + own(p - (dx, dy)), ambient, maximum),
+// as extra light (mul, negative where it darkens); values are interpolated
+// between hex centres with a tent kernel of half-size kernelX x kernelY.
+// Nothing is added when (dx, dy) is (0, 0).
+struct HdMovedLightHex {
+    float x;
+    float y;
+    float total;
+    float own;
+};
+
+void hdLightFieldAddMovedLight(HdLightField* field, const std::vector<HdMovedLightHex>& hexes, float dx, float dy,
+    float ambient, float maximum, float kernelX, float kernelY);
+
+// The light (engine scale) at logical point (x, y) interpolated from `hexes`
+// as hdLightFieldAddMovedLight does, with the own part moved by (dx, dy):
+// clamp(total - own + own(p - d), ambient, maximum); 0 where no hex is near.
+float hdMovedLightAt(const std::vector<HdMovedLightHex>& hexes, float x, float y, float dx, float dy,
+    float ambient, float maximum, float kernelX, float kernelY);
 
 } // namespace fallout
 

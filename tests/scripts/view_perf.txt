@@ -1,0 +1,43 @@
+# Phase 2.13 timings (run with --dev-load-game=8 at 3440x1440, hd=1, an
+# hd_pack, hd_lights=1, smooth_scroll=1, zoom=1; a Release build): presenter,
+# map view and light counters (`perf`) while idle, scrolling at zoom 1, 0.5
+# and 2, zooming, and walking at night.
+until game 30000
+wait 1500
+perf reset
+wait 1000
+perf idle1
+perf reset
+scrollhold 1 0 1500
+wait 1500
+perf scroll1
+wait 300
+zoom 0.5
+viewsettle
+wait 300
+perf reset
+scrollhold 0 1 1500
+wait 1500
+perf scroll05
+wait 300
+zoom 2
+viewsettle
+wait 300
+perf reset
+scrollhold -1 0 1500
+wait 1500
+perf scroll2
+wait 300
+perf reset
+zoom 0.5
+wait 400
+zoom 2
+wait 400
+perf zoomanim
+zoom 1 now
+wait 500
+perf reset
+walk 2 6
+wait 1500
+perf walk
+quit 0

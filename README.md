@@ -32,6 +32,8 @@ A **STIMPACK** button on the main menu (hotkey **S**, above EXIT) opens a save w
 
 With `[graphics] hd=1` (and `[screen] scale=2`) the game renders in true colour at twice its logical resolution. HD art comes from packs under `data/hd/<pack>/` made by `tools/hd` (scripted or local-AI enhancement of the original art; they are derived from the game's art and stay local). `hd_pack=mixed` (the default in `files/fallout2.cfg`) takes the AI pack except where the AI does poorly (`ce.dat` `hd/mixed/manifest.txt`). In HD so far: main menu, load/save, character editor, Stimpack screens, and floors and roofs of Arroyo, Klamath and the Den with smooth RGB lighting. Objects, critters and text are still the original art (work in progress). `hd=0` gives the original 256-colour look.
 
+Map motion (Phase 2.13, `[graphics]` in `fallout2.cfg`): `hd_lights_follow=1` makes the light a walking critter carries (the player's light circle at night) follow the drawn sprite instead of jumping hex by hex (HD lights only); `smooth_scroll=1` pans the map smoothly every frame (arrow keys, mouse at the screen edge, Home; `scroll_speed` in % of the original); `zoom=1` zooms the map view 0.5x–2x with the mouse wheel over the map or Ctrl+= / Ctrl+- (Ctrl+0 resets). The interface bar keeps its size, the zoom lasts for the session and is not saved, dialogue pictures of the map are taken at 1x. The map is then drawn into a larger off-screen surface that the map window shows through a pan/zoom transform (`src/map_view.h`); game logic, saves and scroll limits are unchanged.
+
 The bundled `f2_res.dat` has a Russian 800-pixel interface bar; `ce.dat` overrides it with an English one built from the original art (`tools/dev/iface_bar_art.py`).
 
 ### Playing and testing

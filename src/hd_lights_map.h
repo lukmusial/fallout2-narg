@@ -52,6 +52,10 @@ unsigned hdLightsMapGetEffects();
 
 // JSON with the current emitters, ambient and timing (harness `hdlights dump`).
 std::string hdLightsMapDescribe();
+// JSON array: the lights of walking critters last placed at the sprite
+// (Phase 2.13): hex centre, sprite offset, and the centroid of the light
+// above ambient at the hex ("centre") and as drawn ("moved").
+std::string hdLightsMapDescribeMoving();
 
 // Timing counters (ms), reset by hdLightsMapResetStats.
 struct HdLightsStats {

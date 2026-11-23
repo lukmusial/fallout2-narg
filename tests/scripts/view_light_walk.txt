@@ -1,0 +1,12 @@
+# Phase 2.13 light follow (run with --dev-load-game=8, the Den at night,
+# [graphics]hd=1, an hd_pack, [graphics]hd_lights=1): the player walks four
+# hexes east; every second presented frame around him (output pixels, 70
+# frames) with the view, his sprite offset and the moving light per frame.
+until game 30000
+wait 1500
+frames walk 70 1460 360 1060 600 2
+walk 1 4
+wait 3000
+framesdone
+dump state
+quit 0

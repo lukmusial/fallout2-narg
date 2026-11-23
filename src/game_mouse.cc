@@ -27,6 +27,7 @@
 #include "item.h"
 #include "kb.h"
 #include "map_edge.h"
+#include "map_view.h"
 #include "mouse.h"
 #include "object.h"
 #include "party_member.h"
@@ -710,8 +711,14 @@ void gameMouseRefresh()
         break;
     }
 
+    // CE: the hex cursor goes where the map shows under the mouse (the map
+    // view may pan or zoom, see map_view.h).
+    int mapX = mouseX;
+    int mapY = mouseY;
+    mapViewScreenToSurface(&mapX, &mapY);
+
     Rect r1;
-    if (_gmouse_3d_move_to(mouseX, mouseY, gElevation, &r1) == 0) {
+    if (_gmouse_3d_move_to(mapX, mapY, gElevation, &r1) == 0) {
         tileWindowRefreshRect(&r1, gElevation);
     }
 
@@ -1273,7 +1280,10 @@ void _gmouse_handle_event(int mouseX, int mouseY, MouseButtonEvent mouseEvent)
             if (gameMouseRenderActionMenuItems(mouseX, mouseY, actionMenuItems, actionMenuItemsCount, _scr_size.right - _scr_size.left + 1, _scr_size.bottom - _scr_size.top - 99) == 0) {
                 Rect cursorRect;
                 // NOTE: Uninline.
-                if (gameMouse3dSetFlatFrmId(InterfaceFrameId::ActionMenu, &cursorRect) == 0 && _gmouse_3d_move_to(mouseX, mouseY, gElevation, &cursorRect) == 0) {
+                int menuMapX = mouseX;
+                int menuMapY = mouseY;
+                mapViewScreenToSurface(&menuMapX, &menuMapY);
+                if (gameMouse3dSetFlatFrmId(InterfaceFrameId::ActionMenu, &cursorRect) == 0 && _gmouse_3d_move_to(menuMapX, menuMapY, gElevation, &cursorRect) == 0) {
                     tileWindowRefreshRect(&cursorRect, gElevation);
                     isoDisable();
 
@@ -1529,6 +1539,7 @@ void gameMouseSetMode(GameMouseMode mode)
     int mouseX;
     int mouseY;
     mouseGetPosition(&mouseX, &mouseY);
+    mapViewScreenToSurface(&mouseX, &mouseY);
 
     Rect cursorRect;
     if (_gmouse_3d_move_to(mouseX, mouseY, gElevation, &cursorRect) == 0) {
@@ -1780,6 +1791,7 @@ Object* gameMouseGetObjectUnderCursor(ObjectType objectType, bool includeDude, M
     int mouseX;
     int mouseY;
     mouseGetPosition(&mouseX, &mouseY);
+    mapViewScreenToSurface(&mouseX, &mouseY);
 
     bool intersectsRoof = false;
     if (objectType == -1) {
@@ -2306,6 +2318,7 @@ int gameMouseObjectsInit()
     int x;
     int y;
     mouseGetPosition(&x, &y);
+    mapViewScreenToSurface(&x, &y);
 
     Rect v9;
     _gmouse_3d_move_to(x, y, gElevation, &v9);

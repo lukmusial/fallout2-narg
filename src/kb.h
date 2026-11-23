@@ -326,6 +326,11 @@ typedef enum Key {
     KEY_CTRL_NUMBERPAD_5 = 399,
     KEY_ALT_NUMBERPAD_5 = 9999,
 
+    // CE (Phase 2.13): map zoom keys.
+    KEY_CTRL_MINUS = 430,
+    KEY_CTRL_EQUAL = 431,
+    KEY_CTRL_0 = 432,
+
     KEY_FIRST_INPUT_CHARACTER = KEY_SPACE,
     KEY_LAST_INPUT_CHARACTER = KEY_LOWERCASE_Z,
 } Key;

@@ -642,7 +642,7 @@ static void keyboardBuildQwertyConfiguration()
     gLogicalKeyEntries[SDL_SCANCODE_0].shift = KEY_PAREN_RIGHT;
     gLogicalKeyEntries[SDL_SCANCODE_0].lmenu = -1;
     gLogicalKeyEntries[SDL_SCANCODE_0].rmenu = -1;
-    gLogicalKeyEntries[SDL_SCANCODE_0].ctrl = -1;
+    gLogicalKeyEntries[SDL_SCANCODE_0].ctrl = KEY_CTRL_0;
 
     switch (gKeyboardLayout) {
     case KEYBOARD_LAYOUT_QWERTY:
@@ -660,7 +660,7 @@ static void keyboardBuildQwertyConfiguration()
     gLogicalKeyEntries[k].shift = KEY_UNDERSCORE;
     gLogicalKeyEntries[k].lmenu = -1;
     gLogicalKeyEntries[k].rmenu = -1;
-    gLogicalKeyEntries[k].ctrl = -1;
+    gLogicalKeyEntries[k].ctrl = KEY_CTRL_MINUS;
 
     switch (gKeyboardLayout) {
     case KEYBOARD_LAYOUT_QWERTY:
@@ -676,7 +676,7 @@ static void keyboardBuildQwertyConfiguration()
     gLogicalKeyEntries[k].shift = KEY_PLUS;
     gLogicalKeyEntries[k].lmenu = -1;
     gLogicalKeyEntries[k].rmenu = -1;
-    gLogicalKeyEntries[k].ctrl = -1;
+    gLogicalKeyEntries[k].ctrl = KEY_CTRL_EQUAL;
 
     gLogicalKeyEntries[SDL_SCANCODE_BACKSPACE].unmodified = KEY_BACKSPACE;
     gLogicalKeyEntries[SDL_SCANCODE_BACKSPACE].shift = KEY_BACKSPACE;

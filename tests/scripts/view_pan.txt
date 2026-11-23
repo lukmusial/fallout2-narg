@@ -1,0 +1,15 @@
+# Phase 2.13 smooth panning (run with --dev-load-game=N, [graphics]hd=1, an
+# hd_pack; [graphics]smooth_scroll=0 or 1): the map scrolls left as a held
+# arrow key would for 0.8 s; 45 consecutive presented frames (a crop in
+# output pixels) with the view per frame, then the view at rest.
+until game 30000
+wait 1500
+viewdump before
+frames pan 45 920 320 1600 800
+scrollhold -1 0 800
+wait 1200
+framesdone
+viewsettle
+viewdump after
+dump state
+quit 0

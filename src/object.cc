@@ -3392,7 +3392,10 @@ static int _obj_offset_table_init()
             int tileX = originTileX;
             for (int y = 0; y < gObjectsUpdateAreaHexHeight; y++) {
                 for (int x = 0; x < gObjectsUpdateAreaHexWidth; x++) {
-                    int tile = tileFromScreenXY(tileX, originTileY);
+                    // CE: the map view's larger surface (Phase 2.13) reaches
+                    // past the hex grid's corners; offsets are linear in the
+                    // hex coordinates, as for rendering (ignoreBounds).
+                    int tile = tileFromScreenXY(tileX, originTileY, true);
                     if (tile == -1) {
                         goto err;
                     }

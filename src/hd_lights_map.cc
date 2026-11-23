@@ -16,6 +16,7 @@
 #include "input.h"
 #include "light.h"
 #include "map.h"
+#include "map_view.h"
 #include "object.h"
 #include "settings.h"
 #include "tile.h"
@@ -201,8 +202,8 @@ namespace {
         // What the lights were built for.
         bool built = false;
         int elevation = -1;
-        int originX = 0;
-        int originY = 0;
+        float originX = 0.0f;
+        float originY = 0.0f;
         unsigned int lightGeneration = 0;
         int screenWidth = 0;
         int screenHeight = 0;
@@ -216,6 +217,7 @@ namespace {
         // update).
         unsigned char palette[(248 - 229) * 3] = {};
         uint64_t critterKey = 0;
+        uint64_t movingKey = 0;
         unsigned int assembledAt = 0;
         int ambient = -1;
 
@@ -231,7 +233,8 @@ namespace {
 
     State gState;
 
-    // Ground point (hex centre) of a tile in iso window coordinates.
+    // Ground point (hex centre) of a tile in map window coordinates (through
+    // the map view's pan and zoom, see map_view.h).
     bool tileCentre(int tile, float* x, float* y)
     {
         int sx;
@@ -241,7 +244,14 @@ namespace {
         }
         *x = static_cast<float>(sx + 16);
         *y = static_cast<float>(sy + 8);
+        mapViewSurfaceToScreen(x, y);
         return true;
+    }
+
+    // Map window pixels per map pixel.
+    float viewZoom()
+    {
+        return mapViewGetZoom();
     }
 
     const ArtClass& classifyArt(Object* object)
@@ -395,7 +405,7 @@ namespace {
             }
 
             // Off-screen lights cannot reach the screen.
-            float reach = (light.radius + 2) * 32.0f;
+            float reach = (light.radius + 2) * 32.0f * viewZoom();
             if (light.x < -reach || light.y < -reach || light.x > screenWidth + reach || light.y > screenHeight + reach) {
                 continue;
             }
@@ -469,7 +479,7 @@ namespace {
                 }
             }
 
-            hdLightFootprintBuild(samples, 26.0f, 16.0f, 1.3f, &light.footprint);
+            hdLightFootprintBuild(samples, 26.0f * viewZoom(), 16.0f * viewZoom(), 1.3f, &light.footprint);
             gState.lights.push_back(std::move(light));
         }
 
@@ -557,8 +567,8 @@ namespace {
         if (!tileCentre(object->tile, &x, &y)) {
             return;
         }
-        x += object->x;
-        y += object->y;
+        x += object->x * viewZoom();
+        y += object->y * viewZoom();
         if (x < -64 || y < -64 || x > critters->width + 64 || y > critters->height + 64) {
             return;
         }
@@ -573,13 +583,14 @@ namespace {
 
     void addShadows(HdLightField* field, const CritterContext& critters, const unsigned char* palette8, float night)
     {
+        const float zoom = viewZoom();
         for (const Feet& feet : critters.feet) {
             if (feet.dead) {
                 continue;
             }
 
             // Contact shadow (ambient occlusion under the feet).
-            hdLightFieldAddShadow(field, feet.x, feet.y + 1.0f, 13.0f, 0.0f, 5.0f, 0.30f + 0.10f * night);
+            hdLightFieldAddShadow(field, feet.x, feet.y + 1.0f * zoom, 13.0f * zoom, 0.0f, 5.0f * zoom, 0.30f + 0.10f * night);
 
             if (night <= 0.0f) {
                 continue;
@@ -606,15 +617,15 @@ namespace {
             float dx = feet.x - strongest->x;
             float dy = (feet.y - strongest->y) * 2.0f;
             float distance = sqrtf(dx * dx + dy * dy);
-            if (distance < 8.0f) {
+            if (distance < 8.0f * zoom) {
                 continue;
             }
             float ux = dx / distance;
             float uy = dy / distance;
-            float length = std::clamp(distance * 0.35f, 12.0f, 24.0f);
+            float length = std::clamp(distance * 0.35f, 12.0f * zoom, 24.0f * zoom);
             float axisX = ux * length;
             float axisY = uy * length * 0.5f;
-            hdLightFieldAddShadow(field, feet.x + axisX * 0.8f, feet.y + axisY * 0.8f, axisX, axisY, 5.5f,
+            hdLightFieldAddShadow(field, feet.x + axisX * 0.8f, feet.y + axisY * 0.8f, axisX, axisY, 5.5f * zoom,
                 std::min(0.5f, strongestWeight * 0.5f) * night);
         }
     }
@@ -629,15 +640,174 @@ namespace {
         }
         Rect rect;
         objectGetRect(gGameMouseHexCursor, &rect);
-        int x0 = std::max(rect.left / kHdLightCell, 0);
-        int y0 = std::max(rect.top / kHdLightCell, 0);
-        int x1 = std::min(rect.right / kHdLightCell, cellsX - 1);
-        int y1 = std::min(rect.bottom / kHdLightCell, cellsY - 1);
+        float left = static_cast<float>(rect.left);
+        float top = static_cast<float>(rect.top);
+        float right = static_cast<float>(rect.right + 1);
+        float bottom = static_cast<float>(rect.bottom + 1);
+        mapViewSurfaceToScreen(&left, &top);
+        mapViewSurfaceToScreen(&right, &bottom);
+        int x0 = std::max(static_cast<int>(floorf(left)) / kHdLightCell, 0);
+        int y0 = std::max(static_cast<int>(floorf(top)) / kHdLightCell, 0);
+        int x1 = std::min(static_cast<int>(ceilf(right)) / kHdLightCell, cellsX - 1);
+        int y1 = std::min(static_cast<int>(ceilf(bottom)) / kHdLightCell, cellsY - 1);
         for (int y = y0; y <= y1; y++) {
             for (int x = x0; x <= x1; x++) {
                 float* cell = &(*grid)[(static_cast<size_t>(y) * cellsX + x) * 3];
                 cell[0] = cell[1] = cell[2] = 0.0f;
             }
+        }
+    }
+
+    // Lights carried by walking critters (Phase 2.13): the engine lights the
+    // hexes around the critter's hex, the sprite is drawn up to a hex away.
+    struct MovingLight {
+        Object* object;
+        float dx;
+        float dy;
+    };
+
+    struct MovingContext {
+        std::vector<MovingLight> lights;
+        uint64_t key = 1469598103934665603ull;
+        int width;
+        int height;
+    };
+
+    void collectMovingLight(Object* object, void* context)
+    {
+        MovingContext* moving = static_cast<MovingContext*>(context);
+        if ((object->flags & OBJECT_HIDDEN) != 0 || (object->flags & OBJECT_LIGHTING) == 0 || object->lightIntensity <= 0
+            || object->tile == -1 || (object->x == 0 && object->y == 0) || FrmId(object).objectType() != OBJ_TYPE_CRITTER) {
+            return;
+        }
+
+        float x;
+        float y;
+        if (!tileCentre(object->tile, &x, &y)) {
+            return;
+        }
+        float reach = (object->lightDistance + 2) * 32.0f * viewZoom();
+        if (x < -reach || y < -reach || x > moving->width + reach || y > moving->height + reach) {
+            return;
+        }
+
+        moving->lights.push_back({ object, object->x * viewZoom(), object->y * viewZoom() });
+        uint64_t values[4] = { static_cast<uint64_t>(reinterpret_cast<uintptr_t>(object)), static_cast<uint64_t>(object->tile),
+            static_cast<uint64_t>(static_cast<int64_t>(object->x)), static_cast<uint64_t>(static_cast<int64_t>(object->y)) };
+        for (uint64_t value : values) {
+            moving->key = (moving->key ^ value) * 1099511628211ull;
+        }
+    }
+
+    // Moved-light kernel: about linear between neighbouring hex centres, as
+    // the floors interpolate light between hex corners.
+    constexpr float kMovedKernelX = 32.0f;
+    constexpr float kMovedKernelY = 20.0f;
+
+    // The hexes a moving light reaches (and the ring around them) with the
+    // engine's light there; `centre` gets the moved light's centroid
+    // (harness dumps).
+    void movedLightHexes(Object* object, std::vector<HdMovedLightHex>* hexes)
+    {
+        hexes->clear();
+        std::vector<std::pair<int, int>> visited;
+        gVisitedTiles = &visited;
+        objectVisitLightTiles(object, visitTile);
+        gVisitedTiles = nullptr;
+
+        std::unordered_map<int, int> own;
+        for (const auto& entry : visited) {
+            int& value = own[entry.first];
+            value = std::max(value, entry.second);
+        }
+        std::unordered_set<int> ring;
+        for (const auto& entry : own) {
+            for (int rotation = 0; rotation < ROTATION_COUNT; rotation++) {
+                int neighbour = tileGetTileInDirection(entry.first, static_cast<Rotation>(rotation), 1);
+                if (own.find(neighbour) == own.end()) {
+                    ring.insert(neighbour);
+                }
+            }
+        }
+
+        auto add = [&](int tile, int value) {
+            float x;
+            float y;
+            if (tileCentre(tile, &x, &y)) {
+                hexes->push_back({ x, y, static_cast<float>(lightGetTrueTileIntensity(gElevation, tile)), static_cast<float>(value) });
+            }
+        };
+        for (const auto& entry : own) {
+            add(entry.first, entry.second);
+        }
+        for (int tile : ring) {
+            add(tile, 0);
+        }
+    }
+
+    // Last moved lights (harness dumps): sprite offset and the centroid of
+    // the light above ambient, at the hex and as drawn.
+    struct MovedLightInfo {
+        int tile;
+        float hexX;
+        float hexY;
+        float dx;
+        float dy;
+        float centreX;
+        float centreY;
+        float movedX;
+        float movedY;
+    };
+    std::vector<MovedLightInfo> gMovedLights;
+
+    void addMovedLights(HdLightField* field, const MovingContext& moving)
+    {
+        gMovedLights.clear();
+        float ambient = static_cast<float>(lightGetAmbientIntensity());
+        float maximum = static_cast<float>(LIGHT_INTENSITY_MAX);
+        if (ambient >= maximum) {
+            return;
+        }
+        std::vector<HdMovedLightHex> hexes;
+        for (const MovingLight& light : moving.lights) {
+            movedLightHexes(light.object, &hexes);
+            const float zoom = viewZoom();
+            const float kernelX = kMovedKernelX * zoom;
+            const float kernelY = kMovedKernelY * zoom;
+            hdLightFieldAddMovedLight(field, hexes, light.dx, light.dy, ambient, maximum, kernelX, kernelY);
+
+            MovedLightInfo info = {};
+            info.tile = light.object->tile;
+            tileCentre(info.tile, &info.hexX, &info.hexY);
+            info.dx = light.dx;
+            info.dy = light.dy;
+            for (int pass = 0; pass < 2; pass++) {
+                double sum = 0.0;
+                double sumX = 0.0;
+                double sumY = 0.0;
+                for (float y = info.hexY - 120.0f * zoom; y <= info.hexY + 120.0f * zoom; y += 2.0f * zoom) {
+                    for (float x = info.hexX - 200.0f * zoom; x <= info.hexX + 200.0f * zoom; x += 2.0f * zoom) {
+                        float value = hdMovedLightAt(hexes, x, y, pass == 0 ? 0.0f : light.dx, pass == 0 ? 0.0f : light.dy, ambient,
+                                          maximum, kernelX, kernelY)
+                            - ambient;
+                        if (value > 0.0f) {
+                            sum += value;
+                            sumX += value * x;
+                            sumY += value * y;
+                        }
+                    }
+                }
+                float cx = sum > 0.0 ? static_cast<float>(sumX / sum) : info.hexX;
+                float cy = sum > 0.0 ? static_cast<float>(sumY / sum) : info.hexY;
+                if (pass == 0) {
+                    info.centreX = cx;
+                    info.centreY = cy;
+                } else {
+                    info.movedX = cx;
+                    info.movedY = cy;
+                }
+            }
+            gMovedLights.push_back(info);
         }
     }
 
@@ -653,7 +823,9 @@ namespace {
             return;
         }
         gState.initialized = true;
-        gState.effects = settings.graphics.hd_lights ? (static_cast<unsigned>(settings.graphics.hd_lights_effects) & kHdLightAll) : 0;
+        gState.effects = settings.graphics.hd_lights
+            ? ((static_cast<unsigned>(settings.graphics.hd_lights_effects) & kHdLightAll) | (settings.graphics.hd_lights_follow ? kHdLightFollow : 0))
+            : 0;
     }
 
 } // namespace
@@ -713,9 +885,11 @@ bool hdLightsMapUpdate(const HdLightScreen& screen, HdLightField* field)
 
     auto start = std::chrono::steady_clock::now();
 
-    int originX;
-    int originY;
-    tileToScreenXY(0, &originX, &originY);
+    // Where the map is on screen (scrolling, the map view's pan and zoom).
+    float originX;
+    float originY;
+    tileCentre(0, &originX, &originY);
+    originX += viewZoom() * 4096.0f;
     unsigned int generation = lightGetGeneration();
     bool rebuild = !gState.built || gState.elevation != gElevation || gState.originX != originX || gState.originY != originY
         || gState.lightGeneration != generation || gState.screenWidth != screen.width || gState.screenHeight != screen.height;
@@ -737,6 +911,13 @@ bool hdLightsMapUpdate(const HdLightScreen& screen, HdLightField* field)
         objectVisitAtElevation(gElevation, collectCritter, &critters);
     }
 
+    MovingContext moving;
+    moving.width = screen.width;
+    moving.height = screen.height;
+    if ((gState.effects & kHdLightFollow) != 0) {
+        objectVisitAtElevation(gElevation, collectMovingLight, &moving);
+    }
+
     const unsigned char* cycling = screen.palette8 + 229 * 3;
     bool paletteChanged = memcmp(gState.palette, cycling, sizeof(gState.palette)) != 0;
     unsigned int now = getTicks();
@@ -744,13 +925,14 @@ bool hdLightsMapUpdate(const HdLightScreen& screen, HdLightField* field)
     // Animated art and critters walking in front of glowing pixels change
     // the emissive pixels without any of the above changing.
     bool stale = getTicksBetween(now, gState.assembledAt) >= 100;
-    if (!rebuild && !sizeChanged && !paletteChanged && critters.key == gState.critterKey && ambient == gState.ambient && !stale
-        && gState.hasContent) {
+    if (!rebuild && !sizeChanged && !paletteChanged && critters.key == gState.critterKey && moving.key == gState.movingKey
+        && ambient == gState.ambient && !stale && gState.hasContent) {
         return false;
     }
 
     memcpy(gState.palette, cycling, sizeof(gState.palette));
     gState.critterKey = critters.key;
+    gState.movingKey = moving.key;
     gState.assembledAt = now;
     gState.ambient = ambient;
 
@@ -817,6 +999,12 @@ bool hdLightsMapUpdate(const HdLightScreen& screen, HdLightField* field)
         addShadows(field, critters, screen.palette8, night);
     }
 
+    if ((effects & kHdLightFollow) != 0) {
+        addMovedLights(field, moving);
+    } else {
+        gMovedLights.clear();
+    }
+
     hdLightFieldFinish(field);
     gState.hasContent = true;
 
@@ -832,6 +1020,24 @@ static std::string jsonPath(const char* path)
     std::string result = path != nullptr ? path : "";
     std::replace(result.begin(), result.end(), '\\', '/');
     return result;
+}
+
+std::string hdLightsMapDescribeMoving()
+{
+    std::ostringstream out;
+    out << "[";
+    bool first = true;
+    for (const MovedLightInfo& info : gMovedLights) {
+        if (!first) {
+            out << ", ";
+        }
+        first = false;
+        out << "{\"tile\": " << info.tile << ", \"hex_x\": " << info.hexX << ", \"hex_y\": " << info.hexY
+            << ", \"dx\": " << info.dx << ", \"dy\": " << info.dy << ", \"centre_x\": " << info.centreX
+            << ", \"centre_y\": " << info.centreY << ", \"moved_x\": " << info.movedX << ", \"moved_y\": " << info.movedY << "}";
+    }
+    out << "]";
+    return out.str();
 }
 
 std::string hdLightsMapDescribe()
@@ -854,7 +1060,8 @@ std::string hdLightsMapDescribe()
             << ", \"from_neighbour\": " << (light.fromNeighbour ? "true" : "false")
             << ", \"sync_index\": " << light.syncIndex << ", \"footprint_cells\": " << light.footprint.weight.size() << "}";
     }
-    out << "], \"stats\": {\"updates\": " << gState.stats.updates << ", \"rebuilds\": " << gState.stats.rebuilds
+    out << "], \"moving\": " << hdLightsMapDescribeMoving();
+    out << ", \"stats\": {\"updates\": " << gState.stats.updates << ", \"rebuilds\": " << gState.stats.rebuilds
         << ", \"update_ms_avg\": " << (gState.stats.updates > 0 ? gState.stats.updateMs / gState.stats.updates : 0.0)
         << ", \"update_ms_max\": " << gState.stats.updateMaxMs
         << ", \"rebuild_ms_avg\": " << (gState.stats.rebuilds > 0 ? gState.stats.rebuildMs / gState.stats.rebuilds : 0.0) << "}}";

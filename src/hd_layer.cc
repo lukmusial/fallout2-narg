@@ -845,6 +845,94 @@ void hdLayerScroll(HdLayer* layer, int dx, int dy)
     layer->textBottom = newBottom;
 }
 
+void hdLayerScrollRect(HdLayer* layer, int left, int top, int width, int height, int dx, int dy)
+{
+    if (layer == nullptr || (dx == 0 && dy == 0)) {
+        return;
+    }
+
+    int right = std::min(left + width, layer->width);
+    int bottom = std::min(top + height, layer->height);
+    left = std::max(left, 0);
+    top = std::max(top, 0);
+    if (left >= right || top >= bottom) {
+        return;
+    }
+    width = right - left;
+    height = bottom - top;
+    if (dx <= -width || dx >= width || dy <= -height || dy >= height) {
+        hdLayerInvalidateRect(layer, left, top, width, height);
+        return;
+    }
+
+    const int layerWidth = layer->width;
+    const int pitch = layerWidth * kHdScale;
+    const int destLeft = left + std::max(-dx, 0);
+    const int count = width - std::abs(dx);
+    bool text = !layer->textGuard.empty() && layer->textTop < layer->textBottom;
+
+    auto moveRow = [&](int destY) {
+        int srcY = destY + dy;
+        unsigned char* valid = layer->valid.data() + static_cast<size_t>(destY) * layerWidth;
+        uint16_t* guard = text ? layer->textGuard.data() + static_cast<size_t>(destY) * layerWidth : nullptr;
+        if (srcY < top || srcY >= bottom) {
+            memset(valid + left, 0, width);
+            if (guard != nullptr) {
+                std::fill(guard + left, guard + right, 0);
+            }
+            return;
+        }
+
+        const size_t srcOffset = static_cast<size_t>(srcY) * layerWidth + destLeft + dx;
+        const size_t destOffset = static_cast<size_t>(destY) * layerWidth + destLeft;
+        memmove(layer->valid.data() + destOffset, layer->valid.data() + srcOffset, count);
+        memmove(layer->shadow.data() + destOffset, layer->shadow.data() + srcOffset, count);
+        for (int sy = 0; sy < kHdScale; sy++) {
+            uint32_t* destPixels = layer->pixels.data() + static_cast<size_t>(destY * kHdScale + sy) * pitch + destLeft * kHdScale;
+            const uint32_t* srcPixels = layer->pixels.data() + static_cast<size_t>(srcY * kHdScale + sy) * pitch + (destLeft + dx) * kHdScale;
+            memmove(destPixels, srcPixels, sizeof(uint32_t) * count * kHdScale);
+        }
+        if (dx > 0) {
+            memset(valid + right - dx, 0, dx);
+        } else if (dx < 0) {
+            memset(valid + left, 0, -dx);
+        }
+
+        if (guard != nullptr) {
+            memmove(layer->textGuard.data() + destOffset, layer->textGuard.data() + srcOffset, sizeof(uint16_t) * count);
+            memmove(layer->textShadow.data() + destOffset, layer->textShadow.data() + srcOffset, count);
+            memmove(layer->textUnder.data() + destOffset, layer->textUnder.data() + srcOffset, count);
+            for (int sy = 0; sy < kHdScale; sy++) {
+                uint32_t* destPixels = layer->textPixels.data() + static_cast<size_t>(destY * kHdScale + sy) * pitch + destLeft * kHdScale;
+                const uint32_t* srcPixels = layer->textPixels.data() + static_cast<size_t>(srcY * kHdScale + sy) * pitch + (destLeft + dx) * kHdScale;
+                memmove(destPixels, srcPixels, sizeof(uint32_t) * count * kHdScale);
+            }
+            if (dx > 0) {
+                std::fill(guard + right - dx, guard + right, 0);
+            } else if (dx < 0) {
+                std::fill(guard + left, guard + left - dx, 0);
+            }
+        }
+    };
+
+    if (dy > 0) {
+        for (int y = top; y < bottom; y++) {
+            moveRow(y);
+        }
+    } else {
+        for (int y = bottom - 1; y >= top; y--) {
+            moveRow(y);
+        }
+    }
+
+    if (text) {
+        // Text rows: the old range and where it moved (a superset is fine,
+        // rows without text have no guard bits).
+        layer->textTop = std::max(std::min(layer->textTop, layer->textTop - dy), 0);
+        layer->textBottom = std::min(std::max(layer->textBottom, layer->textBottom - dy), layer->height);
+    }
+}
+
 void hdComposeRect(const HdLayer* layer, const unsigned char* buffer, int bufferPitch,
     int srcX, int srcY, int width, int height,
     unsigned char* mask, int maskPitch, uint32_t* rgb, int rgbPitch, bool transparent,
