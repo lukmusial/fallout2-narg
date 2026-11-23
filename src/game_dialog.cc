@@ -24,6 +24,7 @@
 #include "game.h"
 #include "game_mouse.h"
 #include "game_sound.h"
+#include "hd_art.h"
 #include "input.h"
 #include "interface.h"
 #include "inventory.h"
@@ -3586,6 +3587,11 @@ int gameDialogCreateBarterWindow()
 
     _gdialog_scroll_subwin(win.get(), true, backgroundFrmImage.getData(), windowBuffer, nullptr, bgOverlapHeight);
 
+    // CE: HD (Phase 2.10): the barter/trade panel once it has slid in.
+    if (hdArtDrawImage(win.get(), backgroundFrmImage, 0, 0)) {
+        windowRefresh(win.get());
+    }
+
     // TRADE
     int tradeBtn = createDialogRedButton(win.get(), 40, 162, nullptr, KEY_LOWERCASE_M);
     if (tradeBtn == -1) return -1;
@@ -3642,6 +3648,7 @@ void gameDialogDestroyBarterWindow()
             + GAME_DIALOG_WINDOW_WIDTH * (GAME_DIALOG_WINDOW_HEIGHT - bgOverlapHeight);
 
         unsigned char* windowBuffer = windowGetBuffer(gameDialogWindow);
+        windowHdClear(gameDialogWindow);
         _gdialog_scroll_subwin(gameDialogWindow, false, _barterBackgroundFrmImage.getData(), windowBuffer, backgroundWindowBuffer, bgOverlapHeight);
 
         _barterBackgroundFrmImage.unlock();

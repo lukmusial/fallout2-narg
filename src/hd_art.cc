@@ -416,6 +416,45 @@ bool hdArtDrawRegion(int win, const HdImage& hd, const unsigned char* source, in
     return windowHdDrawImageEx(win, originX, originY, sourceWidth, sourceHeight, hd, options);
 }
 
+void hdArtRender(int win, const FrmId& frmId, int x, int y, int width, int height)
+{
+    unsigned char* buffer = windowGetBuffer(win);
+    int pitch = windowGetWidth(win);
+    if (buffer == nullptr) {
+        return;
+    }
+
+    std::shared_ptr<const HdImage> hd;
+    HdLayer* layer = nullptr;
+    int drawX = 0;
+    int drawY = 0;
+    int drawWidth = 0;
+    int drawHeight = 0;
+    if (windowHdIsActive() && frmId.valid()) {
+        FrmImage frmImage;
+        if (frmImage.lock(frmId)) {
+            hd = hdArtFindImage(frmImage);
+            if (hd != nullptr) {
+                artRenderGetRect(frmImage.getWidth(), frmImage.getHeight(), width, height, &drawX, &drawY, &drawWidth, &drawHeight);
+                layer = windowHdGetLayer(win);
+            }
+        }
+    }
+
+    if (layer == nullptr) {
+        artRender(frmId, buffer + pitch * y + x, width, height, pitch);
+        return;
+    }
+
+    unsigned char basePalette8[256 * 3];
+    windowHdGetBasePalette(basePalette8);
+
+    std::vector<uint32_t> under;
+    hdLayerCapture(layer, buffer, pitch, x + drawX, y + drawY, drawWidth, drawHeight, basePalette8, &under);
+    artRender(frmId, buffer + pitch * y + x, width, height, pitch);
+    hdLayerDrawOver(layer, buffer, pitch, x + drawX, y + drawY, drawWidth, drawHeight, *hd, under.data(), basePalette8);
+}
+
 int hdArtSetButtonArt(int btn, const FrmImage* normal, const FrmImage* pressed, const FrmImage* hover)
 {
     std::string paths[3];

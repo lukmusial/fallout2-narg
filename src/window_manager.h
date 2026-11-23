@@ -1,6 +1,7 @@
 #ifndef WINDOW_MANAGER_H
 #define WINDOW_MANAGER_H
 
+#include <memory>
 #include <stddef.h>
 #include <vector>
 
@@ -297,6 +298,12 @@ bool windowHdDrawImage(int win, int x, int y, int width, int height, const HdIma
 // Same with a clip rectangle and/or the legacy source art (see HdDrawOptions).
 bool windowHdDrawImageEx(int win, int x, int y, int width, int height, const HdImage& image, const HdDrawOptions& options);
 void windowHdClear(int win);
+// Marks a rectangle of the window's layer as having no HD pixels.
+void windowHdInvalidateRect(int win, int x, int y, int width, int height);
+// The HD side of copying a rectangle of one window's buffer into another's
+// (inventory panes cut from the barter window): the layer's pixels and
+// shadows are copied along, so they stay valid exactly where they were.
+void windowHdCopyRect(int srcWin, int srcX, int srcY, int width, int height, int destWin, int destX, int destY);
 // The window's HD layer (created on first use), or null when HD is off or the
 // window has no buffer. For drawing code that writes the layer directly
 // (floor and roof tiles).
@@ -343,6 +350,15 @@ int buttonSetDisabledFrm(int btn, const InterfaceFrmId& normalId, const Interfac
 int buttonSetHdArt(int btn, const char* normalPath, const unsigned char* normalSource,
     const char* pressedPath, const unsigned char* pressedSource,
     const char* hoverPath = nullptr, const unsigned char* hoverSource = nullptr);
+// Same for the disabled normal, pressed and hover images.
+int buttonSetHdDisabledArt(int btn, const char* normalPath, const unsigned char* normalSource,
+    const char* pressedPath, const unsigned char* pressedSource,
+    const char* hoverPath = nullptr, const unsigned char* hoverSource = nullptr);
+// HD images the caller composed itself for the normal and pressed images
+// (the interface bar's item button: button art plus the item). Replaces any
+// HD art of the button; both null removes it.
+int buttonSetHdImages(int btn, std::shared_ptr<const HdImage> normal, const unsigned char* normalSource,
+    std::shared_ptr<const HdImage> pressed, const unsigned char* pressedSource);
 int _win_register_text_button(int win, int x, int y, int mouseEnterEventCode, int mouseExitEventCode, int mouseDownEventCode, int mouseUpEventCode, const char* title, ButtonFlags flags);
 int _win_register_button_disable(int btn, unsigned char* normal, unsigned char* pressed, unsigned char* hover);
 int _win_register_button_image(int btn, unsigned char* normal, unsigned char* pressed, unsigned char* hover, bool draw);

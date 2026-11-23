@@ -18,6 +18,11 @@ Writes into the gitignored work dir (tools/hd/work by default):
   extract.py --areas --objects  # + the walls, scenery and items placed on
                                 #   those maps and in the reference saves
                                 #   (every frame and direction)
+  extract.py --areas --objects --inven
+                                # + every inventory item image (art/inven,
+                                #   366) and the inventory, loot, use-on,
+                                #   barter/trade and move-items windows,
+                                #   their buttons and the bar's item button
 """
 
 from __future__ import annotations
@@ -70,11 +75,37 @@ SCREENS = [
     "art/intrface/opbase.frm", "art/intrface/opbtnoff.frm", "art/intrface/opbtnon.frm",
 ]
 
-# Named indexed PNGs from this repo's ce.dat (Stimpack art), same palette indices.
+# Phase 2.10: the inventory, loot, use-item-on, barter/trade and move-items
+# windows, their buttons, and the interface bar's item button.
+INVENTORY_SCREENS = [
+    "art/intrface/invbox.frm", "art/intrface/loot.frm", "art/intrface/use.frm",
+    "art/intrface/barter.frm", "art/intrface/trade.frm",
+    "art/intrface/movemult.frm", "art/intrface/timer.frm",
+    "art/intrface/invupout.frm", "art/intrface/invupin.frm", "art/intrface/invupds.frm",
+    "art/intrface/invdnout.frm", "art/intrface/invdnin.frm", "art/intrface/invdnds.frm",
+    "art/intrface/invmaup.frm", "art/intrface/invmadn.frm",
+    "art/intrface/di_up1.frm", "art/intrface/di_up2.frm", "art/intrface/di_down1.frm", "art/intrface/di_down2.frm",
+    "art/intrface/sattkbup.frm", "art/intrface/sattkbdn.frm", "art/intrface/saturbup.frm",
+]
+
+# Named indexed PNGs from this repo's ce.dat (Stimpack art, expanded
+# inventory/loot/barter windows), same palette indices.
 CE_DAT_PNG = [
     "art/intrface/mainmenu_sp.png",
     "art/intrface/hr_menu_bg_sp.png",
     "art/intrface/opbase_sp.png",
+]
+CE_DAT_PNG_INVEN = [
+    "art/intrface/invbox2.png",
+    "art/intrface/loot2.png",
+    "art/intrface/partyslot.png",
+    "art/intrface/di_upds.png",
+    "art/intrface/di_dnds.png",
+]
+# FRMs in ce.dat (expanded barter/trade windows).
+CE_DAT_FRM_INVEN = [
+    "art/intrface/barter_e.frm",
+    "art/intrface/trade_e.frm",
 ]
 
 # Floor tiles seen in Arroyo / Klamath / Den maps (counted from the map grids)
@@ -320,6 +351,8 @@ def main() -> None:
                     help="add every floor and roof tile of the Arroyo, Klamath and Den maps")
     ap.add_argument("--objects", action="store_true",
                     help="with --areas: also the walls, scenery and items on those maps")
+    ap.add_argument("--inven", action="store_true",
+                    help="every inventory item image (art/inven) and the inventory/loot/barter windows")
     args = ap.parse_args()
 
     raw = hdlib.WORK_DIR / "raw"
@@ -363,8 +396,16 @@ def main() -> None:
             kinds[path.split("/")[1]] = kinds.get(path.split("/")[1], 0) + 1
         print(f"objects: {len(objects)} art files {kinds}")
 
+    inven: list[str] = []
+    if args.inven:
+        arch.fetch(["art/inven/inven.lst"], raw)
+        inven = [f"art/inven/{n}" for n in mapobjects.read_art_list(raw / "art/inven/inven.lst") if n]
+        inven = INVENTORY_SCREENS + sorted(dict.fromkeys(inven))
+        print(f"inventory: {len(inven) - len(INVENTORY_SCREENS)} item images, {len(INVENTORY_SCREENS)} window images")
+
     art = list(dict.fromkeys(INTERFACE + SCREENS + TILES + OBJECTS + sorted(region_tiles)
-                             + sorted(area_floor | area_roof) + sorted(objects) + [e.lower() for e in args.extra]))
+                             + sorted(area_floor | area_roof) + sorted(objects) + inven
+                             + [e.lower() for e in args.extra]))
     sources = arch.fetch(art, raw)
 
     pal = raw / "color.pal"
@@ -405,7 +446,25 @@ def main() -> None:
     # ce.dat PNGs: re-saved with the palette ce-frm2png writes, so both kinds
     # of source decode to the same colours.
     palette_ref = next((hdlib.SRC_DIR / a["key"] for a in assets if a["type"] == "intrface"), None)
-    for path in CE_DAT_PNG:
+    for path in CE_DAT_FRM_INVEN if args.inven else []:
+        src = hdlib.REPO_ROOT / "files" / "ce.dat" / path
+        if not src.exists():
+            print(f"warning: {src} missing", file=sys.stderr)
+            continue
+        name = Path(path).stem
+        key = f"art/intrface/{name}.png"
+        dst = hdlib.SRC_DIR / key
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run([str(tool("ce-frm2png")), str(src), str(dst), "--palette", str(pal)],
+                       check=True, capture_output=True)
+        idx, _ = hdlib.load_indexed(dst)
+        assets.append({
+            "key": key, "name": name, "type": "intrface", "kind": "interface",
+            "width": int(idx.shape[1]), "height": int(idx.shape[0]),
+            "source": "ce.dat", "sample": False,
+        })
+        print(f"{'ce.dat':>12}  {key}  {idx.shape[1]}x{idx.shape[0]}")
+    for path in CE_DAT_PNG + (CE_DAT_PNG_INVEN if args.inven else []):
         src = hdlib.REPO_ROOT / "files" / "ce.dat" / path
         if not src.exists() or palette_ref is None:
             print(f"warning: {src} missing", file=sys.stderr)

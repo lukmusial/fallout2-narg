@@ -467,6 +467,46 @@ static void testScrollAndInvalidate()
     CHECK(staging.at(0, 0) == 1 && staging.at(1, 1) == 0 && staging.at(1, 2) == 0 && staging.at(2, 1) == 1);
 }
 
+// Phase 2.10: an item scaled into a slot over an HD background.
+static void testDrawOver()
+{
+    std::vector<unsigned char> palette = makePalette();
+    HdLayer layer;
+    hdLayerInit(&layer, 4, 1);
+    Staging staging(4, 1);
+
+    // HD red background on pixels 0..2, pixel 3 legacy index 10.
+    std::vector<unsigned char> buffer = { 20, 20, 20, 10 };
+    hdLayerDrawImage(&layer, buffer.data(), 4, 0, 0, 3, 1, solidImage(6, 2, kRed), palette.data());
+    std::vector<uint32_t> under;
+    hdLayerCapture(&layer, buffer.data(), 4, 0, 0, 4, 1, palette.data(), &under);
+
+    // The legacy item draw changes pixel 1; the HD image (exactly 2x the
+    // 4x1 rectangle) is opaque blue on pixel 1, half-transparent white on
+    // pixel 2, transparent on 0 and 3.
+    buffer[1] = 77;
+    HdImage item = solidImage(8, 2, 0);
+    for (int y = 0; y < 2; y++) {
+        for (int x = 2; x < 4; x++) {
+            item.pixels[y * 8 + x] = 0xFF0000FF;
+        }
+        for (int x = 4; x < 6; x++) {
+            item.pixels[y * 8 + x] = 0x80FFFFFF;
+        }
+    }
+    hdLayerDrawOver(&layer, buffer.data(), 4, 0, 0, 4, 1, item, under.data(), palette.data());
+    staging.compose(&layer, buffer, 4);
+    CHECK(staging.at(0, 0) == 1 && staging.hd(0, 0) == 0xFF0000); // untouched background
+    CHECK(staging.at(1, 0) == 1 && staging.hd(1, 0) == 0x0000FF); // item over a changed legacy pixel
+    CHECK(staging.at(2, 0) == 1 && staging.hd(2, 0) == 0xFF8080); // white blended over the HD red
+    CHECK(staging.at(3, 0) == 0); // not covered: legacy
+
+    // Legacy drawing over the item (a quantity label) wins.
+    buffer[1] = 78;
+    staging.compose(&layer, buffer, 4);
+    CHECK(staging.at(1, 0) == 0);
+}
+
 static void testCaptureAndBlend()
 {
     std::vector<unsigned char> palette = makePalette();
@@ -795,6 +835,7 @@ int main()
     testDrawLit();
     testScrollAndInvalidate();
     testCaptureAndBlend();
+    testDrawOver();
     testTextOverlay();
     testTextRedrawAndScroll();
     testTextScrollRows();

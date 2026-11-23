@@ -552,6 +552,10 @@ void artToggleObjectTypeHidden(ObjectType objectType);
 int artGetFidgetCount(const HeadFrmId& frmId);
 void artRender(const FrmId& frmId, unsigned char* dest, int width, int height, int pitch);
 
+// Where artRender puts a frameWidth x frameHeight frame in a width x height
+// box: (x, y) and the drawn size. True when the frame is scaled to fit.
+bool artRenderGetRect(int frameWidth, int frameHeight, int width, int height, int* x, int* y, int* drawWidth, int* drawHeight);
+
 // works for fid based FrmIds only, to be replaced by FrmImage::lock
 Art* artLock(const FrmId& frmId, CacheEntry** handlePtr);
 

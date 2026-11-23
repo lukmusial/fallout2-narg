@@ -443,38 +443,55 @@ void artRender(const FrmId& frmId, unsigned char* dest, int width, int height, i
     int frameWidth = frmImage.getWidth();
     int frameHeight = frmImage.getHeight();
 
-    int remainingWidth = width - frameWidth;
-    int remainingHeight = height - frameHeight;
-    if (remainingWidth < 0 || remainingHeight < 0) {
-        if (height * frameWidth >= width * frameHeight) {
-            blitBufferToBufferStretchTrans(frameData,
-                frameWidth,
-                frameHeight,
-                frameWidth,
-                dest + pitch * ((height - width * frameHeight / frameWidth) / 2),
-                width,
-                width * frameHeight / frameWidth,
-                pitch);
-        } else {
-            blitBufferToBufferStretchTrans(frameData,
-                frameWidth,
-                frameHeight,
-                frameWidth,
-                dest + (width - height * frameWidth / frameHeight) / 2,
-                height * frameWidth / frameHeight,
-                height,
-                pitch);
-        }
+    int x;
+    int y;
+    int drawWidth;
+    int drawHeight;
+    if (artRenderGetRect(frameWidth, frameHeight, width, height, &x, &y, &drawWidth, &drawHeight)) {
+        blitBufferToBufferStretchTrans(frameData,
+            frameWidth,
+            frameHeight,
+            frameWidth,
+            dest + pitch * y + x,
+            drawWidth,
+            drawHeight,
+            pitch);
     } else {
         blitBufferToBufferTrans(frameData,
             frameWidth,
             frameHeight,
             frameWidth,
-            dest + pitch * (remainingHeight / 2) + remainingWidth / 2,
+            dest + pitch * y + x,
             pitch);
     }
 
     frmImage.unlock();
+}
+
+bool artRenderGetRect(int frameWidth, int frameHeight, int width, int height, int* x, int* y, int* drawWidth, int* drawHeight)
+{
+    int remainingWidth = width - frameWidth;
+    int remainingHeight = height - frameHeight;
+    if (remainingWidth < 0 || remainingHeight < 0) {
+        if (height * frameWidth >= width * frameHeight) {
+            *x = 0;
+            *y = (height - width * frameHeight / frameWidth) / 2;
+            *drawWidth = width;
+            *drawHeight = width * frameHeight / frameWidth;
+        } else {
+            *x = (width - height * frameWidth / frameHeight) / 2;
+            *y = 0;
+            *drawWidth = height * frameWidth / frameHeight;
+            *drawHeight = height;
+        }
+        return true;
+    }
+
+    *x = remainingWidth / 2;
+    *y = remainingHeight / 2;
+    *drawWidth = frameWidth;
+    *drawHeight = frameHeight;
+    return false;
 }
 
 int artListIndex(ObjectType objectType, const char* name)

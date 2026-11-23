@@ -1,0 +1,29 @@
+# Phase 2.10 inventory screens in HD (run with --dev-load-game=1, [graphics]
+# hd=1 and an hd_pack; with hd=0 fbshot writes the plain legacy frame). Slot 1
+# has Sulik in the party: the loot window opens on him (as the steal skill
+# does on companions), the trade window through a dialogue with him.
+# legacyshot writes the 8-bit composition, which must equal the hd=0 frame.
+until game 30000
+wait 2000
+fbshot game
+legacyshot game_legacy
+key i
+wait 1500
+fbshot inventory
+legacyshot inventory_legacy
+key esc
+wait 1000
+loot 1
+wait 2000
+fbshot loot
+legacyshot loot_legacy
+key esc
+wait 1000
+talk 1
+wait 3000
+fbshot dialog
+key b
+wait 3000
+fbshot barter
+legacyshot barter_legacy
+quit 0

@@ -20,6 +20,9 @@ work/pack_review.json and, with --sheet, a sheet of the worst candidates
 
   pack_review.py [--top N] [--sheet docs/screens/phase2.8/mixed_candidates.png]
                  [--art art/walls/jds1001.frm ...] [--zoom 2]
+  pack_review.py --inven ...     # Phase 2.10: inventory item images and the
+                                 # inventory windows' art instead
+                                 # (work/pack_review_inven.json)
 """
 
 from __future__ import annotations
@@ -151,8 +154,14 @@ def main() -> None:
     ap.add_argument("--sheet", type=Path)
     ap.add_argument("--art", action="append", default=[], help="put these art files on the sheet instead")
     ap.add_argument("--zoom", type=int, default=1)
+    ap.add_argument("--inven", action="store_true", help="the inventory art (extract.py --inven) instead")
     args = ap.parse_args()
-    assets = [a for a in hdlib.load_manifest() if a["type"] in ("walls", "scenery", "items") and a.get("area")]
+    if args.inven:
+        from extract import CE_DAT_FRM_INVEN, CE_DAT_PNG_INVEN, INVENTORY_SCREENS
+        window_keys = {p.rsplit(".", 1)[0] + ".png" for p in INVENTORY_SCREENS + CE_DAT_FRM_INVEN + CE_DAT_PNG_INVEN}
+        assets = [a for a in hdlib.load_manifest() if a["type"] == "inven" or a["key"] in window_keys]
+    else:
+        assets = [a for a in hdlib.load_manifest() if a["type"] in ("walls", "scenery", "items") and a.get("area")]
     by_art: dict[str, list[dict]] = {}
     for a in assets:
         art = a.get("fhd", a["key"]).rsplit(".", 1)[0] + ".frm"
@@ -166,7 +175,7 @@ def main() -> None:
         if len(group) > 1:
             m.update(flicker(group))
         results[art] = m
-    out = hdlib.WORK_DIR / "pack_review.json"
+    out = hdlib.WORK_DIR / ("pack_review_inven.json" if args.inven else "pack_review.json")
     out.write_text(json.dumps(results, indent=1))
     flagged = {art: m for art, m in results.items() if reasons(m)}
     print(f"{len(results)} art files measured, {len(flagged)} flagged")

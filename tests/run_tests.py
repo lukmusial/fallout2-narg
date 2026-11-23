@@ -670,6 +670,91 @@ def compare_hd_golden_live(actual_path, golden_name, update):
     return f"{changed:.1%}"
 
 
+# --- Phase 2.10: inventory, loot and trade windows -----------------------------
+#
+# tests/scripts/hd_inventory.txt loads slot 1 (Sulik in the party), captures
+# the interface bar, the inventory, the loot window on Sulik and the trade
+# window of a dialogue with him. The 8-bit frames (legacyshot) must equal an
+# hd=0 run's frames inside the windows (the map behind them animates).
+
+HD_INVENTORY_PACKS = ("scripted", "ai", "mixed")
+HD_INVENTORY_SCREENS = ("game", "inventory", "loot", "barter")
+# Logical 640x480 rectangles: the window (8-bit frame must not change) and
+# art that must show HD detail (backgrounds, items, the bar's item button).
+HD_INVENTORY_WINDOW = {
+    "game": [(267, 405, 455, 472)],
+    "inventory": [(80, 20, 590, 370), (0, 380, 640, 480)],
+    "loot": [(70, 10, 580, 370), (0, 380, 640, 480)],
+    "barter": [(0, 295, 640, 480)],
+}
+HD_INVENTORY_ART = {
+    "game": [(267, 405, 455, 472)],
+    "inventory": [(80, 30, 210, 330), (250, 150, 440, 350), (250, 280, 440, 350)],
+    "loot": [(225, 35, 300, 330), (340, 35, 410, 330), (80, 140, 200, 340)],
+    "barter": [(100, 310, 220, 470), (460, 310, 540, 470)],
+}
+HD_INVENTORY_TEXT = {"inventory": [(390, 40, 550, 240)], "loot": [(230, 320, 410, 340)]}
+HD_INVENTORY_MAX_CHANGED = 0.002   # 8-bit pixels differing from hd=0 inside the windows
+
+_hd_inventory_legacy_out = None
+
+
+def inventory_pack_installed(pack):
+    packs = ("scripted", "ai") if pack == "mixed" else (pack,)
+    return all((RUN_DIR / f"data/hd/{p}/art/{art}").exists() for p in packs
+               for art in ("inven/spear.png", "intrface/invbox.png", "intrface/trade.png", "intrface/sattkbup.png"))
+
+
+def hd_inventory_legacy_reference():
+    global _hd_inventory_legacy_out
+    if _hd_inventory_legacy_out is None:
+        reset_saves()
+        _hd_inventory_legacy_out, _ = run_game("hd_inventory_legacy", "hd_inventory.txt", ["--dev-load-game=1"])
+    return _hd_inventory_legacy_out
+
+
+def make_hd_inventory_test(pack):
+    def test(update):
+        """Inventory, loot and trade windows and the interface bar's item
+        button with a real HD pack: HD backgrounds, buttons and items
+        (resampled into their slots), legacy text intact, the 8-bit frames
+        exactly as with hd=0, goldens with tolerance."""
+        if not inventory_pack_installed(pack):
+            raise TestSkipped(f"pack '{pack}' lacks the inventory art (tools/hd: extract.py --areas --objects --inven, "
+                              "enhance_*.py, install.py)")
+        legacy_out = hd_inventory_legacy_reference()
+        reset_saves()
+        out, seconds = run_game(f"hd_inventory_{pack}", "hd_inventory.txt",
+                                ["--dev-load-game=1", *HD_ARGS, f"[graphics]hd_pack={pack}"])
+        notes = []
+        for screen in HD_INVENTORY_SCREENS:
+            fb = load_png(out / f"{screen}.png")
+            eight = load_png(out / f"{screen}_legacy.png")
+            legacy = load_png(legacy_out / f"{screen}.png")
+            if fb.shape != (960, 1280, 3) or eight.shape != legacy.shape:
+                raise TestFailure(f"{screen}: unexpected sizes {fb.shape} / {eight.shape} / {legacy.shape}")
+            for left, top, right, bottom in HD_INVENTORY_WINDOW[screen]:
+                changed = float(np.any(eight[top:bottom, left:right] != legacy[top:bottom, left:right], axis=2).mean())
+                if changed > HD_INVENTORY_MAX_CHANGED:
+                    raise TestFailure(f"{screen}: 8-bit frame differs from hd=0 in {(left, top, right, bottom)} "
+                                      f"({changed:.2%} of pixels)")
+            details = []
+            for region in HD_INVENTORY_ART[screen]:
+                detail = blocks_detail(fb, region)
+                if detail < 0.3:
+                    raise TestFailure(f"{screen}: no HD detail in {region} ({detail:.0%} of 2x2 blocks)")
+                details.append(f"{detail:.0%}")
+            for region in HD_INVENTORY_TEXT.get(screen, ()):
+                kept, count = legacy_text_kept(fb, eight, region)
+                if count < 50 or kept < 0.98:
+                    raise TestFailure(f"{screen}: legacy text in {region}: {kept:.1%} of {count} pixels kept")
+            golden = compare_hd_golden_live(out / f"{screen}.png", f"hd_inventory_{pack}_{screen}.png", update)
+            notes.append(f"{screen} HD {'/'.join(details)} golden {golden}")
+        return ", ".join(notes) + f" ({seconds:.0f}s)"
+    test.__name__ = f"test_hd_inventory_{pack}"
+    return test
+
+
 def make_slot_test(slot, hd=False):
     def test(update):
         reset_saves()
@@ -892,7 +977,8 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
          + [make_hd_map_test(pack, slot) for pack in HD_MAP_PACKS for slot in range(1, SLOT_COUNT + 1)]
          + [test_hd_mixed_pack]
          + [make_hd_text_screens_test(style) for style in HD_TEXT_STYLES]
-         + [test_hd_text_game])
+         + [test_hd_text_game]
+         + [make_hd_inventory_test(pack) for pack in HD_INVENTORY_PACKS])
 
 
 PERF_CONFIGS = [
@@ -983,7 +1069,7 @@ def main():
         results[test.__name__] = outcome[0]
 
     # Longest tests first so the pool finishes together.
-    order = sorted(selected, key=lambda t: 0 if any(k in t.__name__ for k in ("hd_screens", "hd_text", "stimpack", "lists")) else 1)
+    order = sorted(selected, key=lambda t: 0 if any(k in t.__name__ for k in ("hd_screens", "hd_text", "hd_inventory", "stimpack", "lists")) else 1)
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         list(pool.map(run_one, order))
 

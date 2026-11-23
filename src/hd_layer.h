@@ -282,6 +282,17 @@ void hdLayerDrawLit(HdLayer* layer, const unsigned char* buffer, int bufferPitch
 void hdLayerCapture(const HdLayer* layer, const unsigned char* buffer, int bufferPitch,
     int x, int y, int width, int height, const unsigned char* basePalette8, std::vector<uint32_t>* under);
 
+// An image scaled into a box over what was there (Phase 2.10: inventory
+// items, which artRender stretches into their slots): `under` is the
+// hdLayerCapture of exactly (x, y, width, height) taken before the legacy
+// draw. The image is resampled (bilinear) to 2x the rectangle when it has a
+// different size. Every logical pixel the image covers (any alpha in its 2x2
+// block) becomes the image blended over `under`, with the buffer's (new)
+// index as shadow, so the HD silhouette replaces the legacy one, whose edges
+// are only nearest-scaled; pixels the image does not cover are left alone.
+void hdLayerDrawOver(HdLayer* layer, const unsigned char* buffer, int bufferPitch,
+    int x, int y, int width, int height, const HdImage& image, const uint32_t* under, const unsigned char* basePalette8);
+
 enum class HdBlendMode {
     // Translucent objects (the legacy blend tables): the HD pixel's grey
     // level sets how much of `tint` covers what is under it; the result is

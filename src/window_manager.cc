@@ -45,11 +45,17 @@ static int _button_check_group(Button* button);
 static void _button_draw(Button* button, Window* window, unsigned char* data, bool draw, Rect* bound, bool sound);
 static void _GNW_button_refresh(Window* window, Rect* rect);
 static void buttonDrawHd(Button* button, Window* window, unsigned char* data, const Rect* clippedRect);
+static void buttonAttachFrmHdArt(int btn, const FrmImage* images[3], bool disabled);
 
-// CE: HD art of a graphic button (see buttonSetHdArt): normal, pressed, hover.
+// CE: HD art of a graphic button (see buttonSetHdArt): normal, pressed,
+// hover, then the disabled normal, pressed and hover images. A slot has an
+// art path or an HD image the caller made (buttonSetHdImages).
+constexpr int kButtonHdSlots = 6;
+
 struct ButtonHdArt {
-    std::string path[3];
-    const unsigned char* source[3] = {};
+    std::string path[kButtonHdSlots];
+    const unsigned char* source[kButtonHdSlots] = {};
+    std::shared_ptr<const HdImage> image[kButtonHdSlots];
 };
 
 // 0x50FA30 path_patches
@@ -1043,6 +1049,63 @@ void windowHdClear(int win)
     }
 }
 
+void windowHdInvalidateRect(int win, int x, int y, int width, int height)
+{
+    Window* window = windowGetWindow(win);
+    if (window != nullptr && window->hdLayer != nullptr) {
+        hdLayerInvalidateRect(window->hdLayer, x, y, width, height);
+    }
+}
+
+void windowHdCopyRect(int srcWin, int srcX, int srcY, int width, int height, int destWin, int destX, int destY)
+{
+    if (!windowHdIsActive()) {
+        return;
+    }
+
+    Window* source = windowGetWindow(srcWin);
+    HdLayer* dest = windowHdGetLayer(destWin);
+    if (dest == nullptr) {
+        return;
+    }
+
+    HdLayer* from = source != nullptr ? source->hdLayer : nullptr;
+    const int destPitch = dest->width * kHdScale;
+    for (int row = 0; row < height; row++) {
+        int sy = srcY + row;
+        int dy = destY + row;
+        if (dy < 0 || dy >= dest->height) {
+            continue;
+        }
+        for (int column = 0; column < width; column++) {
+            int sx = srcX + column;
+            int dx = destX + column;
+            if (dx < 0 || dx >= dest->width) {
+                continue;
+            }
+            size_t destOffset = static_cast<size_t>(dy) * dest->width + dx;
+            if (from == nullptr || sx < 0 || sy < 0 || sx >= from->width || sy >= from->height) {
+                dest->valid[destOffset] = 0;
+                continue;
+            }
+            size_t srcOffset = static_cast<size_t>(sy) * from->width + sx;
+            dest->valid[destOffset] = from->valid[srcOffset];
+            dest->shadow[destOffset] = from->shadow[srcOffset];
+            if (from->valid[srcOffset] == 0) {
+                continue;
+            }
+            const int fromPitch = from->width * kHdScale;
+            const uint32_t* src = from->pixels.data() + static_cast<size_t>(sy) * kHdScale * fromPitch + sx * kHdScale;
+            uint32_t* out = dest->pixels.data() + static_cast<size_t>(dy) * kHdScale * destPitch + dx * kHdScale;
+            for (int y = 0; y < kHdScale; y++) {
+                for (int x = 0; x < kHdScale; x++) {
+                    out[y * destPitch + x] = src[y * fromPitch + x];
+                }
+            }
+        }
+    }
+}
+
 // 0x4D6FD8
 void _GNW_win_refresh(Window* window, Rect* rect, unsigned char* dest)
 {
@@ -1683,6 +1746,9 @@ int buttonCreateWithFrm(int win, int x, int y,
         flags);
     if (btnId == -1) return -1;
 
+    const FrmImage* images[3] = { &normalFrm, &pressedFrm, &hoverFrm };
+    buttonAttachFrmHdArt(btnId, images, false);
+
     Button* button = buttonGetButton(btnId, nullptr);
     button->frmImages.push_back(std::move(normalFrm));
     if (pressedFrm.isLocked()) button->frmImages.push_back(std::move(pressedFrm));
@@ -1702,6 +1768,9 @@ int buttonSetDisabledFrm(int btn,
     hoverFrm.lock(hoverId);
 
     if (_win_register_button_disable(btn, normalFrm.getData(), pressedFrm.getData(), hoverFrm.getData()) == -1) return -1;
+
+    const FrmImage* images[3] = { &normalFrm, &pressedFrm, &hoverFrm };
+    buttonAttachFrmHdArt(btn, images, true);
 
     Button* button = buttonGetButton(btn, nullptr);
     if (normalFrm.isLocked()) button->frmImages.push_back(std::move(normalFrm));
@@ -2860,16 +2929,24 @@ static void buttonDrawHd(Button* button, Window* window, unsigned char* data, co
         slot = 1;
     } else if (data == button->hoverImage) {
         slot = 2;
+    } else if (data == button->disabledNormalImage) {
+        slot = 3;
+    } else if (data == button->disabledPressedImage) {
+        slot = 4;
+    } else if (data == button->disabledHoverImage) {
+        slot = 5;
     } else {
         return;
     }
 
     const ButtonHdArt* art = button->hdArt;
-    if (art->path[slot].empty() || !windowHdIsActive()) {
+    if ((art->path[slot].empty() && art->image[slot] == nullptr) || !windowHdIsActive()) {
         return;
     }
 
-    std::shared_ptr<const HdImage> image = hdArtFindFrame(art->path[slot].c_str(), 0, 0);
+    std::shared_ptr<const HdImage> image = art->image[slot] != nullptr
+        ? art->image[slot]
+        : hdArtFindFrame(art->path[slot].c_str(), 0, 0);
     if (image == nullptr) {
         return;
     }
@@ -2905,6 +2982,7 @@ int buttonSetHdArt(int btn, const char* normalPath, const unsigned char* normalS
     for (int slot = 0; slot < 3; slot++) {
         button->hdArt->path[slot] = paths[slot] != nullptr ? paths[slot] : "";
         button->hdArt->source[slot] = sources[slot];
+        button->hdArt->image[slot] = nullptr;
     }
 
     // The button drew its legacy image when it was created.
@@ -2913,6 +2991,91 @@ int buttonSetHdArt(int btn, const char* normalPath, const unsigned char* normalS
     }
 
     return 0;
+}
+
+int buttonSetHdDisabledArt(int btn, const char* normalPath, const unsigned char* normalSource,
+    const char* pressedPath, const unsigned char* pressedSource,
+    const char* hoverPath, const unsigned char* hoverSource)
+{
+    Window* window;
+    Button* button = buttonGetButton(btn, &window);
+    if (button == nullptr || (button->flags & BUTTON_FLAG_GRAPHIC) == 0) {
+        return -1;
+    }
+
+    if (button->hdArt == nullptr) {
+        button->hdArt = new ButtonHdArt();
+    }
+
+    const char* paths[3] = { normalPath, pressedPath, hoverPath };
+    const unsigned char* sources[3] = { normalSource, pressedSource, hoverSource };
+    for (int slot = 0; slot < 3; slot++) {
+        button->hdArt->path[3 + slot] = paths[slot] != nullptr ? paths[slot] : "";
+        button->hdArt->source[3 + slot] = sources[slot];
+        button->hdArt->image[3 + slot] = nullptr;
+    }
+    return 0;
+}
+
+int buttonSetHdImages(int btn, std::shared_ptr<const HdImage> normal, const unsigned char* normalSource,
+    std::shared_ptr<const HdImage> pressed, const unsigned char* pressedSource)
+{
+    Window* window;
+    Button* button = buttonGetButton(btn, &window);
+    if (button == nullptr || (button->flags & BUTTON_FLAG_GRAPHIC) == 0) {
+        return -1;
+    }
+
+    if (normal == nullptr && pressed == nullptr) {
+        delete button->hdArt;
+        button->hdArt = nullptr;
+        return 0;
+    }
+
+    if (button->hdArt == nullptr) {
+        button->hdArt = new ButtonHdArt();
+    }
+
+    for (int slot = 0; slot < kButtonHdSlots; slot++) {
+        button->hdArt->path[slot].clear();
+        button->hdArt->source[slot] = nullptr;
+        button->hdArt->image[slot] = nullptr;
+    }
+    button->hdArt->image[0] = std::move(normal);
+    button->hdArt->source[0] = normalSource;
+    button->hdArt->image[1] = std::move(pressed);
+    button->hdArt->source[1] = pressedSource;
+    return 0;
+}
+
+// CE: HD art for buttons made from art ids (buttonCreateWithFrm,
+// buttonSetDisabledFrm): the art's own images are the sources.
+static void buttonAttachFrmHdArt(int btn, const FrmImage* images[3], bool disabled)
+{
+    if (!windowHdIsActive()) {
+        return;
+    }
+
+    std::string paths[3];
+    const unsigned char* sources[3] = {};
+    bool any = false;
+    for (int slot = 0; slot < 3; slot++) {
+        if (images[slot] != nullptr && images[slot]->isLocked()) {
+            paths[slot] = images[slot]->getPath();
+            sources[slot] = images[slot]->getData();
+            any = any || !paths[slot].empty();
+        }
+    }
+    if (!any) {
+        return;
+    }
+
+    auto path = [&](int slot) { return paths[slot].empty() ? nullptr : paths[slot].c_str(); };
+    if (disabled) {
+        buttonSetHdDisabledArt(btn, path(0), sources[0], path(1), sources[1], path(2), sources[2]);
+    } else {
+        buttonSetHdArt(btn, path(0), sources[0], path(1), sources[1], path(2), sources[2]);
+    }
 }
 
 // 0x4D9A58

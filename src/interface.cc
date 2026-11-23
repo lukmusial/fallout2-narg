@@ -22,6 +22,8 @@
 #include "game_mouse.h"
 #include "game_sound.h"
 #include "geometry.h"
+#include "hd_art.h"
+#include "hd_layer.h"
 #include "input.h"
 #include "inventory.h"
 #include "item.h"
@@ -155,6 +157,7 @@ static void interfaceUpdateAlternateAmmoMeterRow(unsigned char* dest, bool fille
 static int interfaceAlternateAmmoMeterGetDividerShade(int row, int firstActiveRow, int ammoQuantity, int ammoPerShot);
 static int _intface_item_reload();
 static void interfaceDrawActionButtonOverlay(unsigned char* data, int width, int height, int pitch, int upX, int upY, int darkenColor);
+static void interfaceBarUpdateItemButtonHd(const FrmImage& upBase, const FrmImage& downBase, int itemFid);
 static void interfaceRenderCounterAnimationStep(unsigned char* src, unsigned char* dest, int delayMs, Rect* numbersRect, bool refreshMouse);
 static void interfaceRenderCounter(int x, int y, int previousValue, int value, int offset, int delay);
 static int intface_fatal_error(int rc);
@@ -296,6 +299,12 @@ static unsigned char _itemButtonDown[INTERFACE_ITEM_ACTION_BUTTON_WIDTH * INTERF
 
 // 0x59A2B4 itemButtonUp
 static unsigned char _itemButtonUp[INTERFACE_ITEM_ACTION_BUTTON_WIDTH * INTERFACE_ITEM_ACTION_BUTTON_HEIGHT];
+
+// CE: HD (Phase 2.10). The item button's legacy art with only the item drawn
+// in (no action text or AP numbers), the sources of its HD images: those
+// overlays differ from it, so they stay legacy.
+static unsigned char gItemButtonUpHdSource[INTERFACE_ITEM_ACTION_BUTTON_WIDTH * INTERFACE_ITEM_ACTION_BUTTON_HEIGHT];
+static unsigned char gItemButtonDownHdSource[INTERFACE_ITEM_ACTION_BUTTON_WIDTH * INTERFACE_ITEM_ACTION_BUTTON_HEIGHT];
 
 // 0x59D3F4 interfaceBuffer
 static unsigned char* gInterfaceWindowBuffer;
@@ -1830,6 +1839,8 @@ static int interfaceBarRefreshMainAction()
         memcpy(_itemButtonDown, _itemButtonDisabledFrmImage.getData(), sizeof(_itemButtonDown));
     }
 
+    bool itemButtonDisabled = !(actionPoints >= 0 && actionPoints < 10);
+
     const FrmId itemFrmId = FrmId(itemState->itemFid);
     if (itemFrmId.valid()) {
         FrmImage itemFrmImage;
@@ -1843,6 +1854,10 @@ static int interfaceBarRefreshMainAction()
             interfaceDrawActionButtonOverlay(data, width, height, width, itemIconX, itemIconY, 63571);
         }
     }
+
+    interfaceBarUpdateItemButtonHd(itemButtonDisabled ? _itemButtonDisabledFrmImage : _itemButtonNormalFrmImage,
+        itemButtonDisabled ? _itemButtonDisabledFrmImage : _itemButtonPressedFrmImage,
+        itemState->itemFid);
 
     if (!gInterfaceBarInitialized) {
         _intface_update_ammo_lights();
@@ -1875,6 +1890,112 @@ static void interfaceDrawActionButtonOverlay(unsigned char* data, int width, int
     if (downHeight > 0) {
         _dark_trans_buf_to_buf(data, width, downHeight, pitch, _itemButtonDown, upX + 1, downY, INTERFACE_ITEM_ACTION_BUTTON_WIDTH, darkenColor);
     }
+}
+
+// CE: HD (Phase 2.10). Composes the item button's HD images (the pack's
+// button art with the item's HD image, placed as the legacy overlay draws
+// it: centred on the normal image, one pixel right, two up and darkened on
+// the pressed one) and gives them to the button.
+static void interfaceBarUpdateItemButtonHd(const FrmImage& upBase, const FrmImage& downBase, int itemFid)
+{
+    if (!windowHdIsActive() || gSingleAttackButton == -1) {
+        return;
+    }
+
+    const int width = INTERFACE_ITEM_ACTION_BUTTON_WIDTH;
+    const int height = INTERFACE_ITEM_ACTION_BUTTON_HEIGHT;
+    std::shared_ptr<const HdImage> upArt = hdArtFindImage(upBase);
+    std::shared_ptr<const HdImage> downArt = hdArtFindImage(downBase);
+
+    FrmImage itemFrmImage;
+    std::shared_ptr<const HdImage> itemArt;
+    const FrmId itemFrmId = FrmId(itemFid);
+    if (itemFrmId.valid() && itemFrmImage.lock(itemFrmId)) {
+        itemArt = hdArtFindImage(itemFrmImage);
+    }
+
+    if (upArt == nullptr && downArt == nullptr && itemArt == nullptr) {
+        buttonSetHdImages(gSingleAttackButton, nullptr, nullptr, nullptr, nullptr);
+        return;
+    }
+
+    unsigned char basePalette8[256 * 3];
+    windowHdGetBasePalette(basePalette8);
+
+    auto compose = [&](const FrmImage& base, const std::shared_ptr<const HdImage>& baseArt, unsigned char* source, bool pressed) {
+        memcpy(source, base.getData(), width * height);
+
+        auto image = std::make_shared<HdImage>();
+        if (baseArt != nullptr && baseArt->width == width * kHdScale && baseArt->height == height * kHdScale) {
+            *image = *baseArt;
+        } else {
+            hdImageFromIndexed(base.getData(), width, height, width, basePalette8, true, image.get());
+        }
+
+        if (!itemFrmImage.isLocked()) {
+            return std::shared_ptr<const HdImage>(image);
+        }
+
+        int itemWidth = itemFrmImage.getWidth();
+        int itemHeight = itemFrmImage.getHeight();
+        int x = (width - itemWidth) / 2;
+        int y = (height - itemHeight) / 2;
+        int rows = itemHeight;
+        if (pressed) {
+            // As interfaceDrawActionButtonOverlay: 2 px higher, 1 px right;
+            // at the top edge the bottom 2 rows are cut instead.
+            x += 1;
+            y -= 2;
+            if (y < 0) {
+                y = 0;
+                rows -= 2;
+            }
+            _dark_trans_buf_to_buf(itemFrmImage.getData(), itemWidth, rows, itemWidth, source, x, y, width, 63571);
+        } else {
+            blitBufferToBufferTrans(itemFrmImage.getData(), itemWidth, itemHeight, itemWidth, source + width * y + x, width);
+        }
+
+        std::shared_ptr<const HdImage> item = itemArt;
+        HdImage fallback;
+        if (item == nullptr || item->width != itemWidth * kHdScale || item->height != itemHeight * kHdScale) {
+            hdImageFromIndexed(itemFrmImage.getData(), itemWidth, itemHeight, itemWidth, basePalette8, true, &fallback);
+            item = std::shared_ptr<const HdImage>(&fallback, [](const HdImage*) { });
+        }
+
+        for (int row = 0; row < rows * kHdScale; row++) {
+            int dy = y * kHdScale + row;
+            if (dy < 0 || dy >= image->height) {
+                continue;
+            }
+            for (int column = 0; column < item->width; column++) {
+                int dx = x * kHdScale + column;
+                if (dx < 0 || dx >= image->width) {
+                    continue;
+                }
+                uint32_t src = item->pixels[static_cast<size_t>(row) * item->width + column];
+                uint32_t alpha = src >> 24;
+                if (alpha == 0) {
+                    continue;
+                }
+                uint32_t rgb = pressed ? hdLight(src, 63571) : (src & 0xFFFFFF);
+                uint32_t& dest = image->pixels[static_cast<size_t>(dy) * image->width + dx];
+                if (alpha == 255 || (dest >> 24) == 0) {
+                    dest = (std::max(alpha, dest >> 24) << 24) | rgb;
+                } else {
+                    uint32_t inverse = 255 - alpha;
+                    uint32_t r = (((rgb >> 16) & 0xFF) * alpha + ((dest >> 16) & 0xFF) * inverse + 127) / 255;
+                    uint32_t g = (((rgb >> 8) & 0xFF) * alpha + ((dest >> 8) & 0xFF) * inverse + 127) / 255;
+                    uint32_t b = ((rgb & 0xFF) * alpha + (dest & 0xFF) * inverse + 127) / 255;
+                    dest = (dest & 0xFF000000u) | (r << 16) | (g << 8) | b;
+                }
+            }
+        }
+        return std::shared_ptr<const HdImage>(image);
+    };
+
+    std::shared_ptr<const HdImage> up = compose(upBase, upArt, gItemButtonUpHdSource, false);
+    std::shared_ptr<const HdImage> down = compose(downBase, downArt, gItemButtonDownHdSource, true);
+    buttonSetHdImages(gSingleAttackButton, up, gItemButtonUpHdSource, down, gItemButtonDownHdSource);
 }
 
 // 0x460658 intface_redraw_items_callback
