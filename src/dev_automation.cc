@@ -18,8 +18,10 @@
 #include "color.h"
 #include "critter.h"
 #include "debug.h"
+#include "display_monitor.h"
 #include "game.h"
 #include "hd_art.h"
+#include "hd_text.h"
 #include "input.h"
 #include "kb.h"
 #include "map.h"
@@ -33,6 +35,7 @@
 #include "skill.h"
 #include "stat.h"
 #include "svga.h"
+#include "text_object.h"
 #include "tile.h"
 #include "trait.h"
 #include "win32.h"
@@ -479,6 +482,19 @@ namespace {
             return true;
         }
 
+        if (name == "legacyshot") {
+            // The 8-bit window composition (640x480 at the logical size),
+            // also in HD mode: what HD drawing must never change.
+            if (args.empty()) {
+                fail(command, "missing name");
+            }
+            std::string path = outputPath(args[0], ".png");
+            if (!screenshotSaveLegacyPng(path.c_str())) {
+                fail(command, "screenshot failed");
+            }
+            return true;
+        }
+
         if (name == "fbshot") {
             if (args.empty()) {
                 fail(command, "missing name");
@@ -501,6 +517,56 @@ namespace {
                 // Floors and roofs draw with the new pack.
                 tileWindowRefresh();
             }
+            return true;
+        }
+
+        if (name == "hdtext") {
+            // Switches HD text live: off, sharp or smooth (text drawn later
+            // uses it; screens redraw their text when they are reopened).
+            HdGlyphStyle style = hdTextGetStyle();
+            if (args.empty() || (args[0] != "off" && !hdGlyphStyleFromName(args[0].c_str(), &style))) {
+                fail(command, "usage: hdtext off|sharp|smooth");
+            }
+            hdTextSetMode(args[0] != "off", style);
+            return true;
+        }
+
+        if (name == "hdtextstats") {
+            // HD text counters (strings drawn at 2x, remembered strings
+            // drawn at a blit, glyphs made, time spent) to <name>.json.
+            if (args.empty()) {
+                fail(command, "missing name");
+            }
+            HdTextStats stats;
+            hdTextGetStats(&stats);
+            std::ofstream out(outputPath(args[0], ".json"));
+            out << "{\"active\": " << (hdTextIsActive() ? "true" : "false")
+                << ", \"style\": ";
+            jsonString(out, hdGlyphStyleName(hdTextGetStyle()));
+            out << ", \"draws\": " << stats.draws
+                << ", \"replays\": " << stats.replays
+                << ", \"glyphs_cached\": " << stats.glyphsCached
+                << ", \"total_ms\": " << stats.totalMs << "}\n";
+            return true;
+        }
+
+        if (name == "floattext") {
+            // Floating text over the player (as the float_msg script
+            // function shows it), white with a black outline.
+            if (args.empty() || strcmp(devAutomationGetState(), "game") != 0 || gDude == nullptr) {
+                fail(command, "usage: floattext <text> (in a game)");
+            }
+            std::string text = command.rest;
+            Rect rect;
+            if (textObjectAdd(gDude, &text[0], 101, COLOR_WHITE, COLOR_BLACK, &rect) == 0) {
+                tileWindowRefreshRect(&rect, gElevation);
+            }
+            return true;
+        }
+
+        if (name == "monitor") {
+            // A line in the interface bar's message monitor.
+            displayMonitorAddMessage(command.rest.c_str());
             return true;
         }
 

@@ -1,6 +1,7 @@
 // Unit tests for the HD layer compositor rules (src/hd_layer.cc).
 // No game data needed; run with ctest or directly.
 
+#include "hd_glyph.h"
 #include "hd_layer.h"
 
 #include <stdio.h>
@@ -59,6 +60,12 @@ struct Staging {
     void compose(const HdLayer* layer, const std::vector<unsigned char>& buffer, int bufferPitch, bool transparent = false)
     {
         hdComposeRect(layer, buffer.data(), bufferPitch, 0, 0, width, height, mask.data(), width, rgb.data(), width * kHdScale, transparent);
+    }
+
+    // With the base palette: the text overlay is composited too.
+    void composeText(const HdLayer* layer, const std::vector<unsigned char>& buffer, int bufferPitch, const std::vector<unsigned char>& palette)
+    {
+        hdComposeRect(layer, buffer.data(), bufferPitch, 0, 0, width, height, mask.data(), width, rgb.data(), width * kHdScale, false, palette.data());
     }
 
     uint32_t hd(int x, int y, int sx = 0, int sy = 0) const
@@ -535,6 +542,244 @@ static void testCaptureAndBlend()
     CHECK(layer.valid[0] == 0);
 }
 
+// A text draw: a 2x text block (premultiplied) per mask pixel.
+struct TextFixture {
+    int width;
+    int height;
+    std::vector<unsigned char> mask;
+    std::vector<uint32_t> pixels;
+    std::vector<unsigned char> before;
+
+    TextFixture(int w, int h)
+        : width(w)
+        , height(h)
+        , mask(static_cast<size_t>(w) * h, 0)
+        , pixels(static_cast<size_t>(w) * h * 4, 0)
+        , before(static_cast<size_t>(w) * h, 0)
+    {
+    }
+
+    void sub(int x, int y, int sx, int sy, uint32_t value) { pixels[static_cast<size_t>(y * 2 + sy) * width * 2 + x * 2 + sx] = value; }
+    void block(int x, int y, uint32_t value)
+    {
+        for (int i = 0; i < 4; i++) {
+            sub(x, y, i % 2, i / 2, value);
+        }
+    }
+
+    HdTextDraw draw(int x, int y) const
+    {
+        HdTextDraw result;
+        result.x = x;
+        result.y = y;
+        result.width = width;
+        result.height = height;
+        result.mask = mask.data();
+        result.pixels = pixels.data();
+        result.before = before.data();
+        return result;
+    }
+};
+
+static void testTextOverlay()
+{
+    std::vector<unsigned char> palette = makePalette();
+    std::vector<unsigned char> buffer(4 * 3, 10);
+    HdLayer layer;
+    hdLayerInit(&layer, 4, 3);
+
+    // Legacy text: pixel (1, 1) becomes index 200; the 2x text covers that
+    // block (one corner cut: transparent) and reaches half into (2, 1).
+    TextFixture text(4, 3);
+    std::fill(text.before.begin(), text.before.end(), 10);
+    text.mask[1 * 4 + 1] = 1;
+    text.block(1, 1, 0xFFC8C8C8);
+    text.sub(1, 1, 1, 1, 0);
+    text.sub(2, 1, 0, 0, 0x80404040); // premultiplied: 50% of (128, 128, 128)
+    buffer[1 * 4 + 1] = 200;
+    hdLayerDrawText(&layer, buffer.data(), 4, text.draw(0, 0));
+
+    Staging staging(4, 3);
+    staging.composeText(&layer, buffer, 4, palette);
+    CHECK(staging.at(1, 1) == 1);
+    CHECK(staging.hd(1, 1) == 0xC8C8C8);
+    CHECK(staging.hd(1, 1, 1, 1) == 0x0A0A0A); // the cut corner shows what the text was drawn over (index 10)
+    CHECK(staging.at(2, 1) == 1); // fringe over legacy index 10
+    CHECK(staging.hd(2, 1) == ((0x40 + 5) * 0x010101));
+    CHECK(staging.hd(2, 1, 1, 0) == 0x0A0A0A);
+    CHECK(staging.at(0, 0) == 0);
+    CHECK(staging.at(3, 1) == 0); // no coverage, no text
+
+    // Without the palette the overlay is ignored (legacy callers).
+    staging.compose(&layer, buffer, 4);
+    CHECK(staging.at(1, 1) == 0);
+
+    // An HD background valid for the index under the text shows under it.
+    std::vector<unsigned char> background(4 * 3, 10);
+    hdLayerDrawImage(&layer, background.data(), 4, 0, 0, 4, 3, solidImage(8, 6, kGreen), palette.data());
+    staging.composeText(&layer, buffer, 4, palette);
+    CHECK(staging.hd(1, 1, 1, 1) == 0x00FF00);
+    CHECK(staging.hd(2, 1, 1, 0) == 0x00FF00);
+    CHECK(staging.hd(2, 1) == 0x40BF40); // 50% grey over green
+    CHECK(staging.at(0, 0) == 1 && staging.hd(0, 0) == 0x00FF00);
+
+    // Legacy code erases the text: the text pixel and the fringe made from it
+    // both go (the background HD shows again where it is valid).
+    buffer[1 * 4 + 1] = 10;
+    staging.composeText(&layer, buffer, 4, palette);
+    CHECK(staging.at(1, 1) == 1 && staging.hd(1, 1) == 0x00FF00);
+    CHECK(staging.hd(2, 1) == 0x00FF00);
+
+    // Drawn again: the text is back; something else drawn over it hides it.
+    buffer[1 * 4 + 1] = 200;
+    staging.composeText(&layer, buffer, 4, palette);
+    CHECK(staging.hd(1, 1) == 0xC8C8C8);
+    buffer[1 * 4 + 1] = 77;
+    staging.composeText(&layer, buffer, 4, palette);
+    CHECK(staging.at(1, 1) == 0);
+    CHECK(staging.hd(2, 1) == 0x00FF00);
+
+    // Clear removes text as well.
+    buffer[1 * 4 + 1] = 200;
+    hdLayerClear(&layer);
+    staging.composeText(&layer, buffer, 4, palette);
+    CHECK(staging.at(1, 1) == 0 && staging.at(2, 1) == 0);
+}
+
+static void testTextRedrawAndScroll()
+{
+    std::vector<unsigned char> palette = makePalette();
+    std::vector<unsigned char> buffer(4 * 3, 10);
+    HdLayer layer;
+    hdLayerInit(&layer, 4, 3);
+
+    TextFixture text(4, 3);
+    std::fill(text.before.begin(), text.before.end(), 10);
+    text.mask[1 * 4 + 1] = 1;
+    text.block(1, 1, 0xFFC8C8C8);
+    text.sub(1, 1, 1, 1, 0);
+    buffer[1 * 4 + 1] = 200;
+    hdLayerDrawText(&layer, buffer.data(), 4, text.draw(0, 0));
+
+    // The same text drawn again over itself (the legacy pixel did not change,
+    // `before` is the text's own index): it is still over index 10.
+    std::fill(text.before.begin(), text.before.end(), 10);
+    text.before[1 * 4 + 1] = 200;
+    hdLayerDrawText(&layer, buffer.data(), 4, text.draw(0, 0));
+    Staging staging(4, 3);
+    staging.composeText(&layer, buffer, 4, palette);
+    CHECK(staging.hd(1, 1, 1, 1) == 0x0A0A0A);
+
+    // Colour-cycling indices never get text.
+    buffer[0] = kHdCycleFirst;
+    TextFixture cycling(1, 1);
+    cycling.mask[0] = 1;
+    cycling.block(0, 0, 0xFFFFFFFF);
+    hdLayerDrawText(&layer, buffer.data(), 4, cycling.draw(0, 0));
+    staging.composeText(&layer, buffer, 4, palette);
+    CHECK(staging.at(0, 0) == 0);
+    buffer[0] = 10;
+
+    // Scrolling moves the text with the buffer.
+    std::vector<unsigned char> scrolled(4 * 3, 10);
+    scrolled[1 * 4 + 2] = 200;
+    hdLayerScroll(&layer, -1, 0);
+    staging.composeText(&layer, scrolled, 4, palette);
+    CHECK(staging.at(2, 1) == 1 && staging.hd(2, 1) == 0xC8C8C8);
+    CHECK(staging.at(1, 1) == 0);
+
+    // Baking composites the shown text into the layer pixels.
+    hdLayerBakeText(&layer, scrolled.data(), 4, palette.data());
+    CHECK(layer.textGuard[1 * 4 + 2] == 0);
+    staging.compose(&layer, scrolled, 4);
+    CHECK(staging.at(2, 1) == 1 && staging.hd(2, 1) == 0xC8C8C8 && staging.hd(2, 1, 1, 1) == 0x0A0A0A);
+}
+
+static void testTextScrollRows()
+{
+    std::vector<unsigned char> palette = makePalette();
+    std::vector<unsigned char> buffer(3 * 4, 10);
+    HdLayer layer;
+    hdLayerInit(&layer, 3, 4);
+    CHECK(layer.textTop == layer.textBottom);
+
+    TextFixture text(1, 1);
+    text.before[0] = 10;
+    text.mask[0] = 1;
+    text.block(0, 0, 0xFF646464);
+    buffer[2 * 3 + 1] = 200;
+    hdLayerDrawText(&layer, buffer.data(), 3, text.draw(1, 2));
+    CHECK(layer.textTop == 2 && layer.textBottom == 3);
+
+    // Up by one row (the content moves up: pixel y shows what was at y + 1).
+    std::vector<unsigned char> moved(3 * 4, 10);
+    moved[1 * 3 + 1] = 200;
+    hdLayerScroll(&layer, 0, 1);
+    CHECK(layer.textTop == 1 && layer.textBottom == 2);
+    Staging staging(3, 4);
+    staging.composeText(&layer, moved, 3, palette);
+    CHECK(staging.at(1, 1) == 1 && staging.hd(1, 1) == 0x646464);
+    CHECK(staging.at(1, 2) == 0);
+
+    // Down by three: the text leaves the layer.
+    hdLayerScroll(&layer, 0, -3);
+    CHECK(layer.textTop == layer.textBottom);
+    std::vector<unsigned char> gone(3 * 4, 10);
+    gone[3 * 3 + 1] = 200; // even where the index matches, nothing is left
+    staging.composeText(&layer, gone, 3, palette);
+    CHECK(staging.at(1, 3) == 0);
+}
+
+static void testGlyphUpscale()
+{
+    // A diagonal stroke: sharp rounds it (the corner sub-pixels between the
+    // steps fill), so the 2x is not plain pixel doubling.
+    const unsigned char diagonal[9] = { 7, 0, 0, 0, 7, 0, 0, 0, 7 };
+    std::vector<unsigned char> alpha;
+    hdGlyphUpscale(diagonal, 3, 3, HdGlyphStyle::Sharp, &alpha);
+    int pitch = (3 + 2 * kHdGlyphMargin) * 2;
+    CHECK(static_cast<int>(alpha.size()) == pitch * pitch);
+    auto at = [&](int x, int y) { return alpha[static_cast<size_t>(y + 2 * kHdGlyphMargin) * pitch + x + 2 * kHdGlyphMargin]; };
+    CHECK(at(0, 0) == 255 && at(1, 1) == 255);
+    CHECK(at(2, 1) == 255 || at(1, 2) == 255); // a step is filled
+    CHECK(at(0, 5) == 0 && at(5, 0) == 0);
+    CHECK(alpha[0] == 0); // margin stays empty
+
+    // An isolated pixel stays a 2x2 block; levels map to alpha.
+    const unsigned char dot[1] = { 7 };
+    hdGlyphUpscale(dot, 1, 1, HdGlyphStyle::Sharp, &alpha);
+    pitch = (1 + 2 * kHdGlyphMargin) * 2;
+    CHECK(alpha[2 * pitch + 2] == 255 && alpha[3 * pitch + 3] == 255);
+    const unsigned char half[1] = { 3 };
+    hdGlyphUpscale(half, 1, 1, HdGlyphStyle::Sharp, &alpha);
+    CHECK(alpha[2 * pitch + 2] == 109);
+
+    // Smooth: a solid block is solid inside and anti-aliased at its edges,
+    // symmetric, and reaches at most the margin.
+    std::vector<unsigned char> square(16, 7);
+    hdGlyphUpscale(square.data(), 4, 4, HdGlyphStyle::Smooth, &alpha);
+    pitch = (4 + 2 * kHdGlyphMargin) * 2;
+    CHECK(static_cast<int>(alpha.size()) == pitch * pitch);
+    CHECK(alpha[static_cast<size_t>(5) * pitch + 5] == 255);
+    bool symmetric = true;
+    bool partial = false;
+    for (int y = 0; y < pitch; y++) {
+        for (int x = 0; x < pitch; x++) {
+            unsigned char value = alpha[static_cast<size_t>(y) * pitch + x];
+            symmetric = symmetric && value == alpha[static_cast<size_t>(y) * pitch + (pitch - 1 - x)];
+            partial = partial || (value > 0 && value < 255);
+        }
+    }
+    CHECK(symmetric);
+    CHECK(partial);
+    CHECK(alpha[0] == 0);
+
+    HdGlyphStyle style;
+    CHECK(hdGlyphStyleFromName("sharp", &style) && style == HdGlyphStyle::Sharp);
+    CHECK(hdGlyphStyleFromName("smooth", &style) && style == HdGlyphStyle::Smooth);
+    CHECK(!hdGlyphStyleFromName("blurry", &style));
+}
+
 int main()
 {
     testShadowValidation();
@@ -550,6 +795,10 @@ int main()
     testDrawLit();
     testScrollAndInvalidate();
     testCaptureAndBlend();
+    testTextOverlay();
+    testTextRedrawAndScroll();
+    testTextScrollRows();
+    testGlyphUpscale();
 
     if (gFailures != 0) {
         fprintf(stderr, "hd_layer_test: %d check(s) failed\n", gFailures);

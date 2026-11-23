@@ -5,6 +5,7 @@
 
 #include "color.h"
 #include "db.h"
+#include "font_manager.h"
 #include "memory.h"
 #include "platform_compat.h"
 #include "settings.h"
@@ -442,6 +443,69 @@ static int textFontGetMonospacedCharacterWidthImpl()
     }
 
     return width + gCurrentTextFontDescriptor->letterSpacing;
+}
+
+bool fontGetHdInfo(int font, FontHdInfo* info)
+{
+    if (font >= 100) {
+        return interfaceFontGetHdInfo(font, info);
+    }
+
+    if (font < 0 || font >= TEXT_FONT_MAX || gTextFontDescriptors[font].glyphCount == 0) {
+        return false;
+    }
+
+    const TextFontDescriptor* descriptor = &(gTextFontDescriptors[font]);
+    int widest = 0;
+    for (int index = 0; index < descriptor->glyphCount; index++) {
+        widest = std::max(widest, descriptor->glyphs[index].width);
+    }
+
+    info->interfaceFont = false;
+    info->rows = descriptor->lineHeight;
+    info->letterSpacing = descriptor->letterSpacing;
+    info->wordSpacing = 0;
+    info->glyphCount = descriptor->glyphCount;
+    info->monospacedWidth = widest + descriptor->letterSpacing;
+    return true;
+}
+
+bool fontGetHdGlyph(int font, int index, int* width, int* height, std::vector<unsigned char>* levels)
+{
+    if (font >= 100) {
+        return interfaceFontGetHdGlyph(font, index, width, height, levels);
+    }
+
+    if (font < 0 || font >= TEXT_FONT_MAX) {
+        return false;
+    }
+
+    const TextFontDescriptor* descriptor = &(gTextFontDescriptors[font]);
+    if (index < 0 || index >= descriptor->glyphCount) {
+        return false;
+    }
+
+    // Same bit walk as textFontDrawImpl.
+    const TextFontGlyph* glyph = &(descriptor->glyphs[index]);
+    *width = glyph->width;
+    *height = descriptor->lineHeight;
+    levels->assign(static_cast<size_t>(glyph->width) * descriptor->lineHeight, 0);
+    const unsigned char* glyphData = descriptor->data + glyph->dataOffset;
+    for (int y = 0; y < descriptor->lineHeight; y++) {
+        int bits = 0x80;
+        for (int x = 0; x < glyph->width; x++) {
+            if (bits == 0) {
+                bits = 0x80;
+                glyphData++;
+            }
+            if ((*glyphData & bits) != 0) {
+                (*levels)[static_cast<size_t>(y) * glyph->width + x] = 7;
+            }
+            bits >>= 1;
+        }
+        glyphData++;
+    }
+    return true;
 }
 
 void fontDrawText2D(const Buffer2D& dest, int xPos, int yPos, const char* string, int length, ColorWithFlags color)

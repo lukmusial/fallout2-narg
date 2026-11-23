@@ -276,6 +276,8 @@ void initSettingsRegistry(bool isMapper)
     SETTING(hd);
     SETTING(hd_pack);
     SETTING_P(hd_cache_mb, clamp(16, 8192));
+    SETTING(hd_text);
+    SETTING(hd_text_style);
 #undef SECT
 
 #define SECT ui

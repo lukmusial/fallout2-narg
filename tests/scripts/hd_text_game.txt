@@ -1,0 +1,14 @@
+# Phase 2.9 HD text in a game view (run with --dev-load-game=N and
+# [graphics]hd=1): interface bar message monitor and floating text over the
+# player, captured as the presented framebuffer (fbshot) and as the 8-bit
+# window composition (legacyshot, which HD text must leave unchanged).
+until game 30000
+wait 1500
+monitor HD text: the quick brown fox jumps over the lazy dog.
+monitor Stimpack applied. You gain 12 hit points.
+floattext Ouch! That really hurt.
+wait 300
+fbshot game
+legacyshot game_legacy
+hdtextstats stats
+quit 0

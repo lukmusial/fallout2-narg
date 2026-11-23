@@ -9,6 +9,7 @@
 #include "color.h"
 #include "db.h"
 #include "debug.h"
+#include "hd_text.h"
 #include "memory_manager.h"
 #include "settings.h"
 
@@ -126,7 +127,8 @@ void interfaceFontDrawTextScaled2D(const Buffer2D& dest, int x, int y, const cha
         return;
     }
 
-    interfaceFontDrawScaledImpl(dest, x, y, string, color, std::max(scale, 0.01f));
+    // CE: HD text draws the same string at 2x around the legacy draw.
+    hdTextDrawScaled(dest, x, y, string, color, std::max(scale, 0.01f), interfaceFontDrawScaledImpl);
 }
 
 int interfaceFontGetStringWidthScaled(const char* string, ColorWithFlags color, float scale)
@@ -510,6 +512,43 @@ static int interfaceFontGetScaledWidthImpl(const char* string, ColorWithFlags co
     }
 
     return std::max(0, static_cast<int>(lround(width)));
+}
+
+bool interfaceFontGetHdInfo(int font, FontHdInfo* info)
+{
+    font -= 100;
+    if (!gInterfaceFontsInitialized || font < 0 || font >= INTERFACE_FONT_MAX || gInterfaceFontDescriptors[font].data == nullptr) {
+        return false;
+    }
+
+    // Monospaced width as interfaceFontGetMonospacedCharacterWidthImpl.
+    const InterfaceFontDescriptor* descriptor = &(gInterfaceFontDescriptors[font]);
+    int spacing = descriptor->wordSpacing <= descriptor->field_8 ? descriptor->lineSpacing : descriptor->letterSpacing;
+
+    info->interfaceFont = true;
+    info->rows = descriptor->maxHeight;
+    info->letterSpacing = descriptor->letterSpacing;
+    info->wordSpacing = descriptor->wordSpacing;
+    info->glyphCount = 256;
+    info->monospacedWidth = spacing + descriptor->maxHeight;
+    return true;
+}
+
+bool interfaceFontGetHdGlyph(int font, int index, int* width, int* height, std::vector<unsigned char>* levels)
+{
+    font -= 100;
+    if (!gInterfaceFontsInitialized || font < 0 || font >= INTERFACE_FONT_MAX || gInterfaceFontDescriptors[font].data == nullptr
+        || index < 0 || index >= 256) {
+        return false;
+    }
+
+    const InterfaceFontDescriptor* descriptor = &(gInterfaceFontDescriptors[font]);
+    const InterfaceFontGlyph* glyph = &(descriptor->glyphs[index]);
+    *width = std::max<int>(glyph->width, 0);
+    *height = std::max<int>(glyph->height, 0);
+    const unsigned char* data = descriptor->data + glyph->offset;
+    levels->assign(data, data + static_cast<size_t>(*width) * *height);
+    return true;
 }
 
 // NOTE: Inlined.

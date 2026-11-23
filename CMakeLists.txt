@@ -144,8 +144,12 @@ set(FALLOUT_ENGINE_SOURCES
     "src/hd_art.h"
     "src/hd_format.cc"
     "src/hd_format.h"
+    "src/hd_glyph.cc"
+    "src/hd_glyph.h"
     "src/hd_layer.cc"
     "src/hd_layer.h"
+    "src/hd_text.cc"
+    "src/hd_text.h"
     "src/heap.cc"
     "src/heap.h"
     "src/input.cc"
@@ -637,6 +641,7 @@ if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
 
     add_executable(hd_layer_test
         "tests/unit/hd_layer_test.cc"
+        "src/hd_glyph.cc"
         "src/hd_layer.cc"
     )
     target_include_directories(hd_layer_test PRIVATE "src")

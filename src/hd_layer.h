@@ -46,6 +46,20 @@ struct HdImage {
     std::vector<uint32_t> pixels;
 };
 
+// Text overlay guard bits (HdLayer::textGuard): kHdTextSelf marks a text
+// pixel (the legacy text draw wrote it); bits 0..7 (kHdTextNeighbours) mark
+// the neighbouring text pixels a fringe pixel's 2x colours were made from.
+constexpr uint16_t kHdTextSelf = 0x100;
+
+struct HdTextNeighbour {
+    int dx;
+    int dy;
+};
+
+constexpr HdTextNeighbour kHdTextNeighbours[8] = {
+    { -1, -1 }, { 0, -1 }, { 1, -1 }, { -1, 0 }, { 1, 0 }, { -1, 1 }, { 0, 1 }, { 1, 1 }
+};
+
 struct HdLayer {
     // Logical size (the window's size); `pixels` is kHdScale times larger in
     // each direction and holds opaque 0x00RRGGBB colours.
@@ -54,10 +68,102 @@ struct HdLayer {
     std::vector<uint32_t> pixels;
     std::vector<unsigned char> shadow;
     std::vector<unsigned char> valid;
+
+    // Text overlay (Phase 2.9, see hdLayerDrawText): 2x text drawn over
+    // whatever the layer or the legacy buffer shows. Empty until the first
+    // text draw. `textPixels` holds premultiplied 0xAARRGGBB colours (2x);
+    // per logical pixel `textGuard` says what must still be in the window
+    // buffer for the text to show, `textShadow` is the buffer index a text
+    // pixel had after the legacy draw and `textUnder` the index before it
+    // (what the text was drawn over).
+    std::vector<uint32_t> textPixels;
+    std::vector<uint16_t> textGuard;
+    std::vector<unsigned char> textShadow;
+    std::vector<unsigned char> textUnder;
+    // Rows [textTop, textBottom) hold all text (empty when equal), so
+    // scrolling and compositing skip the rest.
+    int textTop = 0;
+    int textBottom = 0;
 };
 
 void hdLayerInit(HdLayer* layer, int width, int height);
+// Removes all HD pixels and text.
 void hdLayerClear(HdLayer* layer);
+
+// A 2x text draw that legacy code has just made at 1x (hd_text.cc renders
+// the same string with 2x glyphs). The rectangle (x, y, width, height) is in
+// layer coordinates; `mask` (1x, pitch `width`) is non-zero where the legacy
+// draw wrote a pixel (glyphs, shadow, underline, outline), `pixels` (2x,
+// pitch 2 * width) the premultiplied 2x colours, relative to the base
+// palette like all HD colours, and `before` (pitch `width`) the window
+// buffer's indices in the rectangle before the legacy draw.
+struct HdTextDraw {
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+    const unsigned char* mask = nullptr;
+    const uint32_t* pixels = nullptr;
+    const unsigned char* before = nullptr;
+};
+
+// Records the text in the layer's text overlay. Text pixels (mask set)
+// show their 2x block for as long as the window buffer keeps the index the
+// legacy draw left there; fringe pixels (mask clear, but the 2x glyphs reach
+// into them) show theirs for as long as every neighbouring text pixel they
+// were made from does. Under the text, the compositor shows the layer's HD
+// pixel when it is valid for the index the text was drawn over, otherwise
+// that index's base palette colour. The legacy buffer stays the truth:
+// once legacy code draws over the text (or erases it), its pixels show.
+void hdLayerDrawText(HdLayer* layer, const unsigned char* buffer, int bufferPitch, const HdTextDraw& draw);
+
+// Whether the text overlay shows at logical pixel (x, y) of a layer whose
+// window buffer is `buffer`.
+inline bool hdLayerTextShows(const HdLayer* layer, const unsigned char* buffer, int bufferPitch, int x, int y)
+{
+    if (y < layer->textTop || y >= layer->textBottom) {
+        return false;
+    }
+
+    size_t offset = static_cast<size_t>(y) * layer->width + x;
+    uint16_t guard = layer->textGuard[offset];
+    if (guard == 0) {
+        return false;
+    }
+
+    if ((guard & kHdTextSelf) != 0 && buffer[static_cast<size_t>(y) * bufferPitch + x] != layer->textShadow[offset]) {
+        return false;
+    }
+
+    for (int bit = 0; bit < 8; bit++) {
+        if ((guard & (1 << bit)) == 0) {
+            continue;
+        }
+        int nx = x + kHdTextNeighbours[bit].dx;
+        int ny = y + kHdTextNeighbours[bit].dy;
+        if (nx < 0 || ny < 0 || nx >= layer->width || ny >= layer->height) {
+            return false;
+        }
+        size_t neighbour = static_cast<size_t>(ny) * layer->width + nx;
+        if ((layer->textGuard[neighbour] & kHdTextSelf) == 0
+            || buffer[static_cast<size_t>(ny) * bufferPitch + nx] != layer->textShadow[neighbour]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// The 2x2 block the compositor shows at logical pixel (x, y) when the text
+// overlay shows there: the text over the layer's HD pixel (when valid for the
+// index under the text) or the base palette colour of that index.
+void hdLayerTextBlock(const HdLayer* layer, const unsigned char* buffer, int bufferPitch, int x, int y,
+    const unsigned char* basePalette8, uint32_t* block, int blockPitch);
+
+// Composites the text overlay into the layer's own pixels wherever it shows
+// (valid, shadowed by the buffer's index) and removes the overlay; used
+// before effects that only know the layer's pixels (main menu darkening).
+void hdLayerBakeText(HdLayer* layer, const unsigned char* buffer, int bufferPitch, const unsigned char* basePalette8);
 
 // Draws `image` into the layer so that it covers the logical rectangle
 // (x, y, width, height); the image is resampled (bilinear) when it is not
@@ -258,10 +364,13 @@ inline bool hdLayerShows(const HdLayer* layer, int x, int y, unsigned char index
 // (`transparent`), buffer index 0 is see-through and leaves mask/rgb as they
 // are, mirroring blitBufferToBufferTrans. `layer` may be null (no HD).
 // (srcX, srcY) is in window coordinates; mask/rgb point at the destination's
-// top-left (logical and 2x coordinates respectively).
+// top-left (logical and 2x coordinates respectively). Where the layer's text
+// overlay shows, the text is composited over the HD pixel or the base
+// palette colour (`basePalette8`; the overlay is ignored when it is null).
 void hdComposeRect(const HdLayer* layer, const unsigned char* buffer, int bufferPitch,
     int srcX, int srcY, int width, int height,
-    unsigned char* mask, int maskPitch, uint32_t* rgb, int rgbPitch, bool transparent);
+    unsigned char* mask, int maskPitch, uint32_t* rgb, int rgbPitch, bool transparent,
+    const unsigned char* basePalette8 = nullptr);
 
 // Per-index colour mapping from the base palette to the presented palette.
 // For every channel, with base value b and presented value p:
