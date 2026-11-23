@@ -10,6 +10,7 @@
 #include "debug.h"
 #include "dinput.h"
 #include "draw.h"
+#include "hd_layer.h"
 #include "input.h"
 #include "memory.h"
 #include "mouse.h"
@@ -242,6 +243,7 @@ WindowManagerErr windowManagerInit(VideoSystemInitProc* videoSystemInitProc, Vid
     window->hoveredButton = nullptr;
     window->clickedButton = nullptr;
     window->menuBar = nullptr;
+    window->hdLayer = nullptr;
 
     gWindowsLength = 1;
     gWindowSystemInitialized = 1;
@@ -375,6 +377,7 @@ int windowCreate(int x, int y, int width, int height, ColorWithFlags color, Wind
     window->clickedButton = nullptr;
     window->menuBar = nullptr;
     window->blitProc = blitBufferToBufferTrans;
+    window->hdLayer = nullptr;
     window->color = color;
     gWindowIndexes[id] = gWindowsLength;
     gWindowsLength++;
@@ -460,6 +463,9 @@ void windowFree(int win)
     if (window->menuBar != nullptr) {
         internal_free(window->menuBar);
     }
+
+    delete window->hdLayer;
+    window->hdLayer = nullptr;
 
     Button* curr = window->buttonListHead;
     while (curr != nullptr) {
@@ -800,6 +806,85 @@ void windowRefreshRect(int win, const Rect* rect)
     _GNW_win_refresh(window, &newRect, nullptr);
 }
 
+// CE: composites the HD layer of `window` for a screen rectangle into the
+// presenter's staging planes, next to the 8-bit blit into `_screen_buffer`.
+// Window 0 (no buffer) and windows without a layer clear the staging mask.
+static void windowComposeHd(Window* window, const Rect* rect)
+{
+    unsigned char* mask;
+    uint32_t* rgb;
+    if (!presenterGetHdStaging(&mask, &rgb)) {
+        return;
+    }
+
+    int screenWidth = _scr_size.right - _scr_size.left + 1;
+    int width = rect->right - rect->left + 1;
+    int height = rect->bottom - rect->top + 1;
+    unsigned char* maskOrigin = mask + static_cast<size_t>(rect->top) * screenWidth + rect->left;
+    uint32_t* rgbOrigin = rgb + static_cast<size_t>(rect->top) * kHdScale * screenWidth * kHdScale + rect->left * kHdScale;
+
+    if (window->buffer == nullptr) {
+        for (int y = 0; y < height; y++) {
+            memset(maskOrigin + static_cast<size_t>(y) * screenWidth, 0, width);
+        }
+        return;
+    }
+
+    hdComposeRect(window->hdLayer,
+        window->buffer,
+        window->width,
+        rect->left - window->rect.left,
+        rect->top - window->rect.top,
+        width,
+        height,
+        maskOrigin,
+        screenWidth,
+        rgbOrigin,
+        screenWidth * kHdScale,
+        (window->flags & WINDOW_TRANSPARENT) != 0);
+}
+
+bool windowHdIsActive()
+{
+    unsigned char* mask;
+    uint32_t* rgb;
+    return presenterGetHdStaging(&mask, &rgb);
+}
+
+bool windowHdDrawImage(int win, int x, int y, int width, int height, const HdImage& image)
+{
+    if (!windowHdIsActive()) {
+        return false;
+    }
+
+    Window* window = windowGetWindow(win);
+    if (window == nullptr || window->buffer == nullptr) {
+        return false;
+    }
+
+    if (window->hdLayer == nullptr || window->hdLayer->width != window->width || window->hdLayer->height != window->height) {
+        delete window->hdLayer;
+        window->hdLayer = new HdLayer();
+        hdLayerInit(window->hdLayer, window->width, window->height);
+    }
+
+    unsigned char basePalette8[256 * 3];
+    for (int index = 0; index < 256 * 3; index++) {
+        basePalette8[index] = colorExpand6(_cmap[index]);
+    }
+
+    hdLayerDrawImage(window->hdLayer, window->buffer, window->width, x, y, width, height, image, basePalette8);
+    return true;
+}
+
+void windowHdClear(int win)
+{
+    Window* window = windowGetWindow(win);
+    if (window != nullptr && window->hdLayer != nullptr) {
+        hdLayerClear(window->hdLayer);
+    }
+}
+
 // 0x4D6FD8
 void _GNW_win_refresh(Window* window, Rect* rect, unsigned char* dest)
 {
@@ -869,6 +954,7 @@ void _GNW_win_refresh(Window* window, Rect* rect, unsigned char* dest)
                         }
                     } else {
                         if (_buffering) {
+                            windowComposeHd(window, &(clipRect->rect));
                             if (window->flags & WINDOW_TRANSPARENT) {
                                 window->blitProc(
                                     window->buffer + clipRect->rect.left - window->rect.left + (clipRect->rect.top - window->rect.top) * window->width,
@@ -921,6 +1007,7 @@ void _GNW_win_refresh(Window* window, Rect* rect, unsigned char* dest)
                                 dest_pitch);
                         } else {
                             if (_buffering) {
+                                windowComposeHd(window, &(clipRect->rect));
                                 blitBufferToBuffer(buf,
                                     width,
                                     height,
@@ -944,6 +1031,7 @@ void _GNW_win_refresh(Window* window, Rect* rect, unsigned char* dest)
 
                 // if double-buffering, copy double buffer to screen
                 if (_buffering && !dest) {
+                    presenterSetHdSource(true);
                     _scr_blit(
                         _screen_buffer + screenRect->rect.left + (_scr_size.right - _scr_size.left + 1) * screenRect->rect.top,
                         _scr_size.right - _scr_size.left + 1,
@@ -954,6 +1042,7 @@ void _GNW_win_refresh(Window* window, Rect* rect, unsigned char* dest)
                         screenRect->rect.bottom - screenRect->rect.top + 1,
                         screenRect->rect.left,
                         screenRect->rect.top);
+                    presenterSetHdSource(false);
                 }
 
                 _rect_free(screenRect); // this is where we clean up the main linkedList

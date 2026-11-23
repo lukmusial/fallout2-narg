@@ -421,7 +421,7 @@ static bool screenshotCapture(int* widthPtr, int* heightPtr)
 // exported colors match brightness-adjusted rendering.
 static unsigned char* screenshotPalette()
 {
-    return gSdlSurface != nullptr ? directDrawGetPalette() : _getSystemPalette();
+    return directDrawGetPalette();
 }
 
 void takeScreenshot()
@@ -437,22 +437,51 @@ void takeScreenshot()
     gScreenshotBuffer = nullptr;
 }
 
+// Writes the presented framebuffer, at output resolution.
+bool screenshotSaveFramebufferPng(const char* path)
+{
+    const uint32_t* framebuffer = screenGetFramebuffer();
+    if (framebuffer == nullptr) {
+        return false;
+    }
+
+    int width = screenGetFramebufferWidth();
+    int height = screenGetFramebufferHeight();
+    size_t pixelCount = static_cast<size_t>(width) * height;
+    std::vector<unsigned char> image(pixelCount * 3);
+    for (size_t i = 0; i < pixelCount; i++) {
+        uint32_t color = framebuffer[i];
+        image[i * 3] = (color >> 16) & 0xFF;
+        image[i * 3 + 1] = (color >> 8) & 0xFF;
+        image[i * 3 + 2] = color & 0xFF;
+    }
+
+    return lodepng::encode(path, image, width, height, LCT_RGB, 8) == 0;
+}
+
 bool screenshotSavePng(const char* path)
 {
+    // CE: in HD mode the screen has more detail than the window buffers, so
+    // the screenshot is the presented frame at output resolution.
+    if (screenGetFramebufferScale() > 1) {
+        return screenshotSaveFramebufferPng(path);
+    }
+
     int width;
     int height;
     if (!screenshotCapture(&width, &height)) {
         return false;
     }
 
-    unsigned char* palette = screenshotPalette();
+    // The presenter's 8-bit palette, so the PNG matches what is on screen.
+    const unsigned char* palette = directDrawGetPalette8();
     size_t pixelCount = static_cast<size_t>(width) * height;
     std::vector<unsigned char> image(pixelCount * 3);
     for (size_t i = 0; i < pixelCount; i++) {
-        unsigned char* entry = palette + gScreenshotBuffer[i] * 3;
-        image[i * 3] = entry[0] << 2;
-        image[i * 3 + 1] = entry[1] << 2;
-        image[i * 3 + 2] = entry[2] << 2;
+        const unsigned char* entry = palette + gScreenshotBuffer[i] * 3;
+        image[i * 3] = entry[0];
+        image[i * 3 + 1] = entry[1];
+        image[i * 3 + 2] = entry[2];
     }
     internal_free(gScreenshotBuffer);
     gScreenshotBuffer = nullptr;

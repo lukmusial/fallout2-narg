@@ -10,9 +10,16 @@
 #include <string>
 #include <vector>
 
+#include <lodepng.h>
+
+#include <algorithm>
+
+#include "art.h"
+#include "color.h"
 #include "critter.h"
 #include "debug.h"
 #include "game.h"
+#include "hd_art.h"
 #include "input.h"
 #include "kb.h"
 #include "map.h"
@@ -71,6 +78,14 @@ namespace {
         bool buttonRight = false;
 
         std::string engineState;
+
+        // Pending `fadeshot` captures.
+        struct FadeCapture {
+            std::string name;
+            int percent;
+            int direction; // 0 = any, 1 = fade in, -1 = fade out (to black)
+        };
+        std::vector<FadeCapture> fadeCaptures;
     };
 
     AutomationState gAutomation;
@@ -185,6 +200,29 @@ namespace {
         }
         compat_mkdir(path.c_str());
         return gAutomation.outDir + "/" + name + extension;
+    }
+
+    // Writes the logical index plane through the 6-bit system palette, scaled
+    // the way the pre-CE presenter did (`<< 2`), for before/after comparisons.
+    bool writeLegacyPalettePng(const std::string& path)
+    {
+        const unsigned char* indices = screenGetIndexPlane();
+        if (indices == nullptr) {
+            return false;
+        }
+
+        const unsigned char* palette = _getSystemPalette();
+        int width = screenGetWidth();
+        int height = screenGetHeight();
+        size_t pixelCount = static_cast<size_t>(width) * height;
+        std::vector<unsigned char> image(pixelCount * 3);
+        for (size_t i = 0; i < pixelCount; i++) {
+            const unsigned char* entry = palette + indices[i] * 3;
+            image[i * 3] = _currentGammaTable[entry[0] & 0x3F] << 2;
+            image[i * 3 + 1] = _currentGammaTable[entry[1] & 0x3F] << 2;
+            image[i * 3 + 2] = _currentGammaTable[entry[2] & 0x3F] << 2;
+        }
+        return lodepng::encode(path, image, width, height, LCT_RGB, 8) == 0;
     }
 
     // Stops the run with exit code 2, leaving `failure.png` for diagnosis.
@@ -418,6 +456,101 @@ namespace {
             return true;
         }
 
+        if (name == "fbshot") {
+            if (args.empty()) {
+                fail(command, "missing name");
+            }
+            std::string path = outputPath(args[0], ".png");
+            if (!screenshotSaveFramebufferPng(path.c_str())) {
+                fail(command, "framebuffer screenshot failed");
+            }
+            debugPrint("AUTOMATION: wrote %s\n", path.c_str());
+            return true;
+        }
+
+        if (name == "hdpack") {
+            // Switches the HD pack live ("-" = none); later HD draws use it.
+            if (args.empty()) {
+                fail(command, "missing pack name");
+            }
+            hdArtSetPack(args[0] == "-" ? "" : args[0].c_str());
+            return true;
+        }
+
+        if (name == "hdprobe") {
+            // Looks up the HD image for frame 0 of an art file (with the 2x
+            // legacy fallback) and writes it as <name>.png plus <name>.json.
+            if (args.size() < 2) {
+                fail(command, "usage: hdprobe <art path> <name>");
+            }
+            std::string artPath = args[0];
+            std::replace(artPath.begin(), artPath.end(), '/', '\\');
+            FrmImage legacy;
+            bool haveLegacy = legacy.lock(artPath.c_str());
+            bool fromLegacy = false;
+            std::shared_ptr<const HdImage> image = hdArtGetFrame(args[0].c_str(), 0, 0,
+                haveLegacy ? legacy.getData() : nullptr,
+                haveLegacy ? legacy.getWidth() : 0,
+                haveLegacy ? legacy.getHeight() : 0,
+                haveLegacy ? legacy.getWidth() : 0,
+                &fromLegacy);
+
+            if (image != nullptr) {
+                std::vector<unsigned char> rgba(image->pixels.size() * 4);
+                for (size_t i = 0; i < image->pixels.size(); i++) {
+                    uint32_t pixel = image->pixels[i];
+                    rgba[i * 4] = (pixel >> 16) & 0xFF;
+                    rgba[i * 4 + 1] = (pixel >> 8) & 0xFF;
+                    rgba[i * 4 + 2] = pixel & 0xFF;
+                    rgba[i * 4 + 3] = pixel >> 24;
+                }
+                lodepng::encode(outputPath(args[1], ".png"), rgba, image->width, image->height, LCT_RGBA, 8);
+            }
+
+            std::ofstream out(outputPath(args[1], ".json"));
+            out << "{\"found\": " << (image != nullptr ? "true" : "false")
+                << ", \"from_legacy\": " << (fromLegacy ? "true" : "false")
+                << ", \"width\": " << (image != nullptr ? image->width : 0)
+                << ", \"height\": " << (image != nullptr ? image->height : 0)
+                << ", \"legacy_width\": " << (haveLegacy ? legacy.getWidth() : 0)
+                << ", \"legacy_height\": " << (haveLegacy ? legacy.getHeight() : 0)
+                << ", \"pack\": ";
+            jsonString(out, hdArtGetPack().c_str());
+            out << "}\n";
+            return true;
+        }
+
+        if (name == "hdstats") {
+            if (args.empty()) {
+                fail(command, "missing name");
+            }
+            HdArtStats stats;
+            hdArtGetStats(&stats);
+            std::ofstream out(outputPath(args[0], ".json"));
+            out << "{\"assets_resolved\": " << stats.assetsResolved
+                << ", \"assets_with_hd\": " << stats.assetsWithHd
+                << ", \"frames_cached\": " << stats.framesCached
+                << ", \"bytes_cached\": " << stats.bytesCached
+                << ", \"hits\": " << stats.hits
+                << ", \"misses\": " << stats.misses << "}\n";
+            return true;
+        }
+
+        if (name == "fadeshot") {
+            if (args.size() < 2) {
+                fail(command, "usage: fadeshot <name> <percent> [in|out]");
+            }
+            AutomationState::FadeCapture capture;
+            capture.name = args[0];
+            capture.percent = atoi(args[1].c_str());
+            capture.direction = 0;
+            if (args.size() > 2) {
+                capture.direction = args[2] == "in" ? 1 : (args[2] == "out" ? -1 : 0);
+            }
+            gAutomation.fadeCaptures.push_back(capture);
+            return true;
+        }
+
         if (name == "dump") {
             if (args.empty()) {
                 fail(command, "missing name");
@@ -427,6 +560,34 @@ namespace {
                 fail(command, "state dump failed");
             }
             debugPrint("AUTOMATION: wrote %s\n", path.c_str());
+            return true;
+        }
+
+        if (name == "perf") {
+            // `perf reset` starts a measurement; `perf <name>` writes the
+            // presenter counters gathered since then and starts a new one.
+            if (args.empty()) {
+                fail(command, "missing name");
+            }
+            if (args[0] != "reset") {
+                PresenterStats stats;
+                presenterGetStats(&stats);
+                std::string path = outputPath(args[0], ".json");
+                FILE* stream = fopen(path.c_str(), "wt");
+                if (stream == nullptr) {
+                    fail(command, "cannot write perf file");
+                }
+                fprintf(stream,
+                    "{\n \"framebuffer\": [%d, %d],\n \"presents\": %llu,\n \"present_avg_ms\": %.4f,\n \"present_max_ms\": %.4f,\n"
+                    " \"convert_total_ms\": %.4f,\n \"converted_pixels\": %llu,\n \"palette_total_ms\": %.4f,\n \"palette_updates\": %llu,\n"
+                    " \"uploaded_pixels\": %llu\n}\n",
+                    stats.framebufferWidth, stats.framebufferHeight, static_cast<unsigned long long>(stats.presents), stats.presentMs, stats.presentMaxMs,
+                    stats.convertMs, static_cast<unsigned long long>(stats.convertedPixels), stats.paletteMs, static_cast<unsigned long long>(stats.paletteUpdates),
+                    static_cast<unsigned long long>(stats.uploadedPixels));
+                fclose(stream);
+                debugPrint("AUTOMATION: wrote %s\n", path.c_str());
+            }
+            presenterResetStats();
             return true;
         }
 
@@ -518,6 +679,27 @@ void devAutomationTick()
             return;
         }
         gAutomation.next++;
+    }
+}
+
+void devAutomationOnFadeStep(int step, int steps, bool toBlack)
+{
+    if (!gAutomation.active || gAutomation.fadeCaptures.empty() || steps <= 0) {
+        return;
+    }
+
+    auto& captures = gAutomation.fadeCaptures;
+    for (auto it = captures.begin(); it != captures.end();) {
+        bool directionMatches = it->direction == 0 || (it->direction == 1 && !toBlack) || (it->direction == -1 && toBlack);
+        if (directionMatches && step * 100 >= it->percent * steps) {
+            std::string path = outputPath(it->name, ".png");
+            screenshotSaveFramebufferPng(path.c_str());
+            writeLegacyPalettePng(outputPath(it->name + "_6bit", ".png"));
+            debugPrint("AUTOMATION: wrote %s (fade step %d/%d)\n", path.c_str(), step, steps);
+            it = captures.erase(it);
+        } else {
+            ++it;
+        }
     }
 }
 

@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "db.h"
+#include "dev_automation.h"
 #include "memory.h"
 #include "svga.h"
 
@@ -55,6 +56,10 @@ unsigned char _systemCmap[COLOR_MAP_SIZE];
 // 0x673390 currentGammaTable
 unsigned char _currentGammaTable[64];
 
+// CE: the same brightness curve over 8-bit components, used for everything
+// sent to the presenter, so brightness and fades do not band to 64 levels.
+static unsigned char gGammaTable8[256];
+
 // 0x6733D0 blendTable
 Color* _blendTable[COLOR_COUNT];
 
@@ -91,16 +96,42 @@ int Color2RGB(Color c)
 
 // Performs animated palette transition.
 //
+// Sends 8-bit components (before brightness) to the presenter.
+static void colorPresentPalette8(const unsigned char* palette8, int start, int count)
+{
+    unsigned char corrected[COLOR_MAP_SIZE];
+    for (int index = 0; index < count * 3; index++) {
+        corrected[index] = gGammaTable8[palette8[index]];
+    }
+    directDrawSetPalette8InRange(corrected, start, count);
+}
+
 // 0x4C7320 fadeSystemPalette
+//
+// CE: intermediate steps are interpolated at 8-bit precision for the
+// presenter; `_systemCmap` keeps the 6-bit values the game reads back.
 void colorPaletteFadeBetween(unsigned char* oldPalette, unsigned char* newPalette, int steps)
 {
+    bool toBlack = true;
+    for (int index = 0; index < COLOR_MAP_SIZE; index++) {
+        if (newPalette[index] != 0) {
+            toBlack = false;
+            break;
+        }
+    }
+
     for (int step = 0; step < steps; step++) {
         sharedFpsLimiter.mark();
 
         unsigned char palette[COLOR_MAP_SIZE];
+        unsigned char palette8[COLOR_MAP_SIZE];
 
         for (int index = 0; index < COLOR_MAP_SIZE; index++) {
             palette[index] = oldPalette[index] - (oldPalette[index] - newPalette[index]) * step / steps;
+
+            int from = colorExpand6(oldPalette[index]);
+            int to = colorExpand6(newPalette[index]);
+            palette8[index] = static_cast<unsigned char>(from - (from - to) * step / steps);
         }
 
         if (gColorPaletteTransitionCallback != nullptr) {
@@ -109,7 +140,9 @@ void colorPaletteFadeBetween(unsigned char* oldPalette, unsigned char* newPalett
             }
         }
 
-        _setSystemPalette(palette);
+        memcpy(_systemCmap, palette, sizeof(_systemCmap));
+        colorPresentPalette8(palette8, 0, COLOR_COUNT);
+        devAutomationOnFadeStep(step, steps, toBlack);
         renderPresent();
         sharedFpsLimiter.throttle();
     }
@@ -129,14 +162,14 @@ void colorPaletteSetTransitionCallback(ColorTransitionCallback* callback)
 // 0x4C73E4 setSystemPalette
 void _setSystemPalette(unsigned char* palette)
 {
-    unsigned char newPalette[COLOR_MAP_SIZE];
+    unsigned char palette8[COLOR_MAP_SIZE];
 
     for (int index = 0; index < COLOR_MAP_SIZE; index++) {
-        newPalette[index] = _currentGammaTable[palette[index]];
+        palette8[index] = colorExpand6(palette[index]);
         _systemCmap[index] = palette[index];
     }
 
-    directDrawSetPalette(newPalette);
+    colorPresentPalette8(palette8, 0, COLOR_COUNT);
 }
 
 // 0x4C7420 getSystemPalette
@@ -148,20 +181,20 @@ unsigned char* _getSystemPalette()
 // 0x4C7428 setSystemPaletteEntries
 void _setSystemPaletteEntries(unsigned char* palette, int start, int end)
 {
-    unsigned char newPalette[COLOR_MAP_SIZE];
+    unsigned char palette8[COLOR_MAP_SIZE];
 
     int length = end - start + 1;
     for (int index = 0; index < length; index++) {
-        newPalette[index * 3] = _currentGammaTable[palette[index * 3]];
-        newPalette[index * 3 + 1] = _currentGammaTable[palette[index * 3 + 1]];
-        newPalette[index * 3 + 2] = _currentGammaTable[palette[index * 3 + 2]];
+        palette8[index * 3] = colorExpand6(palette[index * 3]);
+        palette8[index * 3 + 1] = colorExpand6(palette[index * 3 + 1]);
+        palette8[index * 3 + 2] = colorExpand6(palette[index * 3 + 2]);
 
         _systemCmap[start * 3 + index * 3] = palette[index * 3];
         _systemCmap[start * 3 + index * 3 + 1] = palette[index * 3 + 1];
         _systemCmap[start * 3 + index * 3 + 2] = palette[index * 3 + 2];
     }
 
-    directDrawSetPaletteInRange(newPalette, start, end - start + 1);
+    colorPresentPalette8(palette8, start, length);
 }
 
 // 0x4C7550 setIntensityTableColor
@@ -471,6 +504,12 @@ void colorSetBrightness(double value)
     for (int i = 0; i < 64; i++) {
         double value = pow(i, gBrightness);
         _currentGammaTable[i] = (unsigned char)std::clamp(value, 0.0, 63.0);
+    }
+
+    // Same curve on the continuous 0..63 scale, without truncation.
+    for (int i = 0; i < 256; i++) {
+        double value = std::clamp(pow(i * 63.0 / 255.0, gBrightness), 0.0, 63.0);
+        gGammaTable8[i] = static_cast<unsigned char>(std::clamp(static_cast<int>(value * 255.0 / 63.0 + 0.5), 0, 255));
     }
 
     _setSystemPalette(_systemCmap);

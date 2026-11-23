@@ -11,6 +11,9 @@
 
 namespace fallout {
 
+struct HdImage;
+struct HdLayer;
+
 // The maximum number of buttons in one radio group.
 #define BUTTON_GROUP_BUTTON_LIST_CAPACITY (64)
 
@@ -179,6 +182,9 @@ typedef struct Window {
     Button* clickedButton;
     MenuBar* menuBar;
     WindowBlitProc* blitProc;
+    // CE: optional 2x true-colour layer (see hd_layer.h), created on the
+    // first HD draw into this window.
+    HdLayer* hdLayer;
 } Window;
 
 typedef void ButtonCallback(int btn, int keyCode);
@@ -275,6 +281,14 @@ void windowRefresh(int win);
 void windowRefreshRect(int win, const Rect* rect);
 void _GNW_win_refresh(Window* window, Rect* rect, unsigned char* dest);
 void windowRefreshAll(Rect* rect);
+
+// CE: HD layers (see hd_layer.h). Active only with [graphics] hd=1 at scale 2.
+bool windowHdIsActive();
+// Draws a true-colour image into the window's HD layer over the logical
+// rectangle (x, y, width, height), which must already hold the legacy
+// drawing of the same art. The image is resampled if it is not exactly 2x.
+bool windowHdDrawImage(int win, int x, int y, int width, int height, const HdImage& image);
+void windowHdClear(int win);
 void _win_get_mouse_buf(unsigned char* dest);
 bool windowIsValidWindowId(int win);
 Window* windowGetWindow(int win);

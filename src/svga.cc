@@ -1,8 +1,12 @@
 #include "svga.h"
 
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#include <algorithm>
+#include <vector>
 
 #include <SDL.h>
 
@@ -12,6 +16,7 @@
 #include "dinput.h"
 #include "draw.h"
 #include "game.h"
+#include "hd_layer.h"
 #include "interface.h"
 #include "memory.h"
 #include "mouse.h"
@@ -39,10 +44,275 @@ void (*_scr_blit)(unsigned char* src, int src_pitch, int unused, int src_x, int 
 void (*_zero_mem)() = nullptr;
 
 SDL_Window* gSdlWindow = nullptr;
-SDL_Surface* gSdlSurface = nullptr;
 SDL_Renderer* gSdlRenderer = nullptr;
 SDL_Texture* gSdlTexture = nullptr;
-SDL_Surface* gSdlTextureSurface = nullptr;
+
+namespace {
+
+    struct PresenterCounters {
+        uint64_t presents;
+        uint64_t presentTicks;
+        uint64_t presentMaxTicks;
+        uint64_t convertTicks;
+        uint64_t convertedPixels;
+        uint64_t paletteTicks;
+        uint64_t paletteUpdates;
+        uint64_t uploadedPixels;
+    };
+
+} // namespace
+
+// Logical screen size (the size every window and `_scr_size` use).
+static int gScreenWidth = 0;
+static int gScreenHeight = 0;
+
+// What the game has put on screen, one palette index per logical pixel.
+static std::vector<unsigned char> gScreenIndex;
+
+// Presented colours, 0x00RRGGBB, `gFramebufferScale` output pixels per logical
+// pixel in each direction.
+static std::vector<uint32_t> gFramebuffer;
+static int gFramebufferScale = 1;
+
+// Current system palette at 8-bit precision (gamma and fades applied).
+static unsigned char gPalette8[256 * 3];
+static uint32_t gPaletteRgb[256];
+static bool gPaletteValid = false;
+
+// Entries changed since the framebuffer was last brought up to date.
+static bool gPaletteChanged[256];
+static int gPaletteChangedCount = 0;
+
+// Area of the framebuffer (in logical pixels) not yet uploaded to the texture.
+static Rect gDirty = { INT_MAX, INT_MAX, INT_MIN, INT_MIN };
+
+static PresenterCounters gStats;
+
+// HD composition (only when the framebuffer is at kHdScale).
+//
+// The window manager composites HD layers into the staging planes alongside
+// its 8-bit `_screen_buffer` (screen coordinates), then blits rectangles of
+// that buffer here with the HD source flag set; those rectangles copy the
+// staging mask into `gHdMask`. Every other blit (cursor, movies, splash)
+// clears `gHdMask`. Wherever `gHdMask` is set, the screen index plane holds
+// the shadow index of an HD block whose colours are in `gHdStagingRgb`.
+static bool gHdActive = false;
+static std::vector<unsigned char> gHdMask;
+static std::vector<unsigned char> gHdStagingMask;
+static std::vector<uint32_t> gHdStagingRgb;
+static bool gHdSourceIsStaging = false;
+
+// Base palette (`_cmap` at 8 bits) HD colours are authored against, and the
+// mapping from it to the presented palette.
+static unsigned char gHdBase8[256 * 3];
+static HdModulation gHdModulation;
+
+static void presenterAllocateFramebuffer()
+{
+    gFramebuffer.assign(static_cast<size_t>(gScreenWidth) * gFramebufferScale * gScreenHeight * gFramebufferScale, 0);
+
+    gHdActive = gFramebufferScale == kHdScale;
+    size_t logical = gHdActive ? static_cast<size_t>(gScreenWidth) * gScreenHeight : 0;
+    gHdMask.assign(logical, 0);
+    gHdStagingMask.assign(logical, 0);
+    gHdStagingRgb.assign(logical * kHdScale * kHdScale, 0);
+    if (gHdActive) {
+        for (int index = 0; index < 256 * 3; index++) {
+            gHdBase8[index] = colorExpand6(_cmap[index]);
+        }
+        hdModulationBuild(&gHdModulation, gHdBase8, gPalette8);
+    }
+}
+
+// Keeps the modulation in step with the presented palette and `_cmap`.
+// Entries whose base colour changed are flagged so their pixels are redrawn.
+static void presenterUpdateHdModulation(int start, int count)
+{
+    if (!gHdActive) {
+        return;
+    }
+
+    for (int index = 0; index < 256; index++) {
+        unsigned char* base = gHdBase8 + index * 3;
+        unsigned char r = colorExpand6(_cmap[index * 3]);
+        unsigned char g = colorExpand6(_cmap[index * 3 + 1]);
+        unsigned char b = colorExpand6(_cmap[index * 3 + 2]);
+        bool inRange = index >= start && index < start + count;
+        if (base[0] != r || base[1] != g || base[2] != b) {
+            base[0] = r;
+            base[1] = g;
+            base[2] = b;
+            if (!gPaletteChanged[index]) {
+                gPaletteChanged[index] = true;
+                gPaletteChangedCount++;
+            }
+            inRange = true;
+        }
+        if (inRange) {
+            hdModulationUpdate(&gHdModulation, gHdBase8, gPalette8, index, 1);
+        }
+    }
+}
+
+static void presenterMarkDirty(int left, int top, int width, int height)
+{
+    gDirty.left = std::min(gDirty.left, left);
+    gDirty.top = std::min(gDirty.top, top);
+    gDirty.right = std::max(gDirty.right, left + width - 1);
+    gDirty.bottom = std::max(gDirty.bottom, top + height - 1);
+}
+
+static void presenterMarkAllDirty()
+{
+    if (gScreenWidth > 0 && gScreenHeight > 0) {
+        presenterMarkDirty(0, 0, gScreenWidth, gScreenHeight);
+    }
+}
+
+// Writes the 2x2 output block of logical pixel (x, y) in HD mode.
+static inline void presenterWriteBlock(int x, int y, uint32_t* dest, int fbWidth)
+{
+    size_t offset = static_cast<size_t>(y) * gScreenWidth + x;
+    unsigned char index = gScreenIndex[offset];
+    if (gHdMask[offset]) {
+        const uint32_t* hd = gHdStagingRgb.data() + static_cast<size_t>(y) * kHdScale * fbWidth + x * kHdScale;
+        dest[0] = hdModulate(&gHdModulation, hd[0], index);
+        dest[1] = hdModulate(&gHdModulation, hd[1], index);
+        dest[fbWidth] = hdModulate(&gHdModulation, hd[fbWidth], index);
+        dest[fbWidth + 1] = hdModulate(&gHdModulation, hd[fbWidth + 1], index);
+    } else {
+        uint32_t color = gPaletteRgb[index];
+        dest[0] = color;
+        dest[1] = color;
+        dest[fbWidth] = color;
+        dest[fbWidth + 1] = color;
+    }
+}
+
+// Converts a rectangle of the index plane into the framebuffer.
+static void presenterConvertRect(int left, int top, int width, int height)
+{
+    if (gFramebuffer.empty() || width <= 0 || height <= 0) {
+        return;
+    }
+
+    uint64_t startCounter = SDL_GetPerformanceCounter();
+
+    const int scale = gFramebufferScale;
+    const int fbWidth = gScreenWidth * scale;
+
+    for (int y = top; y < top + height; y++) {
+        const unsigned char* src = gScreenIndex.data() + static_cast<size_t>(y) * gScreenWidth + left;
+        uint32_t* dest = gFramebuffer.data() + static_cast<size_t>(y) * scale * fbWidth + left * scale;
+        if (gHdActive) {
+            for (int x = 0; x < width; x++) {
+                presenterWriteBlock(left + x, y, dest + x * kHdScale, fbWidth);
+            }
+        } else if (scale == 1) {
+            for (int x = 0; x < width; x++) {
+                dest[x] = gPaletteRgb[src[x]];
+            }
+        } else {
+            for (int x = 0; x < width; x++) {
+                uint32_t color = gPaletteRgb[src[x]];
+                for (int k = 0; k < scale; k++) {
+                    dest[x * scale + k] = color;
+                }
+            }
+            for (int k = 1; k < scale; k++) {
+                memcpy(dest + k * fbWidth, dest, sizeof(uint32_t) * width * scale);
+            }
+        }
+    }
+
+    presenterMarkDirty(left, top, width, height);
+
+    gStats.convertTicks += SDL_GetPerformanceCounter() - startCounter;
+    gStats.convertedPixels += static_cast<uint64_t>(width) * height;
+}
+
+// Brings the framebuffer up to date with palette changes made since the last
+// present. Only pixels whose index changed are rewritten, so colour cycling
+// (a few dozen entries) does not cost a full conversion.
+static void presenterApplyPaletteChanges()
+{
+    if (gPaletteChangedCount == 0 || gFramebuffer.empty()) {
+        gPaletteChangedCount = 0;
+        return;
+    }
+
+    uint64_t startCounter = SDL_GetPerformanceCounter();
+
+    const int scale = gFramebufferScale;
+    const int fbWidth = gScreenWidth * scale;
+    int changedTop = INT_MAX;
+    int changedBottom = INT_MIN;
+
+    for (int y = 0; y < gScreenHeight; y++) {
+        const unsigned char* src = gScreenIndex.data() + static_cast<size_t>(y) * gScreenWidth;
+        uint32_t* dest = gFramebuffer.data() + static_cast<size_t>(y) * scale * fbWidth;
+        bool rowChanged = false;
+        if (gHdActive) {
+            for (int x = 0; x < gScreenWidth; x++) {
+                if (gPaletteChanged[src[x]]) {
+                    presenterWriteBlock(x, y, dest + x * kHdScale, fbWidth);
+                    rowChanged = true;
+                }
+            }
+        } else {
+            for (int x = 0; x < gScreenWidth; x++) {
+                unsigned char index = src[x];
+                if (gPaletteChanged[index]) {
+                    uint32_t color = gPaletteRgb[index];
+                    for (int k = 0; k < scale; k++) {
+                        dest[x * scale + k] = color;
+                    }
+                    rowChanged = true;
+                }
+            }
+
+            if (rowChanged) {
+                for (int k = 1; k < scale; k++) {
+                    memcpy(dest + k * fbWidth, dest, sizeof(uint32_t) * fbWidth);
+                }
+            }
+        }
+
+        if (rowChanged) {
+            changedTop = std::min(changedTop, y);
+            changedBottom = std::max(changedBottom, y);
+        }
+    }
+
+    if (changedTop <= changedBottom) {
+        presenterMarkDirty(0, changedTop, gScreenWidth, changedBottom - changedTop + 1);
+    }
+
+    memset(gPaletteChanged, 0, sizeof(gPaletteChanged));
+    gPaletteChangedCount = 0;
+
+    gStats.paletteTicks += SDL_GetPerformanceCounter() - startCounter;
+    gStats.paletteUpdates++;
+}
+
+// Updates `gHdMask` for a rectangle about to be converted: copied from the
+// staging mask when the blit comes from the window manager's screen buffer,
+// cleared otherwise.
+static void presenterUpdateHdMask(int left, int top, int width, int height)
+{
+    if (!gHdActive) {
+        return;
+    }
+
+    for (int y = top; y < top + height; y++) {
+        unsigned char* mask = gHdMask.data() + static_cast<size_t>(y) * gScreenWidth + left;
+        if (gHdSourceIsStaging) {
+            memcpy(mask, gHdStagingMask.data() + static_cast<size_t>(y) * gScreenWidth + left, width);
+        } else {
+            memset(mask, 0, width);
+        }
+    }
+}
 
 // TODO: Remove once migration to update-render cycle is completed.
 FpsLimiter sharedFpsLimiter;
@@ -123,6 +393,10 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
         height /= scale;
     }
 
+    // CE: with [graphics] hd=1 and a 2x scale the framebuffer is kept at the
+    // output resolution, so HD layers can show full-resolution pixels.
+    gFramebufferScale = (settings.graphics.hd && scale == 2) ? 2 : 1;
+
     if (_GNW95_init_window(width, height, settings.screen.windowed, scale) == -1) {
         return -1;
     }
@@ -148,7 +422,7 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
     _mouse_blit_trans = nullptr;
     _scr_blit = _GNW95_ShowRect;
     _zero_mem = _GNW95_zero_vid_mem;
-    _mouse_blit = _GNW95_ShowRect;
+    _mouse_blit = gFramebufferScale == kHdScale ? _GNW95_ShowCursorRect : _GNW95_ShowRect;
 
     return 0;
 }
@@ -205,36 +479,24 @@ int _GNW95_init_window(int width, int height, WindowMode mode, int scale)
 }
 
 // 0x4CAF9C GNW95_init_DirectDraw
+//
+// CE: the screen is an owned 8-bit index plane plus a 32-bit framebuffer that
+// is uploaded to the streaming texture. Indices are converted through an 8-bit
+// precision palette (the game's 6-bit palette expanded by bit replication, with
+// gamma and fades applied at 8 bits, see color.cc).
 int directDrawInit(int width, int height, int bpp)
 {
-    if (gSdlSurface != nullptr) {
-        unsigned char* palette = directDrawGetPalette();
+    (void)bpp;
+
+    if (!gScreenIndex.empty()) {
         directDrawFree();
-
-        if (directDrawInit(width, height, bpp) == -1) {
-            return -1;
-        }
-
-        directDrawSetPalette(palette);
-
-        return 0;
     }
 
-    gSdlSurface = SDL_CreateRGBSurface(0, width, height, bpp, 0, 0, 0, 0);
-    if (gSdlSurface == nullptr || gSdlSurface->format->palette == nullptr) {
-        directDrawFree();
-        return -1;
-    }
-
-    SDL_Color colors[256];
-    for (int index = 0; index < 256; index++) {
-        colors[index].r = index;
-        colors[index].g = index;
-        colors[index].b = index;
-        colors[index].a = 255;
-    }
-
-    SDL_SetPaletteColors(gSdlSurface->format->palette, colors, 0, 256);
+    gScreenWidth = width;
+    gScreenHeight = height;
+    gScreenIndex.assign(static_cast<size_t>(width) * height, 0);
+    presenterAllocateFramebuffer();
+    presenterMarkAllDirty();
 
     return 0;
 }
@@ -242,48 +504,60 @@ int directDrawInit(int width, int height, int bpp)
 // 0x4CB1B0 GNW95_reset_mode
 void directDrawFree()
 {
-    if (gSdlSurface != nullptr) {
-        SDL_FreeSurface(gSdlSurface);
-        gSdlSurface = nullptr;
+    gScreenIndex.clear();
+    gScreenIndex.shrink_to_fit();
+    gFramebuffer.clear();
+    gFramebuffer.shrink_to_fit();
+    gScreenWidth = 0;
+    gScreenHeight = 0;
+}
+
+void directDrawSetPalette8InRange(const unsigned char* palette, int start, int count)
+{
+    if (start < 0 || count <= 0 || start + count > 256) {
+        return;
     }
+
+    for (int index = 0; index < count; index++) {
+        int entry = start + index;
+        unsigned char r = palette[index * 3];
+        unsigned char g = palette[index * 3 + 1];
+        unsigned char b = palette[index * 3 + 2];
+        uint32_t rgb = (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | b;
+        if (gPaletteRgb[entry] != rgb || !gPaletteValid) {
+            gPaletteRgb[entry] = rgb;
+            gPalette8[entry * 3] = r;
+            gPalette8[entry * 3 + 1] = g;
+            gPalette8[entry * 3 + 2] = b;
+            gPaletteChanged[entry] = true;
+            gPaletteChangedCount++;
+        }
+    }
+
+    gPaletteValid = true;
+
+    presenterUpdateHdModulation(start, count);
 }
 
 // 0x4CB310 GNW95_SetPaletteEntries
 void directDrawSetPaletteInRange(unsigned char* palette, int start, int count)
 {
-    if (gSdlSurface != nullptr && gSdlSurface->format->palette != nullptr) {
-        SDL_Color colors[256];
-
-        if (count != 0) {
-            for (int index = 0; index < count; index++) {
-                colors[index].r = palette[index * 3] << 2;
-                colors[index].g = palette[index * 3 + 1] << 2;
-                colors[index].b = palette[index * 3 + 2] << 2;
-                colors[index].a = 255;
-            }
-        }
-
-        SDL_SetPaletteColors(gSdlSurface->format->palette, colors, start, count);
-        SDL_BlitSurface(gSdlSurface, nullptr, gSdlTextureSurface, nullptr);
+    unsigned char palette8[256 * 3];
+    if (start < 0 || count <= 0 || start + count > 256) {
+        return;
     }
+
+    for (int index = 0; index < count * 3; index++) {
+        palette8[index] = colorExpand6(palette[index]);
+    }
+
+    directDrawSetPalette8InRange(palette8, start, count);
 }
 
 // 0x4CB568 GNW95_SetPalette
 void directDrawSetPalette(unsigned char* palette)
 {
-    if (gSdlSurface != nullptr && gSdlSurface->format->palette != nullptr) {
-        SDL_Color colors[256];
-
-        for (int index = 0; index < 256; index++) {
-            colors[index].r = palette[index * 3] << 2;
-            colors[index].g = palette[index * 3 + 1] << 2;
-            colors[index].b = palette[index * 3 + 2] << 2;
-            colors[index].a = 255;
-        }
-
-        SDL_SetPaletteColors(gSdlSurface->format->palette, colors, 0, 256);
-        SDL_BlitSurface(gSdlSurface, nullptr, gSdlTextureSurface, nullptr);
-    }
+    directDrawSetPaletteInRange(palette, 0, 256);
 }
 
 // 0x4CB68C GNW95_GetPalette
@@ -292,18 +566,16 @@ unsigned char* directDrawGetPalette()
     // 0x6ACA24
     static unsigned char palette[768];
 
-    if (gSdlSurface != nullptr && gSdlSurface->format->palette != nullptr) {
-        SDL_Color* colors = gSdlSurface->format->palette->colors;
-
-        for (int index = 0; index < 256; index++) {
-            SDL_Color* color = &(colors[index]);
-            palette[index * 3] = color->r >> 2;
-            palette[index * 3 + 1] = color->g >> 2;
-            palette[index * 3 + 2] = color->b >> 2;
-        }
+    for (int index = 0; index < 768; index++) {
+        palette[index] = gPalette8[index] >> 2;
     }
 
     return palette;
+}
+
+const unsigned char* directDrawGetPalette8()
+{
+    return gPalette8;
 }
 
 // 0x4CB850 GNW95_ShowRect
@@ -311,18 +583,88 @@ void _GNW95_ShowRect(unsigned char* src, int srcPitch, int unused, int srcX, int
 {
     (void)unused;
 
-    blitBufferToBuffer(src + srcPitch * srcY + srcX, srcWidth, srcHeight, srcPitch, (unsigned char*)gSdlSurface->pixels + gSdlSurface->pitch * destY + destX, gSdlSurface->pitch);
+    if (gScreenIndex.empty()) {
+        return;
+    }
 
-    SDL_Rect srcRect;
-    srcRect.x = destX;
-    srcRect.y = destY;
-    srcRect.w = srcWidth;
-    srcRect.h = srcHeight;
+    // Callers clip against the screen; guard anyway since the index plane is
+    // owned memory now.
+    if (destX < 0) {
+        srcX -= destX;
+        srcWidth += destX;
+        destX = 0;
+    }
+    if (destY < 0) {
+        srcY -= destY;
+        srcHeight += destY;
+        destY = 0;
+    }
+    srcWidth = std::min(srcWidth, gScreenWidth - destX);
+    srcHeight = std::min(srcHeight, gScreenHeight - destY);
+    if (srcWidth <= 0 || srcHeight <= 0) {
+        return;
+    }
 
-    SDL_Rect destRect;
-    destRect.x = destX;
-    destRect.y = destY;
-    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlTextureSurface, &destRect);
+    blitBufferToBuffer(src + srcPitch * srcY + srcX, srcWidth, srcHeight, srcPitch, gScreenIndex.data() + gScreenWidth * destY + destX, gScreenWidth);
+    presenterUpdateHdMask(destX, destY, srcWidth, srcHeight);
+    presenterConvertRect(destX, destY, srcWidth, srcHeight);
+}
+
+// CE: cursor blit in HD mode. `src` is the window content under the cursor
+// with the cursor drawn over it (see `mouseShowCursor`); the screen already
+// shows that window content, so pixels that are unchanged keep their HD
+// block and only the cursor's own pixels become legacy.
+void _GNW95_ShowCursorRect(unsigned char* src, int srcPitch, int unused, int srcX, int srcY, int srcWidth, int srcHeight, int destX, int destY)
+{
+    if (!gHdActive) {
+        _GNW95_ShowRect(src, srcPitch, unused, srcX, srcY, srcWidth, srcHeight, destX, destY);
+        return;
+    }
+
+    if (destX < 0) {
+        srcX -= destX;
+        srcWidth += destX;
+        destX = 0;
+    }
+    if (destY < 0) {
+        srcY -= destY;
+        srcHeight += destY;
+        destY = 0;
+    }
+    srcWidth = std::min(srcWidth, gScreenWidth - destX);
+    srcHeight = std::min(srcHeight, gScreenHeight - destY);
+    if (srcWidth <= 0 || srcHeight <= 0) {
+        return;
+    }
+
+    for (int y = 0; y < srcHeight; y++) {
+        const unsigned char* srcRow = src + static_cast<size_t>(srcY + y) * srcPitch + srcX;
+        size_t offset = static_cast<size_t>(destY + y) * gScreenWidth + destX;
+        for (int x = 0; x < srcWidth; x++) {
+            if (gScreenIndex[offset + x] != srcRow[x]) {
+                gScreenIndex[offset + x] = srcRow[x];
+                gHdMask[offset + x] = 0;
+            }
+        }
+    }
+
+    presenterConvertRect(destX, destY, srcWidth, srcHeight);
+}
+
+bool presenterGetHdStaging(unsigned char** maskPtr, uint32_t** rgbPtr)
+{
+    if (!gHdActive) {
+        return false;
+    }
+
+    *maskPtr = gHdStagingMask.data();
+    *rgbPtr = gHdStagingRgb.data();
+    return true;
+}
+
+void presenterSetHdSource(bool staging)
+{
+    gHdSourceIsStaging = staging && gHdActive;
 }
 
 // Clears drawing surface.
@@ -334,13 +676,9 @@ void _GNW95_zero_vid_mem()
         return;
     }
 
-    unsigned char* surface = (unsigned char*)gSdlSurface->pixels;
-    for (int y = 0; y < gSdlSurface->h; y++) {
-        memset(surface, 0, gSdlSurface->w);
-        surface += gSdlSurface->pitch;
-    }
-
-    SDL_BlitSurface(gSdlSurface, nullptr, gSdlTextureSurface, nullptr);
+    std::fill(gScreenIndex.begin(), gScreenIndex.end(), 0);
+    std::fill(gHdMask.begin(), gHdMask.end(), 0);
+    presenterConvertRect(0, 0, gScreenWidth, gScreenHeight);
 }
 
 int screenGetWidth()
@@ -383,31 +721,18 @@ static bool createRenderer(int width, int height)
         return false;
     }
 
-    gSdlTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING, width, height);
+    gSdlTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING, width * gFramebufferScale, height * gFramebufferScale);
     if (gSdlTexture == nullptr) {
         return false;
     }
 
-    Uint32 format;
-    if (SDL_QueryTexture(gSdlTexture, &format, nullptr, nullptr, nullptr) != 0) {
-        return false;
-    }
-
-    gSdlTextureSurface = SDL_CreateRGBSurfaceWithFormat(0, width, height, SDL_BITSPERPIXEL(format), format);
-    if (gSdlTextureSurface == nullptr) {
-        return false;
-    }
+    presenterMarkAllDirty();
 
     return true;
 }
 
 static void destroyRenderer()
 {
-    if (gSdlTextureSurface != nullptr) {
-        SDL_FreeSurface(gSdlTextureSurface);
-        gSdlTextureSurface = nullptr;
-    }
-
     if (gSdlTexture != nullptr) {
         SDL_DestroyTexture(gSdlTexture);
         gSdlTexture = nullptr;
@@ -432,7 +757,7 @@ void handleWindowSizeChanged()
 
 void renderFpsCounter()
 {
-    if (!settings.debug.show_fps || gSdlSurface == nullptr || gSdlTextureSurface == nullptr) {
+    if (!settings.debug.show_fps || gScreenIndex.empty()) {
         return;
     }
 
@@ -465,35 +790,102 @@ void renderFpsCounter()
     int width = textWidth + kPadding * 2;
     int height = textHeight + kPadding * 2;
 
-    if (width > gSdlSurface->w) {
-        width = gSdlSurface->w;
+    if (width > gScreenWidth) {
+        width = gScreenWidth;
     }
 
-    if (height > gSdlSurface->h) {
-        height = gSdlSurface->h;
+    if (height > gScreenHeight) {
+        height = gScreenHeight;
     }
 
-    bufferFill(static_cast<unsigned char*>(gSdlSurface->pixels), width, height, gSdlSurface->pitch, COLOR_BLACK);
+    unsigned char* pixels = gScreenIndex.data();
+    bufferFill(pixels, width, height, gScreenWidth, COLOR_BLACK);
+    presenterUpdateHdMask(0, 0, width, height);
     if (width > kPadding * 2 && height > kPadding * 2) {
-        fontDrawText(static_cast<unsigned char*>(gSdlSurface->pixels) + gSdlSurface->pitch * kPadding + kPadding, text, width - kPadding * 2, gSdlSurface->pitch, COLOR_LIGHT_GREY);
+        fontDrawText(pixels + gScreenWidth * kPadding + kPadding, text, width - kPadding * 2, gScreenWidth, COLOR_LIGHT_GREY);
     }
 
-    SDL_Rect rect;
-    rect.x = 0;
-    rect.y = 0;
-    rect.w = width;
-    rect.h = height;
-    SDL_BlitSurface(gSdlSurface, &rect, gSdlTextureSurface, &rect);
+    presenterConvertRect(0, 0, width, height);
 }
 
 void renderPresent()
 {
-    SDL_UpdateTexture(gSdlTexture, nullptr, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
+    if (gSdlTexture == nullptr || gFramebuffer.empty()) {
+        return;
+    }
+
+    uint64_t startCounter = SDL_GetPerformanceCounter();
+
+    presenterApplyPaletteChanges();
+
+    if (gDirty.right >= gDirty.left && gDirty.bottom >= gDirty.top) {
+        int fbWidth = gScreenWidth * gFramebufferScale;
+        SDL_Rect rect;
+        rect.x = gDirty.left * gFramebufferScale;
+        rect.y = gDirty.top * gFramebufferScale;
+        rect.w = (gDirty.right - gDirty.left + 1) * gFramebufferScale;
+        rect.h = (gDirty.bottom - gDirty.top + 1) * gFramebufferScale;
+        SDL_UpdateTexture(gSdlTexture, &rect, gFramebuffer.data() + static_cast<size_t>(rect.y) * fbWidth + rect.x, fbWidth * static_cast<int>(sizeof(uint32_t)));
+        gStats.uploadedPixels += static_cast<uint64_t>(rect.w) * rect.h;
+        gDirty = { INT_MAX, INT_MAX, INT_MIN, INT_MIN };
+    }
+
     SDL_RenderClear(gSdlRenderer);
     SDL_RenderCopy(gSdlRenderer, gSdlTexture, nullptr, nullptr);
     // render movie SDL texture if present
     movieRenderDirectOverlay();
     SDL_RenderPresent(gSdlRenderer);
+
+    uint64_t elapsed = SDL_GetPerformanceCounter() - startCounter;
+    gStats.presents++;
+    gStats.presentTicks += elapsed;
+    gStats.presentMaxTicks = std::max(gStats.presentMaxTicks, elapsed);
+}
+
+int screenGetFramebufferScale()
+{
+    return gFramebufferScale;
+}
+
+int screenGetFramebufferWidth()
+{
+    return gScreenWidth * gFramebufferScale;
+}
+
+int screenGetFramebufferHeight()
+{
+    return gScreenHeight * gFramebufferScale;
+}
+
+const unsigned char* screenGetIndexPlane()
+{
+    return gScreenIndex.empty() ? nullptr : gScreenIndex.data();
+}
+
+const uint32_t* screenGetFramebuffer()
+{
+    presenterApplyPaletteChanges();
+    return gFramebuffer.empty() ? nullptr : gFramebuffer.data();
+}
+
+void presenterGetStats(PresenterStats* stats)
+{
+    double frequency = static_cast<double>(SDL_GetPerformanceFrequency());
+    stats->presents = gStats.presents;
+    stats->presentMs = gStats.presents != 0 ? gStats.presentTicks * 1000.0 / frequency / gStats.presents : 0.0;
+    stats->presentMaxMs = gStats.presentMaxTicks * 1000.0 / frequency;
+    stats->convertMs = gStats.convertTicks * 1000.0 / frequency;
+    stats->convertedPixels = gStats.convertedPixels;
+    stats->paletteMs = gStats.paletteTicks * 1000.0 / frequency;
+    stats->paletteUpdates = gStats.paletteUpdates;
+    stats->uploadedPixels = gStats.uploadedPixels;
+    stats->framebufferWidth = screenGetFramebufferWidth();
+    stats->framebufferHeight = screenGetFramebufferHeight();
+}
+
+void presenterResetStats()
+{
+    gStats = {};
 }
 
 } // namespace fallout
