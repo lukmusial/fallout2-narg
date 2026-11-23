@@ -13,6 +13,32 @@ Popular total conversion mods are supported:
 
 CE has broad (though not total) compatibility with [Sfall](https://github.com/sfall-team/sfall) scripting extensions.  Many traditional Fallout mods work out of the box, including NPC Armor, Party Orders, FO2Tweaks (we recommend v14.5+), Talking Heads, VOCK, and many others.
 
+## Local mods in this tree (branch `mods`)
+
+This local copy adds two mods on top of Fallout 2 CE. Nothing here is published.
+
+### Stimpack: savegame editor
+
+A **STIMPACK** button on the main menu (hotkey **S**, above EXIT) opens a save without starting the game and shows a hub:
+
+- **CHARACTER**: the character screen in an edit mode: SPECIAL 1–10 with no point pool, any skill 0–300% at no cost, tag skills, traits, name/age/sex, a **PERKS** editor (every perk, add/remove ranks), and click-to-type Level, Exp, Hit Points (`cur` or `cur/max`) and Skill Points. Cancel reverts everything.
+- **COMPANIONS**: the same screen for a party member (stats, skills, hit points, perks) and **LEVEL UP** with the game's own companion level-up.
+- **ROSTER**: companions join (experimental: their own story state is not set) or leave.
+- **QUESTS**: set any quest to not started / ACTIVE / DONE (the quest variable only: no rewards or map changes).
+- **LOCATION**: towns unknown / known / visited, and **TRAVEL** to move the party there for real.
+- **SAVE AS** writes to the first empty slot and returns to the main menu; **EXIT** leaves without saving.
+
+### HD: true colour and 2x art
+
+With `[graphics] hd=1` (and `[screen] scale=2`) the game renders in true colour at twice its logical resolution. HD art comes from packs under `data/hd/<pack>/` made by `tools/hd` (scripted or local-AI enhancement of the original art; they are derived from the game's art and stay local). `hd_pack=mixed` (the default in `files/fallout2.cfg`) takes the AI pack except where the AI does poorly (`ce.dat` `hd/mixed/manifest.txt`). In HD so far: main menu, load/save, character editor, Stimpack screens, and floors and roofs of Arroyo, Klamath and the Den with smooth RGB lighting. Objects, critters and text are still the original art (work in progress). `hd=0` gives the original 256-colour look.
+
+The bundled `f2_res.dat` has a Russian 800-pixel interface bar; `ce.dat` overrides it with an English one built from the original art (`tools/dev/iface_bar_art.py`).
+
+### Playing and testing
+
+- `tools/dev/setup-play-dir.sh` makes `out/play` (own copy of your saves, HD on, 3440x1440); open `out/play/Fallout II Community Edition.app`.
+- `tools/dev/run-tests.sh` runs the game hidden and silent with scripted input (`--dev-script`), in parallel; see `CONTRIBUTING.md`.
+
 ## Installation — [Download Latest CE Release](https://github.com/fallout2-ce/fallout2-ce/releases)
 
 You *must* own the game to play. Purchase your copy on [GOG](https://www.gog.com/game/fallout_2), [Epic Games](https://store.epicgames.com/p/fallout-2) or [Steam](https://store.steampowered.com/app/38410).
