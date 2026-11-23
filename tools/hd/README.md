@@ -62,12 +62,31 @@ NAMES=$(.venv/bin/python -c "import json;print(' '.join(a['key'] for a in json.l
 .venv/bin/python floors_sheet.py        # runs the game hidden -> docs/screens/phase2.7/
 ```
 
+Walls, scenery and items (Phase 2.8): every wall, scenery and item art
+placed on those maps and on the reference saves' copies of them (1261 FRMs:
+685 walls, 503 scenery, 73 items; 52 of them multi-frame, 338 frames).
+`mapobjects.py` reads the maps' object lists the way the engine does
+(scripts, objects, per-subtype data from the protos). Multi-frame art
+(doors, fire pits, containers) is extracted per frame and direction
+(`png/art/<type>/<name>/d<D>_f<F>.png`) and `install.py` packs the enhanced
+frames into `art/<type>/<name>.fhd`:
+
+```sh
+cd tools/hd
+.venv/bin/python extract.py --areas --objects
+.venv/bin/python enhance_scripted.py    # everything: ~1 min
+.venv/bin/python enhance_ai.py          # everything: ~3 min
+.venv/bin/python install.py
+.venv/bin/python objects_sheet.py       # runs the game hidden -> docs/screens/phase2.8/
+.venv/bin/python pack_review.py --sheet ../../docs/screens/phase2.8/mixed_candidates.png
+```
+
 Select a pack with `[graphics] hd=1` and `[graphics] hd_pack=scripted` (or
 `ai`, or a mixed pack with a `manifest.txt`, see `src/hd_art.h`).
 
 `extract.py --extra art/scenery/car2.frm` adds assets. The game folder
-defaults to `~/Games/Fallout 2`; override it with `FALLOUT2_DIR`. Multi-frame
-FRMs use frame 0, direction 0 for now (critters come in Phase 2.9).
+defaults to `~/Games/Fallout 2`; override it with `FALLOUT2_DIR`. Critters
+come in Phase 2.9.
 
 ## What each enhancer does
 
@@ -170,6 +189,60 @@ lights everywhere, 6 rat caves; machine under other load):
 
 Whole-map redraws happen on map and elevation changes and when combat starts;
 ordinary frames redraw only the rectangles that changed.
+
+## Walls, scenery and items in the engine (Phase 2.8)
+
+`_obj_render_object` (`src/object.cc`) draws walls, scenery and items into
+the iso window's HD layer right after their legacy draw: the pack image (or
+the legacy frame expanded 2x), lit in RGB from the same intensity as the
+legacy draw, so walls in dark places now get the same neutral colour as the
+2.7 floors instead of the palette's reddish dark entries. Critters, misc and
+interface objects stay legacy (critters: Phase 2.9).
+
+- Translucent objects (glass, steam, energy, red, wall), the cut-out
+  ("egg") in walls and roofs around the player and paletted outlines are
+  blended in RGB: the layer's colours under the draw are captured before the
+  legacy blend (`hdLayerCapture`), then `hdLayerDrawBlended` /
+  `hdLayerTintChanged` apply the legacy formula (grey level of the object
+  -> share of the tint; mask / 128 -> share of the wall) without the
+  palette's quantisation. The cut-out therefore shows the HD floor and
+  scenery behind the wall. Solid and colour-cycling outlines stay legacy.
+- One-direction art is looked up as direction 0; multi-frame art comes from
+  the `.fhd` container per frame and direction.
+- `hdcheck` counts wall/scenery/item pixels and their HD share, critter and
+  other object pixels (must stay legacy) and cut-out draws.
+
+Pipeline fix found on the way: `hdlib.fill_holes` padded the colour sums with
+"edge" but the counts with zeros, so holes next to opaque pixels on the image
+border were filled with values that grew without bound (up to ~900000).
+Sprites whose art touches the frame edge came out of the AI as colour noise.
+It also touched 150 floor/roof tiles (the padded canvas edge) and 5 interface
+images; both packs were regenerated (AI tiles changed by 0.6 levels on
+average, up to 15 on some `arrf*`/`jrt*` roof edges; scripted tiles did not
+change).
+
+Observations (see `docs/screens/phase2.8/`):
+
+- AI keeps stone, wood, fabric and metal textures (Arroyo statue and tents,
+  Klamath brick, mine carts) where scripted smears them; for most objects AI
+  is the better pack.
+- Where AI does poorly (`pack_review.py`, sheet `mixed_candidates.png`):
+  the dithered scrap-metal walls `jds*`/`jdd*` get invented vertical streaks
+  (the failure seen on the corrugated roofs), the craps tables `crptbl*`
+  and the `beer` item drift in colour (blue/white outlines that are not in
+  the art). These are proposed for the mixed manifest, not applied.
+- Chain-link fences score worst on the edge metric but look the same as
+  scripted in the game; no change proposed.
+
+Performance (Release, 3440x1440 at scale 2, `run_tests.py --perf N`; slots 1
+Klamath day, 8 Den at night, 6 rat caves):
+
+| | legacy (hd=0) | hd=1 scripted | hd=1 ai | hd=1 mixed |
+|---|---|---|---|---|
+| idle, work per frame | 1.1-2.3 ms | 1.1-1.4 ms | 1.0-1.2 ms | 1.2-2.1 ms |
+| scroll step | 0.3-1.7 ms | 2.7-4.0 ms (max 5.1) | 2.9-4.9 ms (max 9.4) | 2.9-4.4 ms (max 6.5) |
+| whole-map redraw, median | 1.0-2.9 ms | 8.3-12.3 ms | 7.8-9.9 ms | 8.1-11.2 ms |
+| of that, HD tiles / objects | - | 3.1-6.5 / 1.3-2.5 ms | 2.9-4.9 / 1.2-2.1 ms | 2.9-4.9 / 1.2-2.4 ms |
 
 ## Timings (Apple M5 Pro, 64 GB; per asset, warm)
 

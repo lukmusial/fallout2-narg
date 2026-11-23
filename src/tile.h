@@ -10,6 +10,8 @@
 
 namespace fallout {
 
+struct HdLayer;
+
 #define TILE_SET_CENTER_REFRESH_WINDOW 0x01
 #define TILE_SET_CENTER_FLAG_IGNORE_SCROLL_RESTRICTIONS 0x02
 
@@ -80,8 +82,13 @@ void tileRenderEdgeBlackSquares(Rect* rect, MapElevation elevation, bool drawOnT
 //
 // The rectangle (iso window coordinates, inclusive) is about to be redrawn.
 void tileHdInvalidateRect(const Rect* rect);
-// Legacy art (objects) was drawn at (x, y): its non-zero pixels stay legacy.
-void tileHdInvalidateMasked(const unsigned char* src, int srcPitch, int x, int y, int width, int height);
+// Legacy art (objects) is drawn at (x, y): its non-zero pixels are reset
+// (they stay legacy unless an HD draw follows). `objectType` is recorded for
+// tileHdCheck.
+void tileHdInvalidateMasked(const unsigned char* src, int srcPitch, int x, int y, int width, int height, int objectType);
+// The iso window's HD layer while a render pass draws HD (Phase 2.8: objects
+// draw into it too), with the base palette (8-bit RGB triplets); else null.
+HdLayer* tileHdCurrentLayer(const unsigned char** basePalette8);
 // The iso window buffer was scrolled: pixel (x, y) now holds (x + dx, y + dy).
 void tileHdScroll(int dx, int dy);
 
@@ -96,11 +103,15 @@ struct TileHdCheck {
     int staleTilePixels = 0; // of those, on floor/roof pixels (not objects)
     int legacyChanged = 0; // legacy index itself differs from a fresh redraw
     int objectPixels = 0; // drawn by objects
-    int objectPixelsHd = 0; // of those, showing HD (must be 0)
+    int objectPixelsHd = 0; // of those, showing HD
+    int sceneryPixels = 0; // of the object pixels, last drawn by a wall, scenery or item (HD kinds)
+    int sceneryPixelsHd = 0; // of those, showing HD
+    int legacyObjectPixels = 0; // of the object pixels, last drawn by a critter, misc or interface object
+    int legacyObjectPixelsHd = 0; // of those, showing HD (must be 0)
     int tilePixels = 0; // floor/roof only (not black, not colour-cycling, no object drawn there)
     int tilePixelsHd = 0; // of those, showing HD
     int cyclingHd = 0; // colour-cycling indices showing HD (must be 0)
-    std::vector<unsigned char> mask; // per pixel: 0 legacy, 1 HD tile, 2 object, 3 object with HD, 4 stale, 5 legacy changed
+    std::vector<unsigned char> mask; // per pixel: 0 legacy, 1 HD tile, 2 legacy object, 3 HD on a critter/misc object (or unknown), 4 stale, 5 legacy changed, 6 HD wall/scenery/item
 };
 bool tileHdCheck(TileHdCheck* check);
 
@@ -115,9 +126,11 @@ struct TileRenderStats {
     double scrollMs = 0;
     double scrollMaxMs = 0;
     double hdTilesMs = 0; // of all that, drawing HD floor and roof tiles
+    double hdObjectsMs = 0; // and drawing HD walls, scenery and items
 };
 double tileRenderClockMs();
 void tileRenderStatsAdd(bool scroll, double ms);
+void tileRenderStatsAddHdObjects(double ms);
 void tileGetRenderStats(TileRenderStats* stats);
 void tileResetRenderStats();
 bool _square_roof_intersect(int x, int y, MapElevation elevation);

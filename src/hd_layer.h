@@ -163,6 +163,75 @@ struct HdLitDraw {
 // blended over what the layer shows there (or the base palette colour).
 void hdLayerDrawLit(HdLayer* layer, const unsigned char* buffer, int bufferPitch, const HdLitDraw& draw, const unsigned char* basePalette8);
 
+// Blended draws (Phase 2.8): translucent objects, the cut-out ("egg") in
+// walls and roofs around the player, paletted outlines. The legacy code
+// blends into the window buffer, which loses what was under it, so the
+// colours under the draw are captured first:
+//
+// For the logical rectangle (x, y, width, height), `under` receives
+// (2 * width) x (2 * height) colours (row pitch 2 * width): the layer's HD
+// block where it shows, else the base palette colour of the buffer index.
+// Alpha is 0xFF, or 0 where there is no colour to blend with (a
+// colour-cycling index, or outside the layer).
+void hdLayerCapture(const HdLayer* layer, const unsigned char* buffer, int bufferPitch,
+    int x, int y, int width, int height, const unsigned char* basePalette8, std::vector<uint32_t>* under);
+
+enum class HdBlendMode {
+    // Translucent objects (the legacy blend tables): the HD pixel's grey
+    // level sets how much of `tint` covers what is under it; the result is
+    // lit: light(lerp(under, tint, alpha)).
+    Tint,
+    // The cut-out: m = mask value (0..128) at the pixel; 0 draws the lit HD
+    // pixel, else lerp(under, light(hd), m / 128).
+    Mask,
+};
+
+struct HdBlendDraw {
+    // As HdLitDraw (frame part at (frameX, frameY) lands on logical (x, y)).
+    const unsigned char* frame = nullptr;
+    int framePitch = 0;
+    const HdImage* image = nullptr;
+    int frameX = 0;
+    int frameY = 0;
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+    int intensity = 0x10000;
+
+    // hdLayerCapture of exactly (x, y, width, height), taken before the
+    // legacy draw.
+    const uint32_t* under = nullptr;
+
+    HdBlendMode mode = HdBlendMode::Tint;
+
+    // Tint: the tint colour and the grey weights (out of 10) of the legacy
+    // grey table (_commonGrayTable 3/6/1, _glassGrayTable 1/5/4).
+    uint32_t tint = 0;
+    int greyR = 3;
+    int greyG = 6;
+    int greyB = 1;
+
+    // Mask: aligned with (x, y).
+    const unsigned char* mask = nullptr;
+    int maskPitch = 0;
+};
+
+// For every non-transparent frame pixel of the drawn part the blended HD
+// block becomes the layer's pixel, with the buffer's (new) index as shadow.
+// Pixels with no colour to blend with, colour-cycling buffer indices and
+// fully transparent HD blocks are made invalid (legacy shows).
+void hdLayerDrawBlended(HdLayer* layer, const unsigned char* buffer, int bufferPitch, const HdBlendDraw& draw);
+
+// After legacy code changed some pixels of (x, y, width, height) (e.g. an
+// outline drawn around an object), `before` being a copy of the buffer
+// there (row pitch `width`) and `under` its hdLayerCapture: the changed
+// pixels become lerp(under, tint, alpha256 / 256) in HD (a paletted, i.e.
+// translucent, outline over HD pixels), or invalid (legacy) when
+// alpha256 is 0.
+void hdLayerTintChanged(HdLayer* layer, const unsigned char* buffer, int bufferPitch,
+    int x, int y, int width, int height, const unsigned char* before, const uint32_t* under, uint32_t tint, int alpha256);
+
 // Marks a rectangle (logical, clipped to the layer) as having no HD pixels.
 void hdLayerInvalidateRect(HdLayer* layer, int x, int y, int width, int height);
 

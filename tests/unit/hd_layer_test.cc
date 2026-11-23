@@ -460,6 +460,81 @@ static void testScrollAndInvalidate()
     CHECK(staging.at(0, 0) == 1 && staging.at(1, 1) == 0 && staging.at(1, 2) == 0 && staging.at(2, 1) == 1);
 }
 
+static void testCaptureAndBlend()
+{
+    std::vector<unsigned char> palette = makePalette();
+    HdLayer layer;
+    hdLayerInit(&layer, 4, 1);
+    Staging staging(4, 1);
+
+    // Pixel 0 shows HD red; 1 and 3 are legacy index 10; 2 is colour-cycling.
+    std::vector<unsigned char> buffer = { 10, 10, 230, 10 };
+    hdLayerDrawImage(&layer, buffer.data(), 4, 0, 0, 1, 1, solidImage(2, 2, kRed), palette.data());
+    std::vector<uint32_t> under;
+    hdLayerCapture(&layer, buffer.data(), 4, 0, 0, 4, 1, palette.data(), &under);
+    CHECK(under.size() == 4 * 2 * 2);
+    CHECK(under[0] == 0xFFFF0000 && under[8 + 1] == 0xFFFF0000);
+    CHECK(under[2] == 0xFF0A0A0A);
+    CHECK((under[4] >> 24) == 0);
+    CHECK(under[6] == 0xFF0A0A0A);
+
+    // Cut-out (mask mode) over it: the legacy draw left index 60 everywhere.
+    const unsigned char frame[4] = { 50, 50, 50, 50 };
+    const unsigned char mask[4] = { 0, 64, 64, 128 };
+    HdImage image = solidImage(8, 2, 0xFFC8C8C8);
+    std::fill(buffer.begin(), buffer.end(), 60);
+    HdBlendDraw draw;
+    draw.frame = frame;
+    draw.framePitch = 4;
+    draw.image = &image;
+    draw.width = 4;
+    draw.height = 1;
+    draw.under = under.data();
+    draw.mode = HdBlendMode::Mask;
+    draw.mask = mask;
+    draw.maskPitch = 4;
+    hdLayerDrawBlended(&layer, buffer.data(), 4, draw);
+    staging.compose(&layer, buffer, 4);
+    CHECK(staging.at(0, 0) == 1 && staging.hd(0, 0) == 0xC8C8C8); // m = 0: plain wall
+    CHECK(staging.at(1, 0) == 1 && staging.hd(1, 0, 1, 1) == 0x696969); // half wall, half legacy grey
+    CHECK(staging.at(2, 0) == 0); // nothing to blend with: legacy
+    CHECK(staging.at(3, 0) == 1 && staging.hd(3, 0) == 0xC8C8C8);
+
+    // Translucent tint: white HD pixels take the full tint, black ones none;
+    // the result is lit.
+    for (int sy = 0; sy < 2; sy++) {
+        image.pixels[sy * 8 + 0] = image.pixels[sy * 8 + 1] = 0xFFFFFFFF;
+        image.pixels[sy * 8 + 6] = image.pixels[sy * 8 + 7] = 0xFF000000;
+    }
+    draw.mode = HdBlendMode::Tint;
+    draw.mask = nullptr;
+    draw.tint = 0x0000FF;
+    draw.intensity = 0x8000;
+    hdLayerDrawBlended(&layer, buffer.data(), 4, draw);
+    staging.compose(&layer, buffer, 4);
+    CHECK(staging.at(0, 0) == 1 && staging.hd(0, 0) == 0x000080);
+    CHECK(staging.at(3, 0) == 1 && staging.hd(3, 0) == 0x050505);
+    CHECK(staging.at(2, 0) == 0);
+
+    // A paletted outline drawn over HD pixels: changed pixels are tinted
+    // over what was under them; with alpha 0 they turn legacy.
+    hdLayerClear(&layer);
+    std::fill(buffer.begin(), buffer.end(), 10);
+    hdLayerCapture(&layer, buffer.data(), 4, 0, 0, 4, 1, palette.data(), &under);
+    std::vector<unsigned char> before = buffer;
+    std::fill(layer.valid.begin(), layer.valid.end(), 1);
+    std::fill(layer.shadow.begin(), layer.shadow.end(), 10);
+    buffer[1] = 77;
+    buffer[3] = 230;
+    hdLayerTintChanged(&layer, buffer.data(), 4, 0, 0, 4, 1, before.data(), under.data(), 0x0000FF, 128);
+    CHECK(layer.valid[0] == 1 && layer.valid[2] == 1);
+    CHECK(layer.valid[1] == 1 && layer.shadow[1] == 77 && layer.pixels[2] == 0x050585);
+    CHECK(layer.valid[3] == 0);
+    buffer[0] = 78;
+    hdLayerTintChanged(&layer, buffer.data(), 4, 0, 0, 4, 1, before.data(), under.data(), 0x0000FF, 0);
+    CHECK(layer.valid[0] == 0);
+}
+
 int main()
 {
     testShadowValidation();
@@ -474,6 +549,7 @@ int main()
     testLight();
     testDrawLit();
     testScrollAndInvalidate();
+    testCaptureAndBlend();
 
     if (gFailures != 0) {
         fprintf(stderr, "hd_layer_test: %d check(s) failed\n", gFailures);

@@ -35,8 +35,9 @@ namespace fallout {
 //   refresh                   redraw the whole map window (in a game)
 //   benchrefresh <name> <n>   redraw it n times in a row; min/median/max ms
 //                             per redraw (and HD tile drawing) to <name>.json
-//   hdcheck <name>            self-check of the map's HD floors and roofs (see
-//                             tileHdCheck): <name>.json counts, <name>.png classes
+//   hdcheck <name>            self-check of the map's HD layer (floors, roofs,
+//                             walls, scenery, items; see tileHdCheck):
+//                             <name>.json counts, <name>.png classes
 //   perf reset|<name>         reset presenter and map redraw timing counters, or
 //                             write them to <out>/<name>.json and reset
 //   log <text>                write a line to the debug log

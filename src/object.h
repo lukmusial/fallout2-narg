@@ -32,6 +32,10 @@ int objectLoadAll(File* stream);
 int objectSaveAll(File* stream);
 void _obj_render_pre_roof(Rect* rect, MapElevation elevation);
 void _obj_render_post_roof(Rect* rect, MapElevation elevation);
+
+// CE: how many HD object draws so far blended the cut-out around the player
+// (Phase 2.8; dev automation `hdcheck`).
+unsigned int objectHdCutOutDraws();
 int objectCreateWithFrmIdProtoId(Object** objectPtr, const FrmId& frmId, const ProtoId& protoId);
 int objectCreateWithProtoId(Object** objectPtr, const ProtoId& protoId);
 int _obj_copy(Object** a1, Object* a2);

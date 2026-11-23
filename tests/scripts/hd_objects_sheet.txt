@@ -1,0 +1,15 @@
+# Phase 2.8 proposal sheets (tools/hd/objects_sheet.py; run with
+# --dev-load-game=N and [graphics]hd=1). The frames are taken in the same
+# tick, switching the pack and redrawing the map in between, so animated
+# critters and lights are identical in all of them.
+until game 30000
+wait 2000
+hdpack -
+fbshot legacy
+hdpack scripted
+fbshot scripted
+hdpack ai
+fbshot ai
+hdpack mixed
+fbshot mixed
+quit 0

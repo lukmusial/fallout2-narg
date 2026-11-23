@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <limits>
+#include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include "animation.h"
@@ -18,6 +20,8 @@
 #include "draw.h"
 #include "game.h"
 #include "game_mouse.h"
+#include "hd_art.h"
+#include "hd_layer.h"
 #include "item.h"
 #include "light.h"
 #include "map.h"
@@ -4743,6 +4747,175 @@ static int _obj_adjust_light(Object* obj, int a2, Rect* rect)
     return 0;
 }
 
+// CE: HD walls, scenery and items (Phase 2.8). With [graphics] hd=1 and an
+// HD pack, these objects also draw their pack image (or their legacy frame
+// expanded 2x) into the iso window's HD layer right after the legacy draw,
+// lit in RGB from the same intensity. Translucent objects, the cut-out
+// around the player and paletted outlines blend in RGB over what the layer
+// showed before the legacy draw. Critters, misc and interface objects stay
+// legacy (critters: Phase 2.9).
+namespace {
+
+    struct ObjectHdState {
+        // 2x image per (fid, direction, frame); kept while the HD art cache
+        // may evict them, dropped when the pack changes or they grow too big.
+        std::unordered_map<uint64_t, std::shared_ptr<const HdImage>> images;
+        size_t bytes = 0;
+        unsigned int generation = 0;
+
+        // Scratch: colours under a blended draw, buffer before an outline.
+        std::vector<uint32_t> under;
+        std::vector<unsigned char> before;
+
+        unsigned int cutOutDraws = 0;
+    };
+
+    ObjectHdState gObjectHd;
+
+    constexpr size_t kObjectHdMaxBytes = 256 * 1024 * 1024;
+
+} // namespace
+
+unsigned int objectHdCutOutDraws()
+{
+    return gObjectHd.cutOutDraws;
+}
+
+static bool objectHdIsHdType(ObjectType type)
+{
+    return type == OBJ_TYPE_ITEM || type == OBJ_TYPE_SCENERY || type == OBJ_TYPE_WALL;
+}
+
+static uint32_t objectHdPaletteColor(const unsigned char* basePalette8, Color color)
+{
+    return (static_cast<uint32_t>(basePalette8[color * 3]) << 16)
+        | (static_cast<uint32_t>(basePalette8[color * 3 + 1]) << 8)
+        | basePalette8[color * 3 + 2];
+}
+
+// The 2x image of an object frame: the pack's, else the legacy frame
+// expanded; exactly twice the frame's size.
+static const HdImage* objectHdImage(const FrmId& frmId, Art* art, int frame, Rotation rotation)
+{
+    if (gObjectHd.generation != hdArtGeneration() || gObjectHd.bytes > kObjectHdMaxBytes) {
+        gObjectHd.images.clear();
+        gObjectHd.bytes = 0;
+        gObjectHd.generation = hdArtGeneration();
+    }
+
+    // Art with one direction points every direction at the same data; HD
+    // packs store that as direction 0.
+    int direction = art->dataOffsets[rotation] == art->dataOffsets[0] ? 0 : rotation;
+    uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(frmId.fid())) << 32)
+        | (static_cast<uint64_t>(direction) << 24)
+        | (static_cast<uint32_t>(frame) & 0xFFFFFF);
+    auto found = gObjectHd.images.find(key);
+    if (found != gObjectHd.images.end()) {
+        return found->second.get();
+    }
+
+    std::shared_ptr<const HdImage> image;
+    const char* path = frmId.filePath();
+    int width = artGetWidth(art, frame, rotation);
+    int height = artGetHeight(art, frame, rotation);
+    unsigned char* data = artGetFrameData(art, frame, rotation);
+    if (path != nullptr && data != nullptr && width > 0 && height > 0) {
+        image = hdArtGetFrame(path, frame, direction, data, width, height, width);
+        if (image != nullptr && (image->width != width * kHdScale || image->height != height * kHdScale)) {
+            auto resampled = std::make_shared<HdImage>();
+            hdImageResample(*image, width * kHdScale, height * kHdScale, resampled.get());
+            image = resampled;
+        }
+    }
+
+    if (image != nullptr) {
+        gObjectHd.bytes += image->pixels.size() * sizeof(uint32_t);
+    }
+    gObjectHd.images.emplace(key, image);
+    return image.get();
+}
+
+// An object about to be drawn into the iso window, for its HD side.
+struct ObjectHdDraw {
+    HdLayer* layer = nullptr;
+    const unsigned char* basePalette8 = nullptr;
+    const HdImage* image = nullptr;
+    const unsigned char* frame = nullptr; // whole frame
+    int framePitch = 0;
+    int sx = 0; // frame's top-left in the window
+    int sy = 0;
+
+    explicit operator bool() const { return layer != nullptr; }
+
+    // Plain lit draw of the frame part covering `rect` (window coordinates).
+    void drawLit(const Rect& rect, int light) const
+    {
+        HdLitDraw draw;
+        draw.frame = frame;
+        draw.framePitch = framePitch;
+        draw.image = image;
+        draw.frameX = rect.left - sx;
+        draw.frameY = rect.top - sy;
+        draw.x = rect.left;
+        draw.y = rect.top;
+        draw.width = rect.right - rect.left + 1;
+        draw.height = rect.bottom - rect.top + 1;
+        draw.constantIntensity = light;
+        hdLayerDrawLit(layer, gObjectsWindowBuffer, gObjectsWindowPitch, draw, basePalette8);
+    }
+
+    // What the layer shows under `rect`, before a blending legacy draw.
+    void capture(const Rect& rect) const
+    {
+        hdLayerCapture(layer, gObjectsWindowBuffer, gObjectsWindowPitch, rect.left, rect.top,
+            rect.right - rect.left + 1, rect.bottom - rect.top + 1, basePalette8, &gObjectHd.under);
+    }
+
+    // Blended draw over `rect` (captured before).
+    void drawBlended(const Rect& rect, HdBlendDraw& draw) const
+    {
+        draw.frame = frame;
+        draw.framePitch = framePitch;
+        draw.image = image;
+        draw.frameX = rect.left - sx;
+        draw.frameY = rect.top - sy;
+        draw.x = rect.left;
+        draw.y = rect.top;
+        draw.width = rect.right - rect.left + 1;
+        draw.height = rect.bottom - rect.top + 1;
+        draw.under = gObjectHd.under.data();
+        hdLayerDrawBlended(layer, gObjectsWindowBuffer, gObjectsWindowPitch, draw);
+    }
+};
+
+static ObjectHdDraw objectHdBegin(ObjectType type, const FrmId& frmId, Art* art, Object* object)
+{
+    ObjectHdDraw hd;
+    if (!objectHdIsHdType(type)) {
+        return hd;
+    }
+
+    const unsigned char* basePalette8 = nullptr;
+    HdLayer* layer = tileHdCurrentLayer(&basePalette8);
+    if (layer == nullptr) {
+        return hd;
+    }
+
+    const HdImage* image = objectHdImage(frmId, art, object->frame, object->rotation);
+    if (image == nullptr) {
+        return hd;
+    }
+
+    hd.layer = layer;
+    hd.basePalette8 = basePalette8;
+    hd.image = image;
+    hd.frame = artGetFrameData(art, object->frame, object->rotation);
+    hd.framePitch = artGetWidth(art, object->frame, object->rotation);
+    hd.sx = object->sx;
+    hd.sy = object->sy;
+    return hd;
+}
+
 // 0x48EABC obj_render_outline
 static void objectDrawOutline(Object* object, Rect* rect)
 {
@@ -4871,6 +5044,34 @@ static void objectDrawOutline(Object* object, Rect* rect)
             isOutlinePalleted = 0;
             animatedColorBandHeight = 0;
             break;
+        }
+
+        // CE: the outline's pixels over HD (see hdLayerTintChanged): a
+        // paletted outline is a tint over what is under it, so it blends in
+        // RGB; solid (and colour-cycling) outlines stay legacy.
+        const unsigned char* hdPalette = nullptr;
+        HdLayer* hdLayer = tileHdCurrentLayer(&hdPalette);
+        Rect hdRect;
+        if (hdLayer != nullptr) {
+            hdRect.left = std::max(object->sx - 1, gObjectsWindowRect.left);
+            hdRect.top = std::max(object->sy - 1, gObjectsWindowRect.top);
+            hdRect.right = std::min(object->sx + frameWidth, gObjectsWindowRect.right);
+            hdRect.bottom = std::min(object->sy + frameHeight, gObjectsWindowRect.bottom);
+            if (hdRect.left > hdRect.right || hdRect.top > hdRect.bottom) {
+                hdLayer = nullptr;
+            }
+        }
+        if (hdLayer != nullptr) {
+            int width = hdRect.right - hdRect.left + 1;
+            int height = hdRect.bottom - hdRect.top + 1;
+            gObjectHd.before.resize(static_cast<size_t>(width) * height);
+            for (int row = 0; row < height; row++) {
+                memcpy(gObjectHd.before.data() + static_cast<size_t>(row) * width,
+                    gObjectsWindowBuffer + gObjectsWindowPitch * (hdRect.top + row) + hdRect.left, width);
+            }
+            if (isOutlinePalleted != 0) {
+                hdLayerCapture(hdLayer, gObjectsWindowBuffer, gObjectsWindowPitch, hdRect.left, hdRect.top, width, height, hdPalette, &gObjectHd.under);
+            }
         }
 
         Color outlineColor = color;
@@ -5004,6 +5205,20 @@ static void objectDrawOutline(Object* object, Rect* rect)
                 }
             }
         }
+
+        if (hdLayer != nullptr) {
+            int alpha = 0;
+            uint32_t tint = 0;
+            if (isOutlinePalleted != 0) {
+                // blendTable[level][dest] mixes the table's colour over dest
+                // by level / 7 (see _buildBlendTable).
+                alpha = std::min(static_cast<int>(grayTable[color]), 7) * 256 / 7;
+                tint = objectHdPaletteColor(hdPalette, blendTable == _wallBlendTable ? COLOR_PALE_BLUE : COLOR_RED);
+            }
+            hdLayerTintChanged(hdLayer, gObjectsWindowBuffer, gObjectsWindowPitch, hdRect.left, hdRect.top,
+                hdRect.right - hdRect.left + 1, hdRect.bottom - hdRect.top + 1, gObjectHd.before.data(),
+                isOutlinePalleted != 0 ? gObjectHd.under.data() : nullptr, tint, alpha);
+        }
     }
 
     artUnlock(cacheEntry);
@@ -5068,11 +5283,17 @@ static void _obj_render_object(Object* object, Rect* rect, int light)
     int objectWidth = objectRect.right - objectRect.left + 1;
     int objectHeight = objectRect.bottom - objectRect.top + 1;
 
-    // CE: objects stay legacy over HD floors and roofs (Phase 2.7), even
-    // where a pixel's palette index equals the tile pixel under it.
-    tileHdInvalidateMasked(src, frameWidth, objectRect.left, objectRect.top, objectWidth, objectHeight);
+    // CE: the HD side (Phase 2.8). Every object first resets its pixels in
+    // the HD layer (so critters and other legacy objects stay legacy even
+    // where a pixel's palette index equals what is under it); walls,
+    // scenery and items then draw HD after their legacy draw.
+    ObjectHdDraw hd = objectHdBegin(type, frmId, art, object);
+    auto hdInvalidate = [&]() {
+        tileHdInvalidateMasked(src, frameWidth, objectRect.left, objectRect.top, objectWidth, objectHeight, type);
+    };
 
     if (type == OBJ_TYPE_INTERFACE) {
+        hdInvalidate();
         blitBufferToBufferTrans(src,
             objectWidth,
             objectHeight,
@@ -5172,6 +5393,11 @@ static void _obj_render_object(Object* object, Rect* rect, int light)
                     rects[3].right = objectRect.right;
                     rects[3].bottom = objectRect.bottom;
 
+                    if (hd) {
+                        hd.capture(updatedEggRect);
+                    }
+                    hdInvalidate();
+
                     for (int i = 0; i < 4; i++) {
                         Rect* v21 = &(rects[i]);
                         if (v21->left <= v21->right && v21->top <= v21->bottom) {
@@ -5191,6 +5417,21 @@ static void _obj_render_object(Object* object, Rect* rect, int light)
                         mask + eggWidth * (updatedEggRect.top - eggRect.top) + (updatedEggRect.left - eggRect.left),
                         eggWidth,
                         light);
+
+                    // CE: HD wall with the cut-out blended in RGB over what
+                    // was under it.
+                    if (hd) {
+                        double start = tileRenderClockMs();
+                        hd.drawLit(objectRect, light);
+                        HdBlendDraw blend;
+                        blend.intensity = light;
+                        blend.mode = HdBlendMode::Mask;
+                        blend.mask = mask + eggWidth * (updatedEggRect.top - eggRect.top) + (updatedEggRect.left - eggRect.left);
+                        blend.maskPitch = eggWidth;
+                        hd.drawBlended(updatedEggRect, blend);
+                        gObjectHd.cutOutDraws++;
+                        tileRenderStatsAddHdObjects(tileRenderClockMs() - start);
+                    }
                     artUnlock(eggHandle);
                     artUnlock(cacheEntry);
                     return;
@@ -5201,7 +5442,16 @@ static void _obj_render_object(Object* object, Rect* rect, int light)
         }
     }
 
-    switch (object->flags & OBJECT_FLAG_0xFC000) {
+    // (OBJECT_TRANS_NONE and combinations take the plain draw, as below.)
+    ObjectFlags translucency = object->flags & OBJECT_FLAG_0xFC000;
+    bool translucent = translucency == OBJECT_TRANS_RED || translucency == OBJECT_TRANS_WALL
+        || translucency == OBJECT_TRANS_GLASS || translucency == OBJECT_TRANS_STEAM || translucency == OBJECT_TRANS_ENERGY;
+    if (hd && translucent) {
+        hd.capture(objectRect);
+    }
+    hdInvalidate();
+
+    switch (translucency) {
     case OBJECT_TRANS_RED:
         _dark_translucent_trans_buf_to_buf(src, objectWidth, objectHeight, frameWidth, gObjectsWindowBuffer, objectRect.left, objectRect.top, gObjectsWindowPitch, light, _redBlendTable, _commonGrayTable);
         break;
@@ -5220,6 +5470,43 @@ static void _obj_render_object(Object* object, Rect* rect, int light)
     default:
         _dark_trans_buf_to_buf(src, objectWidth, objectHeight, frameWidth, gObjectsWindowBuffer, objectRect.left, objectRect.top, gObjectsWindowPitch, light);
         break;
+    }
+
+    if (hd) {
+        double start = tileRenderClockMs();
+        if (!translucent) {
+            hd.drawLit(objectRect, light);
+        } else {
+            // The legacy blend tables: the object's grey level sets how much
+            // of the table's colour covers what is under it, then it is lit.
+            HdBlendDraw blend;
+            blend.mode = HdBlendMode::Tint;
+            blend.intensity = light;
+            Color tint = COLOR_RED;
+            switch (translucency) {
+            case OBJECT_TRANS_WALL:
+                tint = COLOR_PALE_BLUE;
+                blend.intensity = 0x10000;
+                break;
+            case OBJECT_TRANS_GLASS:
+                tint = COLOR_CYAN;
+                blend.greyR = 1;
+                blend.greyG = 5;
+                blend.greyB = 4;
+                break;
+            case OBJECT_TRANS_STEAM:
+                tint = COLOR_WHITE;
+                break;
+            case OBJECT_TRANS_ENERGY:
+                tint = COLOR_YELLOW_GREEN;
+                break;
+            default:
+                break;
+            }
+            blend.tint = objectHdPaletteColor(hd.basePalette8, tint);
+            hd.drawBlended(objectRect, blend);
+        }
+        tileRenderStatsAddHdObjects(tileRenderClockMs() - start);
     }
 
     artUnlock(cacheEntry);

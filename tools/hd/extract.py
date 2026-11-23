@@ -15,6 +15,9 @@ Writes into the gitignored work dir (tools/hd/work by default):
   extract.py --extra art/tiles/brick02.frm --extra art/scenery/car2.frm
   extract.py --areas            # + every floor and roof tile of the save
                                 #   games' areas (AREA_PREFIXES maps)
+  extract.py --areas --objects  # + the walls, scenery and items placed on
+                                #   those maps and in the reference saves
+                                #   (every frame and direction)
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ import sys
 from pathlib import Path
 
 import hdlib
+import mapobjects
 from PIL import Image
 
 INTERFACE = [
@@ -233,6 +237,38 @@ def area_tiles(arch: "Archives", raw: Path, tile_names: list[str]) -> tuple[list
     return maps, floors, roofs, stats
 
 
+def area_objects(arch: "Archives", raw: Path, maps: list[str]) -> tuple[set[str], dict]:
+    """Art paths of the walls, scenery and items placed on `maps` and on the
+    reference saves' copies of them (testdata/SAVEGAME/SLOT*/<MAP>.SAV, where
+    doors may be open and items moved), plus per-map counts. Inventory
+    contents and critters are left out (critters come in Phase 2.9)."""
+    kinds = ("items", "scenery", "walls", "misc")
+    arch.fetch(["proto/items/items.lst", "proto/scenery/scenery.lst"]
+               + [f"art/{k}/{k}.lst" for k in kinds], raw)
+    protos = mapobjects.Protos(raw)
+    arch.fetch(protos.files("items") + protos.files("scenery"), raw)
+    art_lists = {k: mapobjects.read_art_list(raw / f"art/{k}/{k}.lst") for k in kinds}
+    stems = {Path(m).stem for m in maps}
+    sources = [raw / m for m in maps]
+    sources += sorted(p for p in (hdlib.REPO_ROOT / "testdata" / "SAVEGAME").glob("SLOT*/*.SAV")
+                      if p.stem.lower() in stems)
+    paths: set[str] = set()
+    stats = {}
+    for source in sources:
+        found = set()
+        for obj in mapobjects.read_map_objects(source, protos):
+            otype = (obj["fid"] >> 24) & 0xF
+            if obj["depth"] == 0 and otype in (mapobjects.OBJ_TYPE_ITEM, mapobjects.OBJ_TYPE_SCENERY,
+                                               mapobjects.OBJ_TYPE_WALL):
+                path = mapobjects.fid_art_path(obj["fid"], art_lists)
+                if path:
+                    found.add(path)
+        paths |= found
+        label = source.name if source.suffix.lower() == ".sav" else Path(source).stem
+        stats[f"{source.parent.name}/{label}" if source.suffix.lower() == ".sav" else label] = len(found)
+    return paths, stats
+
+
 def read_map_floor(path: Path, elevation: int) -> list[list[int]] | None:
     """Return the 100x100 floor/roof fid grid (32-bit words) of one elevation."""
     b = path.read_bytes()
@@ -251,12 +287,39 @@ def read_map_floor(path: Path, elevation: int) -> list[list[int]] | None:
     return None
 
 
+def extract_frames(frm: Path, path: str, typ: str, name: str, directions: int, frames: int,
+                   source: str, pal: Path, area: bool) -> list[dict]:
+    """Multi-frame art: one indexed PNG per frame and direction,
+    png/art/<type>/<name>/d<direction>_f<frame>.png; install.py packs the
+    enhanced frames into art/<type>/<name>.fhd."""
+    out = []
+    for d in range(directions):
+        for f in range(frames):
+            key = f"art/{typ}/{name}/d{d}_f{f}.png"
+            dst = hdlib.SRC_DIR / key
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run([str(tool("ce-frm2png")), str(frm), str(dst), "--palette", str(pal),
+                            "--frame", str(f), "--direction", str(d)], check=True, capture_output=True)
+            idx, _ = hdlib.load_indexed(dst)
+            out.append({
+                "key": key, "name": name, "type": typ, "kind": typ.rstrip("s") if typ.endswith("s") else typ,
+                "width": int(idx.shape[1]), "height": int(idx.shape[0]),
+                "source": source, "sample": False, "area": area,
+                "fhd": f"art/{typ}/{name}.fhd", "direction": d, "frame": f,
+                "directions": directions, "frames": frames,
+            })
+    print(f"{source:>12}  art/{typ}/{name}.fhd  {directions}x{frames} frames")
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--extra", action="append", default=[], help="additional art path (e.g. art/tiles/brick02.frm)")
     ap.add_argument("--no-maps", action="store_true", help="skip the map-region tiles")
     ap.add_argument("--areas", action="store_true",
                     help="add every floor and roof tile of the Arroyo, Klamath and Den maps")
+    ap.add_argument("--objects", action="store_true",
+                    help="with --areas: also the walls, scenery and items on those maps")
     args = ap.parse_args()
 
     raw = hdlib.WORK_DIR / "raw"
@@ -288,8 +351,20 @@ def main() -> None:
             print(f"{m:9} elevations {st['elevations']}  floor {st['floor']:4}  roof {st['roof']:4}")
         print(f"{len(maps)} maps: {len(area_floor | area_roof)} tiles ({len(area_floor)} floor, {len(area_roof)} roof)")
 
+    objects: set[str] = set()
+    if args.objects:
+        if not args.areas:
+            raise SystemExit("--objects needs --areas")
+        objects, ostats = area_objects(arch, raw, maps)
+        for m, n in ostats.items():
+            print(f"{m:24} objects art {n:4}")
+        kinds = {}
+        for path in objects:
+            kinds[path.split("/")[1]] = kinds.get(path.split("/")[1], 0) + 1
+        print(f"objects: {len(objects)} art files {kinds}")
+
     art = list(dict.fromkeys(INTERFACE + SCREENS + TILES + OBJECTS + sorted(region_tiles)
-                             + sorted(area_floor | area_roof) + [e.lower() for e in args.extra]))
+                             + sorted(area_floor | area_roof) + sorted(objects) + [e.lower() for e in args.extra]))
     sources = arch.fetch(art, raw)
 
     pal = raw / "color.pal"
@@ -301,6 +376,12 @@ def main() -> None:
         typ = path.split("/")[1]
         name = Path(path).stem
         key = f"art/{typ}/{name}.png"
+        if typ in ("walls", "scenery", "items", "misc"):
+            directions, frames, _ = mapobjects.frm_frames(frm)
+            if directions * frames > 1:
+                assets.extend(extract_frames(frm, path, typ, name, directions, frames, sources[path], pal,
+                                             path in objects))
+                continue
         dst = hdlib.SRC_DIR / key
         dst.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run([str(tool("ce-frm2png")), str(frm), str(dst), "--palette", str(pal)],
@@ -317,7 +398,7 @@ def main() -> None:
             "key": key, "name": name, "type": typ, "kind": kind,
             "width": int(idx.shape[1]), "height": int(idx.shape[0]),
             "source": sources[path], "sample": path in INTERFACE + TILES + OBJECTS,
-            "area": path in area_floor or path in area_roof,
+            "area": path in area_floor or path in area_roof or path in objects,
         })
         print(f"{sources[path]:>12}  {key}  {idx.shape[1]}x{idx.shape[0]}")
 
