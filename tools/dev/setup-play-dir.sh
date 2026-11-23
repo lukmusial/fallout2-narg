@@ -2,7 +2,8 @@
 # Prepare out/play: a folder to play the modded build in, separate from the
 # installed game and from the test run directory (whose saves the tests reset).
 #
-# - the .app is copied from the build (re-run after each build to update it)
+# - the .app is built in Release (out/build/macos-release) and copied; re-run
+#   after each change to update it
 # - master.dat / critter.dat / patch000.dat / sound are linked read-only from
 #   the installed game; nothing there is modified
 # - data/SAVEGAME starts as a copy of the installed game's saves (only when
@@ -20,17 +21,21 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 GAME_DIR="${FALLOUT2_DATA_DIR:-$HOME/Games/Fallout 2}"
 BUILD_DIR="${BUILD_DIR:-$REPO_DIR/out/build/macos}"
+# The game itself comes from the optimised Release build: the Debug build is far
+# too slow at 3440x1440 (smooth scrolling ran at ~10 fps instead of 60).
+# The HD packs stay in BUILD_DIR, where tools/hd puts them.
+APP_BUILD_DIR="${APP_BUILD_DIR:-$REPO_DIR/out/build/macos-release}"
+if [[ ! -d "$APP_BUILD_DIR" ]]; then
+    cmake -S "$REPO_DIR" -B "$APP_BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release >/dev/null
+fi
+cmake --build "$APP_BUILD_DIR" --target fallout2-ce >/dev/null
 PLAY_DIR="$REPO_DIR/out/play"
 APP="Fallout II Community Edition.app"
 
-if [[ ! -d "$BUILD_DIR/$APP" ]]; then
-    echo "error: build first ($BUILD_DIR/$APP missing)" >&2
-    exit 1
-fi
 
 mkdir -p "$PLAY_DIR/data"
 rm -rf "$PLAY_DIR/$APP"
-cp -R "$BUILD_DIR/$APP" "$PLAY_DIR/"
+cp -R "$APP_BUILD_DIR/$APP" "$PLAY_DIR/"
 
 for f in master.dat critter.dat patch000.dat sound; do
     ln -sfn "$GAME_DIR/$f" "$PLAY_DIR/$f"
