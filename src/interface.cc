@@ -780,12 +780,11 @@ int interfaceLoad(File* stream)
         interfaceBarEnable();
     }
 
-    if (interfaceBarHidden) {
-        // NOTE: Uninline.
-        interfaceBarHide();
-    } else {
-        interfaceBarShow();
-    }
+    // A game can only be saved during normal play, with the bar shown. Early
+    // Stimpack builds saved it with the bar hidden (the editor's hub hides
+    // it), so a stored "hidden" is ignored and the bar is always shown.
+    (void)interfaceBarHidden;
+    interfaceBarShow();
 
     interfaceRenderHitPoints(false);
     interfaceRenderArmorClass(false);

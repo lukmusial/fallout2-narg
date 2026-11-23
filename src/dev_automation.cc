@@ -70,6 +70,9 @@ namespace {
         unsigned int untilDeadline = 0;
         int clickPhase = 0; // 0 = idle, 1..n polls since start
         int keyRepeatDone = 0;
+        // Set when a command queued a key: the rest waits for the next input
+        // poll, so screens see one key per frame as with a real keyboard.
+        bool inputSent = false;
         bool clickRight = false;
 
         // Synthetic mouse.
@@ -417,6 +420,7 @@ namespace {
             // Optional repeat count: one key per input poll, so every press is handled.
             int count = args.size() > 1 ? atoi(args[1].c_str()) : 1;
             enqueueInputEvent(code);
+            gAutomation.inputSent = true;
             if (++gAutomation.keyRepeatDone < count) {
                 return false;
             }
@@ -425,9 +429,14 @@ namespace {
         }
 
         if (name == "text") {
-            for (char ch : command.rest) {
-                enqueueInputEvent(static_cast<unsigned char>(ch));
+            // One character per input poll, like typing.
+            if (gAutomation.keyRepeatDone < static_cast<int>(command.rest.size())) {
+                enqueueInputEvent(static_cast<unsigned char>(command.rest[gAutomation.keyRepeatDone]));
+                gAutomation.keyRepeatDone++;
+                gAutomation.inputSent = true;
+                return false;
             }
+            gAutomation.keyRepeatDone = 0;
             return true;
         }
 
@@ -619,6 +628,7 @@ namespace {
 } // namespace
 
 static bool gAutomationUnattended = false;
+static bool gAutomationFastFades = false;
 
 void devAutomationEarlyInit(int argc, char** argv)
 {
@@ -654,6 +664,8 @@ void devAutomationParseArgs(int argc, char** argv)
     for (int index = 1; index < argc; index++) {
         if (strncmp(argv[index], scriptPrefix, strlen(scriptPrefix)) == 0) {
             scriptPath = argv[index] + strlen(scriptPrefix);
+        } else if (strcmp(argv[index], "--dev-fast") == 0) {
+            gAutomationFastFades = true;
         } else if (strncmp(argv[index], outPrefix, strlen(outPrefix)) == 0) {
             gAutomation.outDir = argv[index] + strlen(outPrefix);
         }
@@ -673,6 +685,11 @@ void devAutomationParseArgs(int argc, char** argv)
     gAutomation.mouseY = screenGetHeight() / 2;
 }
 
+bool devAutomationFastFades()
+{
+    return gAutomationFastFades;
+}
+
 bool devAutomationIsActive()
 {
     return gAutomation.active;
@@ -685,11 +702,15 @@ void devAutomationTick()
     }
 
     // Run every command that completes immediately, stop at the first one that waits.
+    gAutomation.inputSent = false;
     while (gAutomation.next < gAutomation.commands.size()) {
         if (!runCommand(gAutomation.commands[gAutomation.next])) {
             return;
         }
         gAutomation.next++;
+        if (gAutomation.inputSent) {
+            return;
+        }
     }
 }
 

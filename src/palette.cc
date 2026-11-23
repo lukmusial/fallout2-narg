@@ -5,6 +5,7 @@
 #include "color.h"
 #include "cycle.h"
 #include "debug.h"
+#include "dev_automation.h"
 #include "game_sound.h"
 #include "input.h"
 #include "settings.h"
@@ -85,7 +86,8 @@ void paletteFadeTo(unsigned char* palette)
         colorPaletteSetTransitionCallback(soundContinueAll);
     }
 
-    colorPaletteFadeBetween(gPalette, palette, gPaletteFadeSteps);
+    // Test runs with --dev-fast jump straight to the target palette.
+    colorPaletteFadeBetween(gPalette, palette, devAutomationFastFades() ? 1 : gPaletteFadeSteps);
     colorPaletteSetTransitionCallback(nullptr);
 
     memcpy(gPalette, palette, 768);

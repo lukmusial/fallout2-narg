@@ -15,6 +15,8 @@ import json
 import os
 import shutil
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
 import sys
 import time
 from pathlib import Path
@@ -43,24 +45,61 @@ class TestSkipped(Exception):
     pass
 
 
+# --- parallel workers ------------------------------------------------------------
+# Tests run concurrently, each in its own worker directory: an APFS clone of the
+# app next to symlinks to the game data and HD packs, with its own saves and
+# outputs (the game always runs from the folder that contains the .app).
+
+APP_NAME = "Fallout II Community Edition.app"
+_worker = threading.local()
+
+
+def run_dir():
+    return getattr(_worker, "run_dir", RUN_DIR)
+
+
+def prepare_worker(index):
+    worker = RUN_DIR / f"workers/w{index}"
+    if worker.exists():
+        shutil.rmtree(worker)
+    (worker / "data/hd").mkdir(parents=True)
+    # APFS clone: instant and takes no space until written.
+    subprocess.run(["cp", "-cR", str(RUN_DIR / APP_NAME), str(worker / APP_NAME)], check=True)
+    for name in ("master.dat", "critter.dat", "patch000.dat", "f2_res.dat", "sound", "ce.dat", "mods"):
+        if (RUN_DIR / name).exists():
+            (worker / name).symlink_to((RUN_DIR / name).resolve())
+    for pack in (RUN_DIR / "data/hd").glob("*"):
+        (worker / "data/hd" / pack.name).symlink_to(pack.resolve())
+    shutil.copyfile(RUN_DIR / "fallout2.cfg", worker / "fallout2.cfg")
+    return worker
+
+
 def reset_saves():
-    subprocess.run([str(ROOT / "tools/dev/reset-saves.sh")], check=True, stdout=subprocess.DEVNULL)
+    data = run_dir() / "data"
+    for name in ("SAVEGAME", "maps", "MAPS", "proto"):
+        shutil.rmtree(data / name, ignore_errors=True)
+    (data / "worldmap.dat").unlink(missing_ok=True)
+    shutil.copytree(ROOT / "testdata/SAVEGAME", data / "SAVEGAME")
 
 
-def run_game(name, script, extra_args=()):
-    out_dir = OUT / name
+def run_game(name, script, extra_args=(), fast=True):
+    """Runs the game hidden with a script. `fast` makes palette fades instant;
+    tests that measure fades pass fast=False."""
+    directory = run_dir()
+    out_dir = directory / "devout/tests" / name
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
-    args = [str(EXE), f"--dev-script={SCRIPTS / script}", f"--dev-out={out_dir}", *extra_args]
+    exe = directory / APP_NAME / "Contents/MacOS/Fallout II Community Edition"
+    args = [str(exe), f"--dev-script={SCRIPTS / script}", f"--dev-out={out_dir}", *(["--dev-fast"] if fast else []), *extra_args]
     started = time.time()
     try:
-        result = subprocess.run(args, cwd=RUN_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        result = subprocess.run(args, cwd=directory, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                 timeout=GAME_TIMEOUT, text=True)
     except subprocess.TimeoutExpired:
         raise TestFailure(f"game did not finish within {GAME_TIMEOUT}s")
     if result.returncode != 0:
-        log = RUN_DIR / "debug.log"
+        log = directory / "debug.log"
         tail = log.read_text(errors="replace").splitlines()[-5:] if log.exists() else []
         raise TestFailure(f"game exited with {result.returncode}: {result.stderr.strip()} | " + " / ".join(tail))
     return out_dir, time.time() - started
@@ -157,7 +196,7 @@ def nonuniform_blocks(image):
 def test_main_menu_hd_art(update):
     """HD layer + compositor: menu background from a 2x PNG, legacy buttons and
     text on top, cursor composited over HD, fade-out modulates HD pixels."""
-    out, seconds = run_game("main_menu_hd_art", "menu_fades.txt", HD_ART_ARGS)
+    out, seconds = run_game("main_menu_hd_art", "menu_fades.txt", HD_ART_ARGS, fast=False)
     menu = load_png(out / "menu_fb.png")
     detail = nonuniform_blocks(menu)
     if detail < 0.5:
@@ -193,7 +232,7 @@ def test_hd_art_lookup(update):
     png = probe["probe_png"]
     if not png["found"] or png["from_legacy"] or (png["width"], png["height"]) != (1280, 960):
         raise TestFailure(f"PNG lookup: {png}")
-    reference = np.asarray(Image.open(RUN_DIR / "data/hd/test/art/intrface/mainmenu.png").convert("RGBA"))
+    reference = np.asarray(Image.open(run_dir() / "data/hd/test/art/intrface/mainmenu.png").convert("RGBA"))
     for name in ("probe_png", "probe_fhd", "probe_mixed", "probe_mixed_again"):
         if probe[name]["from_legacy"]:
             raise TestFailure(f"{name}: fell back to legacy ({probe[name]})")
@@ -215,7 +254,7 @@ def test_hd_art_lookup(update):
 # --- Phase 2.6: interface screens with the real HD packs --------------------
 #
 # The packs come from tools/hd (enhance_scripted.py, enhance_ai.py, then
-# install.py copies them to RUN_DIR/data/hd/<pack>/); they are derived from the
+# install.py copies them to run_dir()/data/hd/<pack>/); they are derived from the
 # game's art and never committed, so these tests are skipped without them.
 
 HD_SCREENS = ("menu", "load", "hub", "editor", "editor_slider", "perks", "creation")
@@ -246,7 +285,7 @@ HD_GOLDEN_MAX_DIFF = 0.01  # fraction of pixels differing by more than 12 levels
 
 
 def pack_installed(pack):
-    return (RUN_DIR / f"data/hd/{pack}/art/intrface/mainmenu_sp.png").exists()
+    return (run_dir() / f"data/hd/{pack}/art/intrface/mainmenu_sp.png").exists()
 
 
 def blocks_detail(image, region):
@@ -289,7 +328,7 @@ def compare_hd_golden(actual_path, golden_name, update, mask=()):
 
 
 def screenshots_in_run_dir():
-    return set(RUN_DIR.glob("scr*.png")) | set(RUN_DIR.glob("scr*.bmp"))
+    return set(run_dir().glob("scr*.png")) | set(run_dir().glob("scr*.bmp"))
 
 
 _hd_screens_legacy_out = None
@@ -301,7 +340,7 @@ def hd_screens_legacy_reference():
     if _hd_screens_legacy_out is None:
         before = screenshots_in_run_dir()
         reset_saves()
-        _hd_screens_legacy_out, _ = run_game("hd_screens_legacy", "hd_screens.txt")
+        _hd_screens_legacy_out, _ = run_game("hd_screens_legacy", "hd_screens.txt", fast=False)
         for path in screenshots_in_run_dir() - before:
             path.unlink()
     return _hd_screens_legacy_out
@@ -317,7 +356,7 @@ def make_hd_screens_test(pack):
         legacy_out = hd_screens_legacy_reference()
         before = screenshots_in_run_dir()
         reset_saves()
-        out, seconds = run_game(f"hd_screens_{pack}", "hd_screens.txt", [*HD_ARGS, f"[graphics]hd_pack={pack}"])
+        out, seconds = run_game(f"hd_screens_{pack}", "hd_screens.txt", [*HD_ARGS, f"[graphics]hd_pack={pack}"], fast=False)
         new_shots = sorted(screenshots_in_run_dir() - before)
         try:
             notes = []
@@ -345,7 +384,7 @@ def make_hd_screens_test(pack):
             probe = json.loads((out / "probe_named.json").read_text())
             if not probe["found"] or probe["from_legacy"] or (probe["width"], probe["height"]) != (1280, 960):
                 raise TestFailure(f"named PNG lookup: {probe}")
-            reference = np.asarray(Image.open(RUN_DIR / f"data/hd/{pack}/art/intrface/mainmenu_sp.png").convert("RGBA"))
+            reference = np.asarray(Image.open(run_dir() / f"data/hd/{pack}/art/intrface/mainmenu_sp.png").convert("RGBA"))
             if not np.array_equal(np.asarray(Image.open(out / "probe_named.png").convert("RGBA")), reference):
                 raise TestFailure("named PNG lookup: image differs from the pack PNG")
 
@@ -383,7 +422,7 @@ def make_slot_test(slot, hd=False):
 
 
 def slot_description(slot):
-    header = (RUN_DIR / f"data/SAVEGAME/SLOT{slot:02d}/SAVE.DAT").read_bytes()[:0x5B]
+    header = (run_dir() / f"data/SAVEGAME/SLOT{slot:02d}/SAVE.DAT").read_bytes()[:0x5B]
     return header[0x3D:0x5B].split(b"\0")[0].decode("latin-1")
 
 
@@ -454,7 +493,7 @@ HD_SLOTS = (1, 5, 9)
 def test_menu_fades(update):
     """The presenter's framebuffer matches the window composition, and fades run
     at 8-bit precision (within the 6-bit quantisation of the old presenter)."""
-    out, seconds = run_game("menu_fades", "menu_fades.txt")
+    out, seconds = run_game("menu_fades", "menu_fades.txt", fast=False)
     for fb, shot in (("menu_fb", "menu"), ("load_fb", "load")):
         if not np.array_equal(load_png(out / f"{fb}.png"), load_png(out / f"{shot}.png")):
             raise TestFailure(f"{fb}.png differs from the window composition {shot}.png")
@@ -519,7 +558,7 @@ def test_hd_mixed_pack(update):
     """The shipped `mixed` manifest (ce.dat hd/mixed/manifest.txt) picks the
     scripted arrows and AI art for everything else."""
     for pack in ("ai", "scripted"):
-        if not (RUN_DIR / f"data/hd/{pack}").exists():
+        if not (run_dir() / f"data/hd/{pack}").exists():
             return f"SKIP (pack {pack} not installed; run tools/hd/install.py)"
     out, seconds = run_game("hd_mixed_probe", "hd_mixed_probe.txt", [*HD_ARGS, "[graphics]hd_pack=mixed"])
     def source(name, art):
@@ -527,7 +566,7 @@ def test_hd_mixed_pack(update):
             return "legacy"
         probed = np.asarray(Image.open(out / f"{name}.png").convert("RGBA"))
         for pack in ("ai", "scripted"):
-            path = RUN_DIR / f"data/hd/{pack}/art/intrface/{art}.png"
+            path = run_dir() / f"data/hd/{pack}/art/intrface/{art}.png"
             if path.exists() and np.array_equal(probed, np.asarray(Image.open(path).convert("RGBA"))):
                 return pack
         return "unknown"
@@ -563,13 +602,24 @@ def test_english_interface_bar(update):
     return f"English {english:.0%} vs Russian {russian:.0%} ({seconds:.0f}s)"
 
 
+def test_load_save_with_hidden_bar(update):
+    """Slot 12 was saved by an early Stimpack build with the interface bar
+    flagged hidden; loading it must still show the bar."""
+    reset_saves()
+    out, seconds = run_game("hidden_bar_save", "load_slot.txt", ["--dev-load-game=12"])
+    bar = load_png(out / "game.png")[-99:]
+    if bar.mean() < 10:
+        raise TestFailure("interface bar not shown after loading slot 12")
+    return f"bar shown ({seconds:.0f}s)"
+
+
 TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_art, test_main_menu_hd_fhd,
           test_hd_art_lookup]
          + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
          + [make_slot_test(slot, hd=True) for slot in HD_SLOTS]
          + [test_stimpack_save_unchanged, test_character_screens, test_stimpack_edit_player, test_stimpack_cancel,
             test_stimpack_edit_companion, test_stimpack_lists, test_stimpack_perk_scan,
-            test_english_interface_bar]
+            test_english_interface_bar, test_load_save_with_hidden_bar]
          + [make_hd_screens_test(pack) for pack in ("scripted", "ai")]
          + [test_hd_mixed_pack])
 
@@ -601,6 +651,8 @@ def main():
     parser.add_argument("--perf", type=int, metavar="SLOT", help="print presenter timings for a save slot and exit")
     parser.add_argument("--update-golden", action="store_true", help="overwrite golden files with this run's output")
     parser.add_argument("-k", dest="pattern", help="run only tests whose name contains this text")
+    parser.add_argument("-j", "--jobs", type=int, default=min(6, max(1, (os.cpu_count() or 2) // 2)),
+                        help="tests run at once, each in its own worker directory (default %(default)s)")
     args = parser.parse_args()
 
     if not EXE.exists():
@@ -612,20 +664,47 @@ def main():
         return 0
 
     selected = [t for t in TESTS if not args.pattern or args.pattern in t.__name__]
-    failures = 0
-    skipped = 0
-    for test in selected:
+    jobs = max(1, min(args.jobs, len(selected)))
+    started = time.time()
+
+    # Worker directories, one per parallel job (job 0 = the run directory itself
+    # when running serially).
+    free_dirs = [RUN_DIR] if jobs == 1 else [prepare_worker(index) for index in range(jobs)]
+    free_lock = threading.Lock()
+    print_lock = threading.Lock()
+    results = {}
+
+    def run_one(test):
+        with free_lock:
+            directory = free_dirs.pop()
+        _worker.run_dir = directory
         try:
             note = test(args.update_golden)
-            print(f"PASS {test.__name__}: {note}", flush=True)
+            outcome = ("PASS", note)
         except TestSkipped as reason:
-            skipped += 1
-            print(f"SKIP {test.__name__}: {reason}", flush=True)
+            outcome = ("SKIP", reason)
         except TestFailure as error:
-            failures += 1
-            print(f"FAIL {test.__name__}: {error}", flush=True)
+            outcome = ("FAIL", error)
+        except Exception as error:  # a broken test must not stop the others
+            outcome = ("FAIL", f"{type(error).__name__}: {error}")
+        finally:
+            with free_lock:
+                free_dirs.append(directory)
+        with print_lock:
+            print(f"{outcome[0]} {test.__name__}: {outcome[1]}", flush=True)
+        results[test.__name__] = outcome[0]
+
+    # Longest tests first so the pool finishes together.
+    order = sorted(selected, key=lambda t: 0 if any(k in t.__name__ for k in ("hd_screens", "stimpack", "lists")) else 1)
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        list(pool.map(run_one, order))
+
+    _worker.run_dir = RUN_DIR
     reset_saves()
-    print(f"{len(selected) - failures - skipped}/{len(selected)} passed" + (f", {skipped} skipped" if skipped else ""))
+    failures = sum(1 for r in results.values() if r == "FAIL")
+    skipped = sum(1 for r in results.values() if r == "SKIP")
+    print(f"{len(selected) - failures - skipped}/{len(selected)} passed" + (f", {skipped} skipped" if skipped else "")
+          + f" in {time.time() - started:.0f}s with {jobs} job(s)")
     return 1 if failures else 0
 
 

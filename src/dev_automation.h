@@ -46,6 +46,9 @@ bool devAutomationWantsHiddenWindow();
 void devAutomationParseArgs(int argc, char** argv);
 bool devAutomationIsActive();
 
+// `--dev-fast`: palette fades take no time (tests that measure fades leave it off).
+bool devAutomationFastFades();
+
 // Advances the script; called once per input poll.
 void devAutomationTick();
 
