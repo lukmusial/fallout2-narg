@@ -189,27 +189,6 @@ namespace {
         return gAutomation.outDir + "/" + name + extension;
     }
 
-    // Writes the presented framebuffer (output resolution) as RGB PNG.
-    bool writeFramebufferPng(const std::string& path)
-    {
-        const uint32_t* framebuffer = screenGetFramebuffer();
-        if (framebuffer == nullptr) {
-            return false;
-        }
-
-        int width = screenGetFramebufferWidth();
-        int height = screenGetFramebufferHeight();
-        size_t pixelCount = static_cast<size_t>(width) * height;
-        std::vector<unsigned char> image(pixelCount * 3);
-        for (size_t i = 0; i < pixelCount; i++) {
-            uint32_t color = framebuffer[i];
-            image[i * 3] = (color >> 16) & 0xFF;
-            image[i * 3 + 1] = (color >> 8) & 0xFF;
-            image[i * 3 + 2] = color & 0xFF;
-        }
-        return lodepng::encode(path, image, width, height, LCT_RGB, 8) == 0;
-    }
-
     // Writes the logical index plane through the 6-bit system palette, scaled
     // the way the pre-CE presenter did (`<< 2`), for before/after comparisons.
     bool writeLegacyPalettePng(const std::string& path)
@@ -469,7 +448,7 @@ namespace {
                 fail(command, "missing name");
             }
             std::string path = outputPath(args[0], ".png");
-            if (!writeFramebufferPng(path)) {
+            if (!screenshotSaveFramebufferPng(path.c_str())) {
                 fail(command, "framebuffer screenshot failed");
             }
             debugPrint("AUTOMATION: wrote %s\n", path.c_str());
@@ -633,7 +612,7 @@ void devAutomationOnFadeStep(int step, int steps, bool toBlack)
         bool directionMatches = it->direction == 0 || (it->direction == 1 && !toBlack) || (it->direction == -1 && toBlack);
         if (directionMatches && step * 100 >= it->percent * steps) {
             std::string path = outputPath(it->name, ".png");
-            writeFramebufferPng(path);
+            screenshotSaveFramebufferPng(path.c_str());
             writeLegacyPalettePng(outputPath(it->name + "_6bit", ".png"));
             debugPrint("AUTOMATION: wrote %s (fade step %d/%d)\n", path.c_str(), step, steps);
             it = captures.erase(it);

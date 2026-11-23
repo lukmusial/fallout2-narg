@@ -276,6 +276,10 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
         height /= scale;
     }
 
+    // CE: with [graphics] hd=1 and a 2x scale the framebuffer is kept at the
+    // output resolution, so HD layers can show full-resolution pixels.
+    gFramebufferScale = (settings.graphics.hd && scale == 2) ? 2 : 1;
+
     if (_GNW95_init_window(width, height, settings.screen.windowed, scale) == -1) {
         return -1;
     }

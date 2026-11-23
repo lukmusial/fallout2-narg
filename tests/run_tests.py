@@ -71,14 +71,20 @@ def load_png(path):
 MAIN_MENU_MASK = [(300, 446, 640, 472)]
 
 
-def compare_image(actual_path, golden_name, update, max_diff=0.0, mask=()):
+HD_ARGS = ["[graphics]hd=1"]
+
+
+def compare_image(actual_path, golden_name, update, max_diff=0.0, mask=(), upscale=1):
     golden_path = GOLDEN / golden_name
-    if update or not golden_path.exists():
+    if upscale == 1 and (update or not golden_path.exists()):
         golden_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(actual_path, golden_path)
         return "golden written"
     actual = load_png(actual_path)
     golden = load_png(golden_path)
+    if upscale != 1:
+        # HD-mode screenshots are at output resolution; legacy pixels are doubled.
+        golden = golden.repeat(upscale, axis=0).repeat(upscale, axis=1)
     if actual.shape != golden.shape:
         raise TestFailure(f"{golden_name}: size {actual.shape} != golden {golden.shape}")
     differs = np.any(actual != golden, axis=2)
@@ -129,15 +135,28 @@ def test_main_menu(update):
     return compare_image(out / "mainmenu.png", "main_menu.png", update, mask=MAIN_MENU_MASK)
 
 
-def make_slot_test(slot):
+def test_main_menu_hd(update):
+    """hd=1 without HD art: the 2x framebuffer is the legacy frame pixel-doubled."""
+    out, seconds = run_game("main_menu_hd", "smoke_menu.txt", HD_ARGS)
+    return compare_image(out / "mainmenu.png", "main_menu.png", False, mask=MAIN_MENU_MASK, upscale=2)
+
+
+def make_slot_test(slot, hd=False):
     def test(update):
         reset_saves()
-        out, seconds = run_game(f"slot{slot:02d}", "load_slot.txt", [f"--dev-load-game={slot}"])
-        notes = [compare_state(out / "state.json", f"slot{slot:02d}_state.json", update)]
-        notes.append(compare_image(out / "game.png", f"slot{slot:02d}_game.png", update, LIVE_VIEW_MAX_DIFF))
+        suffix = "_hd" if hd else ""
+        out, seconds = run_game(f"slot{slot:02d}{suffix}", "load_slot.txt",
+                                [f"--dev-load-game={slot}", *(HD_ARGS if hd else [])])
+        notes = [compare_state(out / "state.json", f"slot{slot:02d}_state.json", update and not hd)]
+        notes.append(compare_image(out / "game.png", f"slot{slot:02d}_game.png", update and not hd, LIVE_VIEW_MAX_DIFF,
+                                   upscale=2 if hd else 1))
         return ", ".join(notes) + f" ({seconds:.0f}s)"
-    test.__name__ = f"test_load_slot{slot:02d}"
+    test.__name__ = f"test_load_slot{slot:02d}{'_hd' if hd else ''}"
     return test
+
+
+# HD mode (no HD art yet) on a sample of saves: must match the doubled legacy frame.
+HD_SLOTS = (1, 5, 9)
 
 
 def test_menu_fades(update):
@@ -160,12 +179,15 @@ def test_menu_fades(update):
     return f"framebuffer matches, fades captured ({seconds:.0f}s)"
 
 
-TESTS = [test_main_menu, test_menu_fades] + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
+TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd]
+         + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
+         + [make_slot_test(slot, hd=True) for slot in HD_SLOTS])
 
 
 PERF_CONFIGS = [
     ("1280x960 scale 2", ["[screen]resolution_x=1280", "[screen]resolution_y=960", "[screen]scale=2"]),
     ("3440x1440 scale 2", ["[screen]resolution_x=3440", "[screen]resolution_y=1440", "[screen]scale=2"]),
+    ("3440x1440 hd=1", ["[screen]resolution_x=3440", "[screen]resolution_y=1440", "[screen]scale=2", *HD_ARGS]),
 ]
 
 
@@ -174,7 +196,7 @@ def run_perf(slot):
     print(f"presenter timings, slot {slot} (avg/max ms per renderPresent; convert = index->RGB total ms)")
     for label, overrides in PERF_CONFIGS:
         reset_saves()
-        out, _ = run_game("perf_" + label.split()[0], "perf_game.txt", [f"--dev-load-game={slot}", *overrides])
+        out, _ = run_game("perf_" + label.replace(" ", "_").replace("=", ""), "perf_game.txt", [f"--dev-load-game={slot}", *overrides])
         for phase in ("idle", "scroll"):
             stats = json.loads((out / f"{phase}.json").read_text())
             fb = "x".join(str(v) for v in stats["framebuffer"])

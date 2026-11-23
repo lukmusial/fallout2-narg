@@ -272,6 +272,10 @@ void initSettingsRegistry(bool isMapper)
     SETTING_P(scale, clamp(1, 4));
 #undef SECT
 
+#define SECT graphics
+    SETTING(hd);
+#undef SECT
+
 #define SECT ui
     SETTING_P(main_menu_scale_mode, clamp(0, 2));
     SETTING(in_game_menu_help);

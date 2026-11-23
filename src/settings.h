@@ -103,6 +103,13 @@ struct ScreenSettings {
     int scale = 1;
 };
 
+// CE: true-colour / 2x rendering.
+struct GraphicsSettings {
+    // Presents at twice the logical resolution (needs [screen] scale=2):
+    // legacy pixels are doubled and HD layers show at full resolution.
+    bool hd = false;
+};
+
 struct UISettings {
     // Main menu background scaling mode.
     // 0 - native size
@@ -320,6 +327,7 @@ struct MapperSettings {
 struct Settings {
     SystemSettings system;
     ScreenSettings screen;
+    GraphicsSettings graphics;
     UISettings ui;
     GameplaySettings gameplay;
     PreferencesSettings preferences;
