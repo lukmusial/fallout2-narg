@@ -9,3 +9,26 @@ art/intrface/uparwoff.frm = scripted
 art/intrface/uparwon.frm = scripted
 art/intrface/dnarwoff.frm = scripted
 art/intrface/dnarwon.frm = scripted
+
+# Corrugated-metal roof tiles (ruf*, jrt* edges): the AI pack renders some
+# tiles stripier than their neighbours, so the roof looks patchy.
+art/tiles/jrt1000.frm = scripted
+art/tiles/jrt1001.frm = scripted
+art/tiles/jrt1002.frm = scripted
+art/tiles/jrt2000.frm = scripted
+art/tiles/jrt2001.frm = scripted
+art/tiles/jrt2002.frm = scripted
+art/tiles/ruf1000.frm = scripted
+art/tiles/ruf1001.frm = scripted
+art/tiles/ruf2000.frm = scripted
+art/tiles/ruf2001.frm = scripted
+art/tiles/ruf2002.frm = scripted
+art/tiles/ruf2003.frm = scripted
+art/tiles/ruf2004.frm = scripted
+art/tiles/ruf2005.frm = scripted
+art/tiles/ruf2006.frm = scripted
+art/tiles/ruf2007.frm = scripted
+art/tiles/ruf2008.frm = scripted
+art/tiles/ruf3000.frm = scripted
+art/tiles/ruf3001.frm = scripted
+art/tiles/ruf4000.frm = scripted

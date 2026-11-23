@@ -656,19 +656,19 @@ def test_hd_mixed_pack(update):
         if not (run_dir() / f"data/hd/{pack}").exists():
             return f"SKIP (pack {pack} not installed; run tools/hd/install.py)"
     out, seconds = run_game("hd_mixed_probe", "hd_mixed_probe.txt", [*HD_ARGS, "[graphics]hd_pack=mixed"])
-    def source(name, art):
+    def source(name, art, folder="intrface"):
         if json.loads((out / f"{name}.json").read_text())["from_legacy"]:
             return "legacy"
         probed = np.asarray(Image.open(out / f"{name}.png").convert("RGBA"))
         for pack in ("ai", "scripted"):
-            path = run_dir() / f"data/hd/{pack}/art/intrface/{art}.png"
+            path = run_dir() / f"data/hd/{pack}/art/{folder}/{art}.png"
             if path.exists() and np.array_equal(probed, np.asarray(Image.open(path).convert("RGBA"))):
                 return pack
         return "unknown"
-    arrow, menu = source("arrow", "uparwoff"), source("menu", "mainmenu")
-    if (arrow, menu) != ("scripted", "ai"):
-        raise TestFailure(f"mixed pack resolved the arrow from {arrow}, the menu from {menu}")
-    return f"arrow from scripted, menu from ai ({seconds:.0f}s)"
+    arrow, menu, roof = source("arrow", "uparwoff"), source("menu", "mainmenu"), source("roof", "ruf1000", "tiles")
+    if (arrow, menu, roof) != ("scripted", "ai", "scripted"):
+        raise TestFailure(f"mixed pack resolved the arrow from {arrow}, the menu from {menu}, the metal roof from {roof}")
+    return f"arrow and metal roof from scripted, menu from ai ({seconds:.0f}s)"
 
 
 def test_stimpack_perk_scan(update):
