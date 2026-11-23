@@ -21,6 +21,7 @@
 #else
 #include "main.h"
 #endif
+#include "dev_automation.h"
 #include "svga.h"
 #include "window_manager.h"
 
@@ -94,6 +95,8 @@ int main(int argc, char* argv[])
     chdir(basePath);
     SDL_free(basePath);
 #endif
+
+    devAutomationEarlyInit(argc, argv);
 
 #if __ANDROID__
     SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");

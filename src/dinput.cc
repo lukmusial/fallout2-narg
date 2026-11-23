@@ -1,6 +1,7 @@
 #include "dinput.h"
 
 #include "debug.h"
+#include "dev_automation.h"
 #include "settings.h"
 #include "sfall_kb_helpers.h"
 #include "svga.h"
@@ -95,6 +96,10 @@ bool mouseDeviceGetData(MouseData* mouseState)
     // TODO: Move mouse events processing into `GNW95_process_message` and
     // update mouse position manually.
     SDL_PumpEvents();
+    if (devAutomationOverrideMouse(mouseState)) {
+        return true;
+    }
+
     Uint32 buttons = mouseDeviceUsesRelativeMode()
         ? SDL_GetRelativeMouseState(&(mouseState->x), &(mouseState->y))
         : SDL_GetMouseState(&(mouseState->x), &(mouseState->y));

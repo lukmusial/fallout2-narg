@@ -8,6 +8,7 @@
 
 #include "color.h"
 #include "config.h"
+#include "dev_automation.h"
 #include "dinput.h"
 #include "draw.h"
 #include "game.h"
@@ -165,6 +166,12 @@ int _GNW95_init_window(int width, int height, WindowMode mode, int scale)
         SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
 
         Uint32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI;
+
+        // Scripted runs render into hidden windows (screenshots come from the
+        // game's own buffers), so nothing appears on screen or takes focus.
+        if (devAutomationWantsHiddenWindow()) {
+            windowFlags |= SDL_WINDOW_HIDDEN;
+        }
 
         if (mode == WindowMode::Fullscreen) {
             windowFlags |= SDL_WINDOW_FULLSCREEN;

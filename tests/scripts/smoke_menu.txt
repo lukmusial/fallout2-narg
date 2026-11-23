@@ -1,0 +1,5 @@
+# Main menu renders; quits from the menu.
+until mainmenu 20000
+wait 1500
+shot mainmenu
+quit 0

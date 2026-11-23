@@ -412,3 +412,5 @@ AGENTS.md
 CLAUDE.md
 GEMINI.md
 opencode.json
+# Local development (mods)
+/.venv/

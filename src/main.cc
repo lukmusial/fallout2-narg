@@ -14,6 +14,7 @@
 #include "cycle.h"
 #include "db.h"
 #include "debug.h"
+#include "dev_automation.h"
 #include "draw.h"
 #include "endgame.h"
 #include "game.h"
@@ -253,6 +254,8 @@ static void mainParseCommandLineArguments(int argc, char** argv)
     const char* devLoadGamePrefix = "--dev-load-game=";
     size_t devLoadGamePrefixLength = strlen(devLoadGamePrefix);
 
+    devAutomationParseArgs(argc, argv);
+
     for (int arg = 1; arg < argc; arg += 1) {
         if (strncmp(argv[arg], devLoadGamePrefix, devLoadGamePrefixLength) == 0) {
             int slot;
@@ -418,6 +421,7 @@ static void mainLoop()
     _main_game_paused = 0;
 
     scriptsEnable();
+    devAutomationSetState("game");
 
     while (_game_user_wants_to_quit == GAME_QUIT_REQUEST_NONE) {
         sharedFpsLimiter.mark();
@@ -449,6 +453,7 @@ static void mainLoop()
     }
 
     scriptsDisable();
+    devAutomationSetState("");
 
     if (cursorWasHidden) {
         mouseHideCursor();

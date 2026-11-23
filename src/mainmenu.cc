@@ -9,6 +9,7 @@
 #include "content_config.h"
 #include "debug.h"
 #include "delay.h"
+#include "dev_automation.h"
 #include "draw.h"
 #include "font_manager.h"
 #include "game.h"
@@ -797,6 +798,7 @@ int _main_menu_is_enabled()
 MainMenuOption mainMenuWindowHandleEvents()
 {
     _in_main_menu = true;
+    devAutomationSetState("mainmenu");
 
     bool oldCursorIsHidden = cursorIsHidden();
     if (oldCursorIsHidden) {
@@ -875,6 +877,7 @@ MainMenuOption mainMenuWindowHandleEvents()
     }
 
     _in_main_menu = false;
+    devAutomationSetState("");
 
     return rc;
 }

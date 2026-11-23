@@ -23,6 +23,8 @@ void tickersRemove(TickerProc* fn);
 void tickersEnable();
 void tickersDisable();
 void takeScreenshot();
+// Composites all windows (including the cursor) and writes an RGB PNG to `path`.
+bool screenshotSavePng(const char* path);
 int screenshotHandlerDefaultImpl(int width, int height, unsigned char* data, unsigned char* palette);
 int screenshotHandlerPngImpl(int width, int height, unsigned char* data, unsigned char* palette);
 void screenshotHandlerConfigure(int keyCode, ScreenshotHandler* handler);

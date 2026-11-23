@@ -1,0 +1,6 @@
+# Used with --dev-load-game=N: dump state as soon as the map runs, then capture it.
+until game 30000
+dump state
+wait 2000
+shot game
+quit 0

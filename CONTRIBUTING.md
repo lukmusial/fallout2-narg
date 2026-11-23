@@ -14,6 +14,14 @@ The project uses CMake, so building mostly comes down to picking the right prese
 - `--dev-load-game=1` - load the given save game automatically (useful for LLM automation)
 - `--dev-endgame` - after a new or loaded game starts, trigger the normal `endgame_slideshow` request
 - `--dev-endgame-movie` - after a new or loaded game starts, run the `endgame_movie` sequence directly
+- `--dev-script=<file>` - drive the game from a script of input commands, screenshots and state dumps (see `src/dev_automation.h`). The game then runs unattended: hidden window, no audio, never takes focus, ignores real keyboard and mouse input
+- `--dev-out=<dir>` - where `--dev-script` writes screenshots and state dumps (default `devout`)
+
+### Local test setup (mods branch)
+
+- `tools/dev/setup-run-dir.sh` links an installed copy of Fallout 2 (`FALLOUT2_DATA_DIR`, default `~/Games/Fallout 2`) into the build folder and writes a test `fallout2.cfg`. The installation itself is never modified.
+- `tools/dev/run-tests.sh` builds, then runs `tests/run_tests.py`: every reference save in `testdata/SAVEGAME` is loaded and its state dump and screenshot are compared with `testdata/golden/`. Pass `--update-golden` after an intended visual or state change, `-k <name>` to run a subset.
+- `tools/dev/contact_sheet.py` tiles screenshots into one review image (`docs/screens/<phase>/`).
 
 For Fallout 1/Fo1in2-style endings, use both endgame flags to mirror the script flow:
 
