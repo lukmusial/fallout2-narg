@@ -1186,7 +1186,8 @@ static int gameTakeScreenshot(int width, int height, unsigned char* buffer, unsi
 
     const char* formatName = settings.system.screenshots_format.c_str();
 
-    if (compat_stricmp(formatName, "png") == 0) {
+    // CE: HD mode always saves a full-resolution PNG (see screenshotHandlerPngImpl).
+    if (compat_stricmp(formatName, "png") == 0 || screenGetFramebufferScale() > 1) {
         handler = screenshotHandlerPngImpl;
     }
 

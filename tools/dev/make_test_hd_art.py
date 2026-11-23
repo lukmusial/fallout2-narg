@@ -3,9 +3,10 @@
 
   make_test_hd_art.py [--force] [ART_PATH ...]
 
-Each ART_PATH (default: the main menu backgrounds, vanilla and hi-res) is read
-from the game archives (patch000.dat, f2_res.dat, master.dat) with
-ce-dat-tool, converted to colours exactly as the engine presents them (6-bit
+Each ART_PATH (default: the main menu backgrounds: vanilla, hi-res and the
+Stimpack seven-plate mainmenu_sp.png the menu actually shows) is read from the
+game archives (patch000.dat, f2_res.dat, master.dat, then ce.dat for named
+indexed PNGs) with ce-dat-tool, converted to colours exactly as the engine presents them (6-bit
 palette expanded by bit replication), upscaled 2x with a Lanczos filter and
 written as an RGBA PNG to RUN_DIR/data/hd/test/<art path>.png, where the game
 finds it through its normal file layering. Index 0 stays opaque here because
@@ -32,8 +33,8 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN_DIR = Path(os.environ.get("RUN_DIR", ROOT / "out/build/macos"))
-DEFAULT_ART = ["art/intrface/mainmenu.frm", "art/intrface/hr_mainmenu.frm"]
-ARCHIVES = ["patch000.dat", "f2_res.dat", "master.dat"]
+DEFAULT_ART = ["art/intrface/mainmenu.frm", "art/intrface/hr_mainmenu.frm", "art/intrface/mainmenu_sp.png"]
+ARCHIVES = ["patch000.dat", "f2_res.dat", "master.dat", "ce.dat"]
 
 
 def dat_cat(entry):
@@ -52,6 +53,14 @@ def palette8():
 
 
 def frm_indices(entry, workdir):
+    if entry.lower().endswith(".png"):
+        # Named art (ce.dat): already an indexed PNG with the game's indices.
+        png = workdir / "in.png"
+        png.write_bytes(dat_cat(entry))
+        image = Image.open(png)
+        if image.mode != "P":
+            sys.exit(f"{entry}: expected an indexed PNG, got {image.mode}")
+        return np.asarray(image)
     frm = workdir / "in.frm"
     png = workdir / "in.png"
     frm.write_bytes(dat_cat(entry))

@@ -71,6 +71,29 @@ void hdLayerClear(HdLayer* layer);
 void hdLayerDrawImage(HdLayer* layer, const unsigned char* buffer, int bufferPitch,
     int x, int y, int width, int height, const HdImage& image, const unsigned char* basePalette8);
 
+// Optional restrictions for hdLayerDrawImageEx.
+struct HdDrawOptions {
+    // Only logical pixels inside this rectangle (layer coordinates, right and
+    // bottom exclusive) are drawn; used to draw part of an image, e.g. when a
+    // screen restores a region of its background.
+    int clipLeft = 0;
+    int clipTop = 0;
+    int clipRight = 1 << 30;
+    int clipBottom = 1 << 30;
+
+    // The legacy art the HD image was made from, at logical resolution and
+    // aligned with the image rectangle (x, y). When set, a logical pixel gets
+    // its HD block only where the window buffer equals the art there, so text
+    // or numbers that legacy code drew into the art (or over it) stay legacy,
+    // whatever order the draws happen in.
+    const unsigned char* source = nullptr;
+    int sourcePitch = 0;
+};
+
+void hdLayerDrawImageEx(HdLayer* layer, const unsigned char* buffer, int bufferPitch,
+    int x, int y, int width, int height, const HdImage& image, const unsigned char* basePalette8,
+    const HdDrawOptions& options);
+
 // Whether the HD block of logical pixel (x, y) is shown for buffer value `index`.
 inline bool hdLayerShows(const HdLayer* layer, int x, int y, unsigned char index)
 {

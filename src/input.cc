@@ -642,6 +642,21 @@ int screenshotHandlerPngImpl(int width, int height, unsigned char* data, unsigne
     }
     fclose(stream);
 
+    // CE: in HD mode the screen shows more than the 8-bit window buffers:
+    // save the presented frame at output resolution, without the cursor
+    // (as the 8-bit capture leaves it out).
+    if (screenGetFramebufferScale() > 1) {
+        bool cursorWasShown = !cursorIsHidden();
+        if (cursorWasShown) {
+            mouseHideCursor();
+        }
+        bool saved = screenshotSaveFramebufferPng(fileName);
+        if (cursorWasShown) {
+            mouseShowCursor();
+        }
+        return saved ? 0 : -1;
+    }
+
     int imgLen = width * height;
     std::vector<unsigned char> image(imgLen * 3);
 

@@ -21,6 +21,7 @@
 #include "game_mouse.h"
 #include "game_sound.h"
 #include "graph_lib.h"
+#include "hd_art.h"
 #include "input.h"
 #include "interface.h"
 #include "kb.h"
@@ -191,6 +192,8 @@ namespace {
         memcpy(hub.buffer + static_cast<size_t>(panelWidth) * (panelHeight - border),
             hub.background.getData() + static_cast<size_t>(panelWidth) * (artHeight - border),
             static_cast<size_t>(panelWidth) * border);
+        hdArtDrawImageRegion(hub.window, hub.background, 0, 0, panelWidth, panelHeight - border, 0, 0);
+        hdArtDrawImageRegion(hub.window, hub.background, 0, artHeight - border, panelWidth, border, 0, panelHeight - border);
         hubDrawHeader(hub, header1, header2);
 
         fontSetCurrent(kButtonFont);
@@ -204,6 +207,7 @@ namespace {
                 // Not available yet: draw the plate with a dim label and no button.
                 blitBufferToBufferTrans(hub.buttonUp.getData(), buttonWidth, buttonHeight, buttonWidth,
                     hub.buffer + panelWidth * slotY + kPanelSlotX, panelWidth);
+                hdArtDrawImage(hub.window, hub.buttonUp, kPanelSlotX, slotY);
                 fontDrawText(hub.buffer + panelWidth * (slotY + textY) + kPanelSlotX + textX, label, buttonWidth, panelWidth, COLOR_DARK_GREY_2);
                 continue;
             }
@@ -236,6 +240,8 @@ namespace {
                 BUTTON_FLAG_TRANSPARENT);
             if (button != -1) {
                 buttonSetCallbacks(button, _gsound_lrg_butt_press, _gsound_lrg_butt_release);
+                // HD plates; the labels drawn into the copies stay legacy.
+                hdArtSetButtonArt(button, &hub.buttonUp, &hub.buttonDown);
             }
         }
 
@@ -384,12 +390,14 @@ namespace {
         }
         unsigned char* buffer = windowGetBuffer(window);
         memcpy(buffer, background.getData(), kListWidth * kListHeight);
+        hdArtDrawImage(window, background, 0, 0);
 
         auto button = [&](int x, int y, FrmImage& up, FrmImage& down, int code) {
             int btn = buttonCreate(window, x, y, up.getWidth(), up.getHeight(), -1, -1, -1, code,
                 up.getData(), down.getData(), nullptr, BUTTON_FLAG_TRANSPARENT);
             if (btn != -1) {
                 buttonSetCallbacks(btn, _gsound_red_butt_press, nullptr);
+                hdArtSetButtonArt(btn, &up, &down);
             }
         };
         button(48, 186, redUp, redDown, CODE_DONE);
@@ -450,6 +458,7 @@ namespace {
             fontSetCurrent(101);
             blitBufferToBuffer(background.getData() + kListWidth * kListY + kListX, kListRowsWidth, kListRowsHeight, kListWidth,
                 buffer + kListWidth * kListY + kListX, kListWidth);
+            hdArtDrawImageRegion(window, background, kListX, kListY, kListRowsWidth, kListRowsHeight, kListX, kListY);
             int y = kListY;
             for (int row = top; row < std::min(static_cast<int>(rows.size()), top + kListVisibleRows); row++) {
                 Color color = rows[row].header ? COLOR_DARK_YELLOW : (row == selected ? COLOR_LIGHT_YELLOW : COLOR_GREEN);
@@ -465,6 +474,7 @@ namespace {
 
             // Card: parchment comes back from the background, then title and text.
             blitBufferToBuffer(background.getData() + kCardX, kListWidth - kCardX, kListHeight, kListWidth, buffer + kCardX, kListWidth);
+            hdArtDrawImageRegion(window, background, kCardX, 0, kListWidth - kCardX, kListHeight, kCardX, 0);
             std::string title;
             std::string text;
             if (selectable(selected)) {

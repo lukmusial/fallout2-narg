@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <type_traits>
 
 #include "animation_defs.h"
@@ -611,6 +612,12 @@ public:
 
     ConstBuffer2D getBuffer() const { return { _data, _width, _height }; };
 
+    // CE: art file path of the locked image (e.g. "art\\intrface\\lsgame.frm",
+    // or the named path), empty if not locked; and its frame number. Used to
+    // find the HD version of the image (hd_art.h).
+    std::string getPath() const;
+    int getFrame() const { return _frame; }
+
 private:
     bool lock(unsigned int fid, int frame = 0, Rotation rotation = ROTATION_NE);
     void resetInternal();
@@ -623,6 +630,9 @@ private:
     int _height = 0;
     int _xOffset = 0;
     int _yOffset = 0;
+    int _fid = -1;
+    int _frame = 0;
+    std::string _path;
 };
 
 } // namespace fallout

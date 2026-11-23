@@ -1821,6 +1821,9 @@ FrmImage::FrmImage(FrmImage&& other) noexcept
     , _height(other._height)
     , _xOffset(other._xOffset)
     , _yOffset(other._yOffset)
+    , _fid(other._fid)
+    , _frame(other._frame)
+    , _path(std::move(other._path))
 {
     other.resetInternal();
 }
@@ -1836,6 +1839,9 @@ FrmImage& FrmImage::operator=(FrmImage&& other) noexcept
         _height = other._height;
         _xOffset = other._xOffset;
         _yOffset = other._yOffset;
+        _fid = other._fid;
+        _frame = other._frame;
+        _path = std::move(other._path);
 
         other.resetInternal();
     }
@@ -1871,6 +1877,8 @@ bool FrmImage::lock(unsigned int fid, int frame, Rotation rotation)
         return false;
     }
 
+    _fid = static_cast<int>(fid);
+    _frame = frame;
     return true;
 }
 
@@ -1888,6 +1896,8 @@ bool FrmImage::lock(const char* frmPath, int frame, Rotation direction)
         return false;
     }
 
+    _path = frmPath;
+    _frame = frame;
     return true;
 }
 
@@ -1917,6 +1927,24 @@ void FrmImage::resetInternal()
     _height = 0;
     _xOffset = 0;
     _yOffset = 0;
+    _fid = -1;
+    _frame = 0;
+    _path.clear();
+}
+
+std::string FrmImage::getPath() const
+{
+    if (!_path.empty()) {
+        return _path;
+    }
+    if (_fid >= 0) {
+        FrmId frmId(_fid);
+        const char* path = frmId.filePath();
+        if (path != nullptr) {
+            return path;
+        }
+    }
+    return std::string();
 }
 
 bool FrmImage::setFrame(const Art* art, int frame, Rotation rotation)

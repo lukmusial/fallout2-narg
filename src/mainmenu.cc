@@ -172,6 +172,7 @@ static bool mainMenuShouldUseVanillaArtForLayout(int backgroundWidth, int backgr
 static bool mainMenuLoadArt();
 static MainMenuLayout mainMenuBuildLayout();
 static void mainMenuDrawBackground(const MainMenuLayout& layout);
+static void mainMenuDrawHd(const FrmImage& image, int x, int y, int width, int height);
 static MainMenuOffsets mainMenuReadOffsets(const MainMenuLayout& layout);
 static void mainMenuDrawPanel(const MainMenuLayout& layout, const MainMenuOffsets& offsets);
 static Point mainMenuTransformPoint(const MainMenuLayout& layout, int x, int y);
@@ -313,10 +314,25 @@ static void mainMenuDrawBackground(const MainMenuLayout& layout)
             layout.backgroundHeight);
     }
 
-    // CE: HD background over the legacy one (buttons and text stay legacy);
-    // resampled to the same rectangle when the menu is scaled.
-    const char* artPath = layout.art == MenuArt::Vanilla ? "art/intrface/mainmenu.frm" : "art/intrface/hr_mainmenu.frm";
-    hdArtDrawInterface(gMainMenuWindow, artPath, layout.backgroundX, layout.backgroundY, layout.backgroundWidth, layout.backgroundHeight);
+    // CE: HD version of the background actually loaded (mainmenu_sp.png,
+    // mainmenu.frm or HR_MAINMENU.FRM); resampled to the same rectangle when
+    // the menu is scaled.
+    mainMenuDrawHd(mainMenuBackgroundFrmImage, layout.backgroundX, layout.backgroundY, layout.backgroundWidth, layout.backgroundHeight);
+}
+
+// CE: draws the HD version of a menu image that was just drawn at (x, y),
+// scaled to width x height.
+static void mainMenuDrawHd(const FrmImage& image, int x, int y, int width, int height)
+{
+    if (width == image.getWidth() && height == image.getHeight()) {
+        hdArtDrawImage(gMainMenuWindow, image, x, y);
+        return;
+    }
+
+    std::shared_ptr<const HdImage> hd = hdArtFindImage(image);
+    if (hd != nullptr) {
+        windowHdDrawImage(gMainMenuWindow, x, y, width, height, *hd);
+    }
 }
 
 static MainMenuOffsets mainMenuReadOffsets(const MainMenuLayout& layout)
@@ -366,6 +382,8 @@ static void mainMenuDrawPanel(const MainMenuLayout& layout, const MainMenuOffset
         panelOrigin.y + offsets.menuY,
         panelSize.width,
         panelSize.height);
+
+    mainMenuDrawHd(mainMenuButtonPanelFrmImage, panelOrigin.x + offsets.menuX, panelOrigin.y + offsets.menuY, panelSize.width, panelSize.height);
 }
 
 static Point mainMenuTransformPoint(const MainMenuLayout& layout, int x, int y)
@@ -498,6 +516,15 @@ static bool mainMenuCreateButtons(const MainMenuLayout& layout, const MainMenuOf
         }
 
         buttonSetMask(gMainMenuButtons[index], buttonNormalData);
+
+        // CE: HD menuup/menudown (resampled when the buttons are scaled).
+        if (buttonNormalData == mainMenuButtonNormalFrmImage.getData()) {
+            hdArtSetButtonArt(gMainMenuButtons[index], &mainMenuButtonNormalFrmImage, &mainMenuButtonPressedFrmImage);
+        } else {
+            std::string normalPath = mainMenuButtonNormalFrmImage.getPath();
+            std::string pressedPath = mainMenuButtonPressedFrmImage.getPath();
+            buttonSetHdArt(gMainMenuButtons[index], normalPath.c_str(), nullptr, pressedPath.c_str(), nullptr);
+        }
     }
 
     return true;
@@ -622,6 +649,9 @@ void mainMenuWindowFree()
 
     mainMenuScaledButtonData.clear();
     mainMenuOverlayDimmedBackup.clear();
+    if (gMainMenuWindow != -1) {
+        windowHdDarkenEnd(gMainMenuWindow);
+    }
     mainMenuButtonPanelFrmImage.unlock();
     mainMenuButtonPressedFrmImage.unlock();
     mainMenuButtonNormalFrmImage.unlock();
@@ -660,6 +690,7 @@ void mainMenuWindowHide(bool animate)
     windowHide(gMainMenuWindow);
     touch_set_touchscreen_mode(false);
     mainMenuOverlayDimmedBackup.clear();
+    windowHdDarkenEnd(gMainMenuWindow);
     mainMenuOverlayCount = 0;
 
     gMainMenuWindowHidden = true;
@@ -947,6 +978,7 @@ static void mainMenuApplyOverlayDim()
     int size = width * height;
 
     mainMenuOverlayDimmedBackup.assign(gMainMenuWindowBuffer, gMainMenuWindowBuffer + size);
+    windowHdDarkenBegin(gMainMenuWindow);
     mainMenuAnimateOverlayDim(mainMenuOverlayDimClearIntensity, mainMenuOverlayDimTargetIntensity);
 }
 
@@ -977,6 +1009,7 @@ static void mainMenuRemoveOverlayDim()
 
     memcpy(gMainMenuWindowBuffer, mainMenuOverlayDimmedBackup.data(), size);
     mainMenuOverlayDimmedBackup.clear();
+    windowHdDarkenEnd(gMainMenuWindow);
     windowRefresh(gMainMenuWindow);
 }
 
@@ -989,6 +1022,7 @@ static void mainMenuSetOverlayDimIntensity(int intensity)
     int width = windowGetWidth(gMainMenuWindow);
     int height = windowGetHeight(gMainMenuWindow);
     _dark_trans_buf_to_buf(mainMenuOverlayDimmedBackup.data(), width, height, width, gMainMenuWindowBuffer, 0, 0, width, intensity);
+    windowHdDarken(gMainMenuWindow, intensity);
     windowRefresh(gMainMenuWindow);
     renderPresent();
 }

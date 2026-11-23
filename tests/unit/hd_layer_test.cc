@@ -256,9 +256,55 @@ static void testFromIndexed()
     CHECK(image.pixels[4 + 3] == 0xFF4D4D4D);
 }
 
+static void testClipAndSource()
+{
+    std::vector<unsigned char> palette = makePalette();
+    // Window 4x2; the art (4x2, all index 10) was drawn at (0, 0), then legacy
+    // text put index 50 at (1, 0).
+    std::vector<unsigned char> art(4 * 2, 10);
+    std::vector<unsigned char> buffer = art;
+    buffer[1] = 50;
+
+    HdLayer layer;
+    hdLayerInit(&layer, 4, 2);
+    HdDrawOptions options;
+    options.source = art.data();
+    options.sourcePitch = 4;
+    options.clipLeft = 0;
+    options.clipRight = 3; // column 3 is outside the region
+    hdLayerDrawImageEx(&layer, buffer.data(), 4, 0, 0, 4, 2, solidImage(8, 4, kRed), palette.data(), options);
+
+    Staging staging(4, 2);
+    staging.compose(&layer, buffer, 4);
+    CHECK(staging.at(0, 0) == 1);
+    CHECK(staging.at(1, 0) == 0); // text differs from the art: legacy
+    CHECK(staging.at(2, 1) == 1);
+    CHECK(staging.at(3, 0) == 0); // clipped
+    CHECK(staging.hd(2, 1) == 0xFF0000);
+
+    // A region draw of a sub-image: image positioned at (-2, 0) so that its
+    // columns 2..3 land on window columns 0..1, clipped to those columns.
+    HdImage image = solidImage(8, 4, kGreen);
+    for (int y = 0; y < 4; y++) {
+        for (int x = 4; x < 8; x++) {
+            image.pixels[y * 8 + x] = kRed; // art columns 2..3
+        }
+    }
+    std::fill(buffer.begin(), buffer.end(), 10);
+    HdDrawOptions region;
+    region.clipLeft = 0;
+    region.clipRight = 2;
+    hdLayerDrawImageEx(&layer, buffer.data(), 4, -2, 0, 4, 2, image, palette.data(), region);
+    staging.compose(&layer, buffer, 4);
+    CHECK(staging.at(1, 0) == 1);
+    CHECK(staging.hd(0, 0) == 0xFF0000);
+    CHECK(staging.hd(1, 1, 1, 1) == 0xFF0000);
+}
+
 int main()
 {
     testShadowValidation();
+    testClipAndSource();
     testOverwriteByLegacyThenHdRedraw();
     testCyclingIndicesStayLegacy();
     testAlpha();

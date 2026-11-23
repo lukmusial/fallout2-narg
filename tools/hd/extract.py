@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 import hdlib
+from PIL import Image
 
 INTERFACE = [
     "art/intrface/mainmenu.frm",
@@ -34,6 +35,40 @@ INTERFACE = [
     "art/intrface/edtrcrte.frm",
     "art/intrface/menuup.frm",
     "art/intrface/menudown.frm",
+]
+
+# Phase 2.6: everything the main menu, load/save screen, character editor and
+# Stimpack hub draw as art (text and the big numbers stay legacy).
+SCREENS = [
+    # main menu (hi-res variants from f2_res.dat)
+    "art/intrface/hr_mainmenu.frm", "art/intrface/hr_menu_bg.frm",
+    # load/save
+    "art/intrface/lscover.frm", "art/intrface/lilredup.frm", "art/intrface/lilreddn.frm",
+    "art/intrface/uparwoff.frm", "art/intrface/uparwon.frm",
+    "art/intrface/dnarwoff.frm", "art/intrface/dnarwon.frm",
+    # character editor, its dialogs and the perk dialog
+    "art/intrface/ageoff.frm", "art/intrface/ageon.frm", "art/intrface/agebox.frm",
+    "art/intrface/nameoff.frm", "art/intrface/nameon.frm", "art/intrface/namebox.frm",
+    "art/intrface/sexoff.frm", "art/intrface/sexon.frm",
+    "art/intrface/slider.frm",
+    "art/intrface/snegoff.frm", "art/intrface/snegon.frm", "art/intrface/splsoff.frm", "art/intrface/splson.frm",
+    "art/intrface/stnegoff.frm", "art/intrface/stnegon.frm", "art/intrface/stplsoff.frm", "art/intrface/stplson.frm",
+    "art/intrface/attribox.frm", "art/intrface/attribwn.frm", "art/intrface/charwin.frm", "art/intrface/donebox.frm",
+    "art/intrface/femoff.frm", "art/intrface/femon.frm", "art/intrface/maleoff.frm", "art/intrface/maleon.frm",
+    "art/intrface/slu.frm", "art/intrface/sld.frm", "art/intrface/sru.frm", "art/intrface/srd.frm",
+    "art/intrface/bararrws.frm",
+    "art/intrface/karmafdr.frm", "art/intrface/killsfdr.frm", "art/intrface/perksfdr.frm",
+    "art/intrface/tgskloff.frm", "art/intrface/tgsklon.frm",
+    "art/intrface/perkwin.frm",
+    # options panel (character editor) and Stimpack hub buttons
+    "art/intrface/opbase.frm", "art/intrface/opbtnoff.frm", "art/intrface/opbtnon.frm",
+]
+
+# Named indexed PNGs from this repo's ce.dat (Stimpack art), same palette indices.
+CE_DAT_PNG = [
+    "art/intrface/mainmenu_sp.png",
+    "art/intrface/hr_menu_bg_sp.png",
+    "art/intrface/opbase_sp.png",
 ]
 
 # Floor tiles seen in Arroyo / Klamath / Den maps (counted from the map grids)
@@ -102,6 +137,10 @@ class Archives:
             dat = g / name
             if dat.exists():
                 self.layers.append((name, dat, list_dat(dat)))
+        # The hi-res patch archive the engine loads (HR_*.FRM).
+        f2res = hdlib.REPO_ROOT / "files" / "f2_res.dat"
+        if f2res.exists():
+            self.layers.append(("f2_res.dat", f2res, list_dat(f2res)))
         self.loose = {}
         data = g / "data"
         if data.is_dir():
@@ -182,7 +221,7 @@ def main() -> None:
         regions.append({"map": m, "elevation": elev, "row": r0, "col": c0, "size": n, "tiles": names})
         region_tiles.update(f"art/tiles/{x}.frm" for row in names for x in row)
 
-    art = list(dict.fromkeys(INTERFACE + TILES + OBJECTS + sorted(region_tiles) + [e.lower() for e in args.extra]))
+    art = list(dict.fromkeys(INTERFACE + SCREENS + TILES + OBJECTS + sorted(region_tiles) + [e.lower() for e in args.extra]))
     sources = arch.fetch(art, raw)
 
     pal = raw / "color.pal"
@@ -211,6 +250,29 @@ def main() -> None:
             "source": sources[path], "sample": path in INTERFACE + TILES + OBJECTS,
         })
         print(f"{sources[path]:>12}  {key}  {idx.shape[1]}x{idx.shape[0]}")
+
+    # ce.dat PNGs: re-saved with the palette ce-frm2png writes, so both kinds
+    # of source decode to the same colours.
+    palette_ref = next((hdlib.SRC_DIR / a["key"] for a in assets if a["type"] == "intrface"), None)
+    for path in CE_DAT_PNG:
+        src = hdlib.REPO_ROOT / "files" / "ce.dat" / path
+        if not src.exists() or palette_ref is None:
+            print(f"warning: {src} missing", file=sys.stderr)
+            continue
+        idx, _ = hdlib.load_indexed(src)
+        _, pal = hdlib.load_indexed(palette_ref)
+        dst = hdlib.SRC_DIR / path
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        image = Image.fromarray(idx, "P")
+        image.putpalette(pal.flatten().tolist())
+        image.save(dst)
+        name = Path(path).stem
+        assets.append({
+            "key": path, "name": name, "type": "intrface", "kind": "interface",
+            "width": int(idx.shape[1]), "height": int(idx.shape[0]),
+            "source": "ce.dat", "sample": False,
+        })
+        print(f"{'ce.dat':>12}  {path}  {idx.shape[1]}x{idx.shape[0]}")
 
     hdlib.MANIFEST.write_text(json.dumps({"assets": assets, "regions": regions}, indent=1))
     print(f"{len(assets)} assets, {len(regions)} map regions -> {hdlib.MANIFEST}")

@@ -41,7 +41,22 @@ static inline uint32_t blendOver(uint32_t src, uint32_t under)
 void hdLayerDrawImage(HdLayer* layer, const unsigned char* buffer, int bufferPitch,
     int x, int y, int width, int height, const HdImage& image, const unsigned char* basePalette8)
 {
+    hdLayerDrawImageEx(layer, buffer, bufferPitch, x, y, width, height, image, basePalette8, HdDrawOptions());
+}
+
+void hdLayerDrawImageEx(HdLayer* layer, const unsigned char* buffer, int bufferPitch,
+    int x, int y, int width, int height, const HdImage& image, const unsigned char* basePalette8,
+    const HdDrawOptions& options)
+{
     if (layer == nullptr || width <= 0 || height <= 0 || image.width <= 0 || image.height <= 0) {
+        return;
+    }
+
+    int left = std::max({ x, 0, options.clipLeft });
+    int top = std::max({ y, 0, options.clipTop });
+    int right = std::min({ x + width, layer->width, options.clipRight });
+    int bottom = std::min({ y + height, layer->height, options.clipBottom });
+    if (left >= right || top >= bottom) {
         return;
     }
 
@@ -52,10 +67,6 @@ void hdLayerDrawImage(HdLayer* layer, const unsigned char* buffer, int bufferPit
         source = &resampled;
     }
 
-    int left = std::max(x, 0);
-    int top = std::max(y, 0);
-    int right = std::min(x + width, layer->width);
-    int bottom = std::min(y + height, layer->height);
     const int layerPitch = layer->width * kHdScale;
 
     for (int ly = top; ly < bottom; ly++) {
@@ -65,6 +76,11 @@ void hdLayerDrawImage(HdLayer* layer, const unsigned char* buffer, int bufferPit
 
             if (hdIsCyclingIndex(index)) {
                 layer->valid[offset] = 0;
+                continue;
+            }
+
+            if (options.source != nullptr && options.source[static_cast<size_t>(ly - y) * options.sourcePitch + (lx - x)] != index) {
+                // Something else was drawn here (text, numbers): legacy.
                 continue;
             }
 

@@ -28,6 +28,7 @@
 #include "game_movie.h"
 #include "game_sound.h"
 #include "geometry.h"
+#include "hd_art.h"
 #include "input.h"
 #include "interface.h"
 #include "item.h"
@@ -185,6 +186,8 @@ static int _RestoreSave();
 static int _LoadObjDudeCid(File* stream);
 static int _SaveObjDudeCid(File* stream);
 static int _EraseSave();
+static void lsgDrawPreviewCover();
+static void lsgRestoreBackground(int x, int y, int width, int height);
 
 // 0x47B7C0 lsgrphs
 static constexpr InterfaceFrmId kLoadSaveFrmIds[LOAD_SAVE_FRM_COUNT] = {
@@ -897,21 +900,11 @@ int lsgSaveGame(LoadSaveMode mode)
                     switch (_LSstatus[_slot_cursor]) {
                     case LoadSaveSlotState::Empty:
                     case LoadSaveSlotState::Error:
-                        blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getData(),
-                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
-                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-                            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-                            LS_WINDOW_WIDTH);
+                        lsgDrawPreviewCover();
                         break;
                     default:
                         _LoadTumbSlot(_slot_cursor);
-                        blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_BACKGROUND].getData() + LS_WINDOW_WIDTH * 39 + 340,
-                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
-                            LS_WINDOW_WIDTH,
-                            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-                            LS_WINDOW_WIDTH);
+                        lsgRestoreBackground(340, 39, _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(), _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight());
                         blitBufferToBuffer(_thumbnail_image,
                             LS_PREVIEW_WIDTH - 1,
                             LS_PREVIEW_HEIGHT - 1,
@@ -939,21 +932,11 @@ int lsgSaveGame(LoadSaveMode mode)
                 case LoadSaveSlotState::Empty:
                 case LoadSaveSlotState::Error:
                 case LoadSaveSlotState::UnsupportedVersion:
-                    blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getData(),
-                        _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-                        _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
-                        _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-                        gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-                        LS_WINDOW_WIDTH);
+                    lsgDrawPreviewCover();
                     break;
                 default:
                     _LoadTumbSlot(_slot_cursor);
-                    blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_BACKGROUND].getData() + LS_WINDOW_WIDTH * 39 + 340,
-                        _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-                        _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
-                        LS_WINDOW_WIDTH,
-                        gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-                        LS_WINDOW_WIDTH);
+                    lsgRestoreBackground(340, 39, _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(), _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight());
                     blitBufferToBuffer(_thumbnail_image,
                         LS_PREVIEW_WIDTH - 1,
                         LS_PREVIEW_HEIGHT - 1,
@@ -1042,21 +1025,11 @@ int lsgSaveGame(LoadSaveMode mode)
                     case LoadSaveSlotState::Empty:
                     case LoadSaveSlotState::Error:
                     case LoadSaveSlotState::UnsupportedVersion:
-                        blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getData(),
-                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
-                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-                            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-                            LS_WINDOW_WIDTH);
+                        lsgDrawPreviewCover();
                         break;
                     default:
                         _LoadTumbSlot(_slot_cursor);
-                        blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_BACKGROUND].getData() + LS_WINDOW_WIDTH * 39 + 340,
-                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
-                            LS_WINDOW_WIDTH,
-                            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-                            LS_WINDOW_WIDTH);
+                        lsgRestoreBackground(340, 39, _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(), _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight());
                         blitBufferToBuffer(_thumbnail_image,
                             LS_PREVIEW_WIDTH - 1,
                             LS_PREVIEW_HEIGHT - 1,
@@ -1256,12 +1229,7 @@ int lsgLoadGame(LoadSaveMode mode)
     case LoadSaveSlotState::Empty:
     case LoadSaveSlotState::Error:
     case LoadSaveSlotState::UnsupportedVersion:
-        blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getData(),
-            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
-            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-            LS_WINDOW_WIDTH);
+        lsgDrawPreviewCover();
         break;
     default:
         _LoadTumbSlot(_slot_cursor);
@@ -1499,21 +1467,11 @@ int lsgLoadGame(LoadSaveMode mode)
                     case LoadSaveSlotState::Empty:
                     case LoadSaveSlotState::Error:
                     case LoadSaveSlotState::UnsupportedVersion:
-                        blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getData(),
-                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
-                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-                            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-                            LS_WINDOW_WIDTH);
+                        lsgDrawPreviewCover();
                         break;
                     default:
                         _LoadTumbSlot(_slot_cursor);
-                        blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_BACKGROUND].getData() + LS_WINDOW_WIDTH * 39 + 340,
-                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-                            _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
-                            LS_WINDOW_WIDTH,
-                            gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-                            LS_WINDOW_WIDTH);
+                        lsgRestoreBackground(340, 39, _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(), _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight());
                         blitBufferToBuffer(_thumbnail_image,
                             LS_PREVIEW_WIDTH - 1,
                             LS_PREVIEW_HEIGHT - 1,
@@ -1540,21 +1498,11 @@ int lsgLoadGame(LoadSaveMode mode)
                 case LoadSaveSlotState::Empty:
                 case LoadSaveSlotState::Error:
                 case LoadSaveSlotState::UnsupportedVersion:
-                    blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getData(),
-                        _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-                        _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
-                        _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-                        gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-                        LS_WINDOW_WIDTH);
+                    lsgDrawPreviewCover();
                     break;
                 default:
                     _LoadTumbSlot(_slot_cursor);
-                    blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_BACKGROUND].getData() + LS_WINDOW_WIDTH * 39 + 340,
-                        _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(),
-                        _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight(),
-                        LS_WINDOW_WIDTH,
-                        gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
-                        LS_WINDOW_WIDTH);
+                    lsgRestoreBackground(340, 39, _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getWidth(), _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER].getHeight());
                     blitBufferToBuffer(_thumbnail_image,
                         LS_PREVIEW_WIDTH - 1,
                         LS_PREVIEW_HEIGHT - 1,
@@ -1754,6 +1702,7 @@ static int lsgWindowInit(LoadSaveWindowType windowType)
 
     gLoadSaveWindowBuffer = windowGetBuffer(gLoadSaveWindow);
     memcpy(gLoadSaveWindowBuffer, _loadsaveFrmImages[LOAD_SAVE_FRM_BACKGROUND].getData(), LS_WINDOW_WIDTH * LS_WINDOW_HEIGHT);
+    hdArtDrawImage(gLoadSaveWindow, _loadsaveFrmImages[LOAD_SAVE_FRM_BACKGROUND], 0, 0);
 
     int messageId;
     switch (windowType) {
@@ -1808,6 +1757,7 @@ static int lsgWindowInit(LoadSaveWindowType windowType)
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
         buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
+        hdArtSetButtonArt(btn, &_loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_NORMAL], &_loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_PRESSED]);
     }
 
     btn = buttonCreate(gLoadSaveWindow,
@@ -1825,6 +1775,7 @@ static int lsgWindowInit(LoadSaveWindowType windowType)
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
         buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
+        hdArtSetButtonArt(btn, &_loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_NORMAL], &_loadsaveFrmImages[LOAD_SAVE_FRM_RED_BUTTON_PRESSED]);
     }
 
     btn = buttonCreate(gLoadSaveWindow,
@@ -1842,6 +1793,7 @@ static int lsgWindowInit(LoadSaveWindowType windowType)
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
         buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
+        hdArtSetButtonArt(btn, &_loadsaveFrmImages[LOAD_SAVE_FRM_ARROW_UP_NORMAL], &_loadsaveFrmImages[LOAD_SAVE_FRM_ARROW_UP_PRESSED]);
     }
 
     btn = buttonCreate(gLoadSaveWindow,
@@ -1859,6 +1811,7 @@ static int lsgWindowInit(LoadSaveWindowType windowType)
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
         buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
+        hdArtSetButtonArt(btn, &_loadsaveFrmImages[LOAD_SAVE_FRM_ARROW_DOWN_NORMAL], &_loadsaveFrmImages[LOAD_SAVE_FRM_ARROW_DOWN_PRESSED]);
     }
 
     // tweaked bounds to accomodate Next/Previous buttons
@@ -2505,10 +2458,36 @@ static void _ShowSlotList(LoadSaveWindowType windowType)
     }
 }
 
+// CE: the "no preview" cover over the thumbnail area, with its HD version.
+static void lsgDrawPreviewCover()
+{
+    const FrmImage& cover = _loadsaveFrmImages[LOAD_SAVE_FRM_PREVIEW_COVER];
+    blitBufferToBuffer(cover.getData(),
+        cover.getWidth(),
+        cover.getHeight(),
+        cover.getWidth(),
+        gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 39 + 340,
+        LS_WINDOW_WIDTH);
+    hdArtDrawImage(gLoadSaveWindow, cover, 340, 39);
+}
+
+// CE: restores a region of the background, with its HD version.
+static void lsgRestoreBackground(int x, int y, int width, int height)
+{
+    const FrmImage& background = _loadsaveFrmImages[LOAD_SAVE_FRM_BACKGROUND];
+    blitBufferToBuffer(background.getData() + LS_WINDOW_WIDTH * y + x,
+        width,
+        height,
+        LS_WINDOW_WIDTH,
+        gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * y + x,
+        LS_WINDOW_WIDTH);
+    hdArtDrawImageRegion(gLoadSaveWindow, background, x, y, width, height, x, y);
+}
+
 // 0x47E8E0
 static void _DrawInfoBox(int slot)
 {
-    blitBufferToBuffer(_loadsaveFrmImages[LOAD_SAVE_FRM_BACKGROUND].getData() + LS_WINDOW_WIDTH * 253 + 396, 164, 60, LS_WINDOW_WIDTH, gLoadSaveWindowBuffer + LS_WINDOW_WIDTH * 253 + 396, 640);
+    lsgRestoreBackground(396, 253, 164, 60);
 
     unsigned char* dest;
     const char* text;
