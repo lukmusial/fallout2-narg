@@ -24,6 +24,8 @@
 #include "game_sound.h"
 #include "geometry.h"
 #include "graph_lib.h"
+#include "hd_art.h"
+#include "hd_layer.h"
 #include "input.h"
 #include "interface.h"
 #include "item.h"
@@ -885,6 +887,83 @@ static unsigned char* characterEditorBackgroundData()
     return _editorBackgroundFrmImage.getData();
 }
 
+// CE: HD version of the editor background (Phase 2.6). In Stimpack mode it
+// is the same composite as the legacy one: the creation screen with the
+// level-up screen's level box. Empty when HD is off or the pack has no image.
+static HdImage gCharacterEditorHdBackground;
+
+static void characterEditorBuildHdBackground(const FrmImage* levelBoxSource)
+{
+    gCharacterEditorHdBackground = HdImage();
+    if (!windowHdIsActive()) {
+        return;
+    }
+
+    std::shared_ptr<const HdImage> base = hdArtFindImage(_editorBackgroundFrmImage);
+    if (base == nullptr) {
+        return;
+    }
+
+    const int width = 640 * kHdScale;
+    const int height = 480 * kHdScale;
+    if (base->width == width && base->height == height) {
+        gCharacterEditorHdBackground = *base;
+    } else {
+        hdImageResample(*base, width, height, &gCharacterEditorHdBackground);
+    }
+
+    if (levelBoxSource == nullptr) {
+        return;
+    }
+
+    std::shared_ptr<const HdImage> levelBox = hdArtFindImage(*levelBoxSource);
+    HdImage resampled;
+    if (levelBox != nullptr && (levelBox->width != width || levelBox->height != height)) {
+        hdImageResample(*levelBox, width, height, &resampled);
+        levelBox = std::make_shared<const HdImage>(std::move(resampled));
+    }
+
+    for (int y = STIMPACK_LEVEL_BOX_Y * kHdScale; y < (STIMPACK_LEVEL_BOX_Y + STIMPACK_LEVEL_BOX_HEIGHT) * kHdScale; y++) {
+        uint32_t* dest = gCharacterEditorHdBackground.pixels.data() + static_cast<size_t>(y) * width + STIMPACK_LEVEL_BOX_X * kHdScale;
+        if (levelBox != nullptr) {
+            memcpy(dest, levelBox->pixels.data() + static_cast<size_t>(y) * width + STIMPACK_LEVEL_BOX_X * kHdScale, sizeof(uint32_t) * STIMPACK_LEVEL_BOX_WIDTH * kHdScale);
+        } else {
+            // No HD level box: leave it to the legacy pixels.
+            std::fill(dest, dest + STIMPACK_LEVEL_BOX_WIDTH * kHdScale, 0u);
+        }
+    }
+}
+
+// CE: draws the HD background over a region the legacy code has just
+// restored from characterEditorBackgroundData().
+static void characterEditorDrawHdBackground(int x, int y, int width, int height)
+{
+    if (gCharacterEditorHdBackground.width == 0) {
+        return;
+    }
+
+    hdArtDrawRegion(gCharacterEditorWindow, gCharacterEditorHdBackground, characterEditorBackgroundData(), 640, 480, x, y, width, height, x, y);
+}
+
+// Restores a region of the window from the background (offset = 640 * y + x).
+static void characterEditorRestoreBackground(int offset, int width, int height)
+{
+    blitBufferToBuffer(characterEditorBackgroundData() + offset, width, height, 640, gCharacterEditorWindowBuffer + offset, 640);
+    characterEditorDrawHdBackground(offset % 640, offset / 640, width, height);
+}
+
+// CE: HD art of the editor's own images: buttons built from them (also from
+// their labelled copies) and images blitted into the window.
+static void characterEditorAttachHdButtons(int win)
+{
+    hdArtAttachButtonArt(win, _editorFrmImages, EDITOR_GRAPHIC_COUNT, gCharacterEditorFrmCopy);
+}
+
+static void characterEditorDrawHdArt(int graphic, int x, int y)
+{
+    hdArtDrawImage(gCharacterEditorWindow, _editorFrmImages[graphic], x, y);
+}
+
 // Stimpack: the skill slider (level-up control) is shown on the creation layout.
 static bool characterEditorHasSkillSlider()
 {
@@ -1635,10 +1714,14 @@ static int characterEditorWindowInit()
                     STIMPACK_LEVEL_BOX_WIDTH);
             }
         }
+        characterEditorBuildHdBackground(&levelUpBackground);
+    } else {
+        characterEditorBuildHdBackground(nullptr);
     }
 
     gCharacterEditorWindowBuffer = windowGetBuffer(gCharacterEditorWindow);
     memcpy(gCharacterEditorWindowBuffer, characterEditorBackgroundData(), 640 * 480);
+    characterEditorDrawHdBackground(0, 0, 640, 480);
 
     if (gCharacterEditorIsCreationMode) {
         fontSetCurrent(103);
@@ -1953,6 +2036,7 @@ static int characterEditorWindowInit()
             _editorFrmImages[EDITOR_GRAPHIC_NAME_ON].getWidth(),
             gCharacterEditorWindowBuffer + (EDITOR_WINDOW_WIDTH * NAME_BUTTON_Y) + x,
             EDITOR_WINDOW_WIDTH);
+        characterEditorDrawHdArt(EDITOR_GRAPHIC_NAME_OFF, x, NAME_BUTTON_Y);
 
         x += _editorFrmImages[EDITOR_GRAPHIC_NAME_ON].getWidth();
         blitBufferToBufferTrans(gCharacterEditorFrmCopy[EDITOR_GRAPHIC_AGE_OFF],
@@ -1961,6 +2045,7 @@ static int characterEditorWindowInit()
             _editorFrmImages[EDITOR_GRAPHIC_AGE_ON].getWidth(),
             gCharacterEditorWindowBuffer + (EDITOR_WINDOW_WIDTH * NAME_BUTTON_Y) + x,
             EDITOR_WINDOW_WIDTH);
+        characterEditorDrawHdArt(EDITOR_GRAPHIC_AGE_OFF, x, NAME_BUTTON_Y);
 
         x += _editorFrmImages[EDITOR_GRAPHIC_AGE_ON].getWidth();
         blitBufferToBufferTrans(gCharacterEditorFrmCopy[EDITOR_GRAPHIC_SEX_OFF],
@@ -1969,6 +2054,7 @@ static int characterEditorWindowInit()
             _editorFrmImages[EDITOR_GRAPHIC_SEX_ON].getWidth(),
             gCharacterEditorWindowBuffer + (EDITOR_WINDOW_WIDTH * NAME_BUTTON_Y) + x,
             EDITOR_WINDOW_WIDTH);
+        characterEditorDrawHdArt(EDITOR_GRAPHIC_SEX_OFF, x, NAME_BUTTON_Y);
 
         btn = buttonCreate(gCharacterEditorWindow,
             11,
@@ -2084,6 +2170,8 @@ static int characterEditorWindowInit()
         buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
     }
 
+    characterEditorAttachHdButtons(gCharacterEditorWindow);
+
     windowRefresh(gCharacterEditorWindow);
     indicatorBarHide();
 
@@ -2104,6 +2192,7 @@ static void characterEditorWindowFree()
     }
 
     windowDestroy(gCharacterEditorWindow);
+    gCharacterEditorHdBackground = HdImage();
 
     for (int index = 0; index < EDITOR_GRAPHIC_COUNT; index++) {
         _editorFrmImages[index].unlock();
@@ -2222,7 +2311,7 @@ static void characterEditorDrawFolders()
         return;
     }
 
-    blitBufferToBuffer(characterEditorBackgroundData() + (360 * 640) + 34, 280, 120, 640, gCharacterEditorWindowBuffer + (360 * 640) + 34, 640);
+    characterEditorRestoreBackground((360 * 640) + 34, 280, 120);
 
     fontSetCurrent(101);
 
@@ -2234,6 +2323,7 @@ static void characterEditorDrawFolders()
             _editorFrmImages[EDITOR_GRAPHIC_PERKS_FOLDER_SELECTED].getWidth(),
             gCharacterEditorWindowBuffer + (327 * 640) + 11,
             640);
+        characterEditorDrawHdArt(EDITOR_GRAPHIC_PERKS_FOLDER_SELECTED, 11, 327);
         characterEditorDrawPerksFolder();
         break;
     case EDITOR_FOLDER_KARMA:
@@ -2243,6 +2333,7 @@ static void characterEditorDrawFolders()
             _editorFrmImages[EDITOR_GRAPHIC_PERKS_FOLDER_SELECTED].getWidth(),
             gCharacterEditorWindowBuffer + (327 * 640) + 11,
             640);
+        characterEditorDrawHdArt(EDITOR_GRAPHIC_KARMA_FOLDER_SELECTED, 11, 327);
         characterEditorDrawKarmaFolder();
         break;
     case EDITOR_FOLDER_KILLS:
@@ -2252,6 +2343,7 @@ static void characterEditorDrawFolders()
             _editorFrmImages[EDITOR_GRAPHIC_PERKS_FOLDER_SELECTED].getWidth(),
             gCharacterEditorWindowBuffer + (327 * 640) + 11,
             640);
+        characterEditorDrawHdArt(EDITOR_GRAPHIC_KILLS_FOLDER_SELECTED, 11, 327);
         gCharacterEditorKillsCount = characterEditorDrawKillsFolder();
         break;
     default:
@@ -2558,7 +2650,7 @@ static void characterEditorDrawPcStats()
 
     fontSetCurrent(101);
 
-    blitBufferToBuffer(characterEditorBackgroundData() + 640 * 280 + 32, 124, 32, 640, gCharacterEditorWindowBuffer + 640 * 280 + 32, 640);
+    characterEditorRestoreBackground(640 * 280 + 32, 124, 32);
 
     // LEVEL
     y = 280;
@@ -2660,7 +2752,7 @@ static void characterEditorDrawPrimaryStat(Stat stat, bool animate, int previous
 
         characterEditorDrawBigNumber(58, gCharacterEditorPrimaryStatY[stat], flags, value, previousValue, gCharacterEditorWindow);
 
-        blitBufferToBuffer(characterEditorBackgroundData() + off, kPrimaryStatDescriptionWidth, fontGetLineHeight(), 640, gCharacterEditorWindowBuffer + off, 640);
+        characterEditorRestoreBackground(off, kPrimaryStatDescriptionWidth, fontGetLineHeight());
 
         messageListItemId = critterGetStat(gDude, stat) + 199;
         if (messageListItemId > 210) {
@@ -2672,7 +2764,7 @@ static void characterEditorDrawPrimaryStat(Stat stat, bool animate, int previous
     } else {
         value = critterGetStat(gDude, stat);
         characterEditorDrawBigNumber(58, gCharacterEditorPrimaryStatY[stat], 0, value, 0, gCharacterEditorWindow);
-        blitBufferToBuffer(characterEditorBackgroundData() + off, kPrimaryStatDescriptionWidth, fontGetLineHeight(), 640, gCharacterEditorWindowBuffer + off, 640);
+        characterEditorRestoreBackground(off, kPrimaryStatDescriptionWidth, fontGetLineHeight());
 
         value = critterGetStat(gDude, stat);
         if (value > 10) {
@@ -2814,7 +2906,7 @@ static void characterEditorDrawDerivedStats()
 
     y = 46;
 
-    blitBufferToBuffer(characterEditorBackgroundData() + 640 * y + 194, 118, 108, 640, gCharacterEditorWindowBuffer + 640 * y + 194, 640);
+    characterEditorRestoreBackground(640 * y + 194, 118, 108);
 
     // Hit Points
     if (characterEditorSelectedItem == EDITOR_HIT_POINTS) {
@@ -2933,7 +3025,7 @@ static void characterEditorDrawDerivedStats()
 
     y = 179;
 
-    blitBufferToBuffer(characterEditorBackgroundData() + 640 * y + 194, 116, 130, 640, gCharacterEditorWindowBuffer + 640 * y + 194, 640);
+    characterEditorRestoreBackground(640 * y + 194, 116, 130);
 
     // Armor Class
     if (characterEditorSelectedItem == EDITOR_FIRST_DERIVED_STAT + EDITOR_DERIVED_STAT_ARMOR_CLASS) {
@@ -3121,7 +3213,7 @@ static void characterEditorDrawSkills(int a1)
         gCharacterEditorSliderPlusBtn = -1;
     }
 
-    blitBufferToBuffer(characterEditorBackgroundData() + 370, 270, 252, 640, gCharacterEditorWindowBuffer + 370, 640);
+    characterEditorRestoreBackground(370, 270, 252);
 
     fontSetCurrent(103);
 
@@ -3191,6 +3283,7 @@ static void characterEditorDrawSkills(int a1)
             _editorFrmImages[EDITOR_GRAPHIC_SLIDER].getWidth(),
             gCharacterEditorWindowBuffer + 640 * (y + 16) + 592,
             640);
+        characterEditorDrawHdArt(EDITOR_GRAPHIC_SLIDER, 592, y + 16);
 
         if (a1 == 0) {
             if (gCharacterEditorSliderPlusBtn == -1) {
@@ -3228,6 +3321,8 @@ static void characterEditorDrawSkills(int a1)
                     BUTTON_FLAG_CALLBACK_PRESERVES_EVENT | BUTTON_FLAG_TRANSPARENT);
                 buttonSetCallbacks(gCharacterEditorSliderMinusBtn, _gsound_red_butt_press, nullptr);
             }
+
+            characterEditorAttachHdButtons(gCharacterEditorWindow);
         }
     }
 }
@@ -3245,7 +3340,7 @@ static void characterEditorDrawCard()
     constexpr int CARD_X = 345;
     constexpr int CARD_Y = 267;
 
-    blitBufferToBuffer(characterEditorBackgroundData() + (STRIDE * CARD_Y) + CARD_X, 295, 170, STRIDE, gCharacterEditorWindowBuffer + (CARD_Y * STRIDE) + CARD_X, STRIDE);
+    characterEditorRestoreBackground((STRIDE * CARD_Y) + CARD_X, 295, 170);
 
     auto drawMsgCard = [&](SkillDexFrmId fid, int titleId, int descId) {
         const char* title = getmsg(&gCharacterEditorMessageList, &gCharacterEditorMessageListItem, titleId);
@@ -3424,6 +3519,9 @@ static int characterEditorEditAge()
         _editorFrmImages[EDITOR_GRAPHIC_DONE_BOX].getWidth(),
         windowBuf + static_cast<size_t>(windowWidth) * 40 + 13,
         _editorFrmImages[EDITOR_GRAPHIC_CHARWIN].getWidth());
+    hdArtDrawImage(win, _editorFrmImages[EDITOR_GRAPHIC_CHARWIN], 0, 0);
+    hdArtDrawImage(win, _editorFrmImages[EDITOR_GRAPHIC_AGE_BOX], 8, 7);
+    hdArtDrawImage(win, _editorFrmImages[EDITOR_GRAPHIC_DONE_BOX], 13, 40);
 
     fontSetCurrent(103);
 
@@ -3483,6 +3581,7 @@ static int characterEditorEditAge()
     if (prevBtn != -1) {
         buttonSetCallbacks(prevBtn, _gsound_med_butt_press, nullptr);
     }
+    characterEditorAttachHdButtons(win);
 
     while (true) {
         sharedFpsLimiter.mark();
@@ -3657,6 +3756,8 @@ static void characterEditorEditGender()
         _editorFrmImages[EDITOR_GRAPHIC_DONE_BOX].getWidth(),
         windowBuf + static_cast<size_t>(windowWidth) * 44 + 15,
         windowWidth);
+    hdArtDrawImage(win, _editorFrmImages[EDITOR_GRAPHIC_CHARWIN], 0, 0);
+    hdArtDrawImage(win, _editorFrmImages[EDITOR_GRAPHIC_DONE_BOX], 15, 44);
 
     fontSetCurrent(103);
 
@@ -3715,6 +3816,8 @@ static void characterEditorEditGender()
         _win_group_radio_buttons(2, btns);
         buttonSetCallbacks(btns[1], _gsound_red_butt_press, nullptr);
     }
+
+    characterEditorAttachHdButtons(win);
 
     int savedGender = critterGetStat(gDude, STAT_GENDER);
     _win_set_button_rest_state(btns[savedGender], 1, 0);
@@ -3900,6 +4003,7 @@ static int characterEditorShowOptions()
 
         unsigned char* windowBuffer = windowGetBuffer(win);
         memcpy(windowBuffer, _editorFrmImages[41].getData(), static_cast<size_t>(_editorFrmImages[41].getWidth()) * _editorFrmImages[41].getHeight());
+        hdArtDrawImage(win, _editorFrmImages[41], 0, 0);
 
         fontSetCurrent(103);
 
@@ -3940,6 +4044,7 @@ static int characterEditorShowOptions()
                 int btn = buttonCreate(win, 13, y, width, height, -1, -1, -1, 500 + index, up[index], down[index], nullptr, BUTTON_FLAG_TRANSPARENT);
                 if (btn != -1) {
                     buttonSetCallbacks(btn, _gsound_lrg_butt_press, nullptr);
+                    hdArtSetButtonArt(btn, &_editorFrmImages[42], &_editorFrmImages[43]);
                 }
             } while (0);
 
@@ -5494,7 +5599,7 @@ static void characterEditorDrawOptionalTraits()
         selectedTrait = static_cast<Trait>(characterEditorSelectedItem - EDITOR_FIRST_TRAIT);
     }
 
-    blitBufferToBuffer(characterEditorBackgroundData() + 640 * 353 + 47, 245, 100, 640, gCharacterEditorWindowBuffer + 640 * 353 + 47, 640);
+    characterEditorRestoreBackground(640 * 353 + 47, 245, 100);
 
     fontSetCurrent(101);
 
@@ -6172,6 +6277,7 @@ static int perkDialogShow()
 
     gPerkDialogWindowBuffer = windowGetBuffer(gPerkDialogWindow);
     memcpy(gPerkDialogWindowBuffer, _perkDialogBackgroundFrmImage.getData(), PERK_WINDOW_WIDTH * PERK_WINDOW_HEIGHT);
+    hdArtDrawImage(gPerkDialogWindow, _perkDialogBackgroundFrmImage, 0, 0);
 
     int btn;
 
@@ -6256,6 +6362,7 @@ static int perkDialogShow()
         nullptr,
         nullptr,
         BUTTON_FLAG_TRANSPARENT);
+    characterEditorAttachHdButtons(gPerkDialogWindow);
 
     fontSetCurrent(103);
 
@@ -7191,6 +7298,8 @@ static int characterEditorFolderViewInit()
         buttonSetCallbacks(gCharacterEditorFolderViewScrollDownBtn, _gsound_red_butt_press, nullptr);
     }
 
+    characterEditorAttachHdButtons(gCharacterEditorWindow);
+
     return 0;
 }
 
@@ -7233,13 +7342,7 @@ static void characterEditorFolderViewScroll(int direction)
     characterEditorDrawFolders();
 
     if (characterEditorSelectedItem >= EDITOR_PERK_KARMA_KILLS && characterEditorSelectedItem < EDITOR_HIT_POINTS) {
-        blitBufferToBuffer(
-            characterEditorBackgroundData() + 640 * 267 + 345,
-            295,
-            170,
-            640,
-            gCharacterEditorWindowBuffer + 640 * 267 + 345,
-            640);
+        characterEditorRestoreBackground(640 * 267 + 345, 295, 170);
         characterEditorDrawCardWithOptions(gCharacterEditorFolderCardFrmId, gCharacterEditorFolderCardTitle, gCharacterEditorFolderCardSubtitle, gCharacterEditorFolderCardDescription);
     }
 }
@@ -7822,6 +7925,7 @@ static void characterEditorStimpackEditPerks()
     }
     gPerkDialogWindowBuffer = windowGetBuffer(gPerkDialogWindow);
     memcpy(gPerkDialogWindowBuffer, _perkDialogBackgroundFrmImage.getData(), PERK_WINDOW_WIDTH * PERK_WINDOW_HEIGHT);
+    hdArtDrawImage(gPerkDialogWindow, _perkDialogBackgroundFrmImage, 0, 0);
 
     auto makeButton = [](int x, int y, int up, int down, int code) {
         int btn = buttonCreate(gPerkDialogWindow, x, y,
@@ -7842,6 +7946,7 @@ static void characterEditorStimpackEditPerks()
     makeButton(153, rankButtonY + _editorFrmImages[EDITOR_GRAPHIC_SLIDER_PLUS_ON].getHeight() - 1, EDITOR_GRAPHIC_SLIDER_MINUS_OFF, EDITOR_GRAPHIC_SLIDER_MINUS_ON, kRemoveButtonCode);
     buttonCreate(gPerkDialogWindow, PERK_WINDOW_LIST_X, PERK_WINDOW_LIST_Y, PERK_WINDOW_LIST_WIDTH, PERK_WINDOW_LIST_HEIGHT,
         -1, -1, -1, kListButtonCode, nullptr, nullptr, nullptr, BUTTON_FLAG_TRANSPARENT);
+    characterEditorAttachHdButtons(gPerkDialogWindow);
 
     // Title, Done label and the rank buttons' caption.
     fontSetCurrent(103);

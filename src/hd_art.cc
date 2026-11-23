@@ -344,6 +344,120 @@ bool hdArtDrawFrame(int win, const FrmId& frmId, int frame, int direction, int x
     return windowHdDrawImage(win, x, y, width, height, *image);
 }
 
+std::shared_ptr<const HdImage> hdArtFindImage(const FrmImage& image)
+{
+    if (!image.isLocked()) {
+        return nullptr;
+    }
+
+    std::string path = image.getPath();
+    if (path.empty()) {
+        return nullptr;
+    }
+
+    return hdArtFindFrame(path.c_str(), image.getFrame(), 0);
+}
+
+bool hdArtDrawImage(int win, const FrmImage& image, int x, int y)
+{
+    return hdArtDrawImageRegion(win, image, 0, 0, image.getWidth(), image.getHeight(), x, y);
+}
+
+bool hdArtDrawImageRegion(int win, const FrmImage& image, int srcX, int srcY, int width, int height, int destX, int destY)
+{
+    if (!windowHdIsActive()) {
+        return false;
+    }
+
+    std::shared_ptr<const HdImage> hd = hdArtFindImage(image);
+    if (hd == nullptr) {
+        return false;
+    }
+
+    return hdArtDrawRegion(win, *hd, image.getData(), image.getWidth(), image.getHeight(), srcX, srcY, width, height, destX, destY);
+}
+
+bool hdArtDrawRegion(int win, const HdImage& hd, const unsigned char* source, int sourceWidth, int sourceHeight,
+    int srcX, int srcY, int width, int height, int destX, int destY)
+{
+    if (!windowHdIsActive() || source == nullptr || sourceWidth <= 0 || sourceHeight <= 0) {
+        return false;
+    }
+
+    // The whole image is placed so that (srcX, srcY) lands on (destX, destY),
+    // then clipped to the region.
+    int originX = destX - srcX;
+    int originY = destY - srcY;
+    HdDrawOptions options;
+    options.clipLeft = destX;
+    options.clipTop = destY;
+    options.clipRight = destX + width;
+    options.clipBottom = destY + height;
+    options.source = source;
+    options.sourcePitch = sourceWidth;
+    return windowHdDrawImageEx(win, originX, originY, sourceWidth, sourceHeight, hd, options);
+}
+
+int hdArtSetButtonArt(int btn, const FrmImage* normal, const FrmImage* pressed, const FrmImage* hover)
+{
+    std::string paths[3];
+    const unsigned char* sources[3] = {};
+    const FrmImage* images[3] = { normal, pressed, hover };
+    for (int slot = 0; slot < 3; slot++) {
+        if (images[slot] != nullptr && images[slot]->isLocked()) {
+            paths[slot] = images[slot]->getPath();
+            sources[slot] = images[slot]->getData();
+        }
+    }
+
+    return buttonSetHdArt(btn,
+        paths[0].empty() ? nullptr : paths[0].c_str(),
+        sources[0],
+        paths[1].empty() ? nullptr : paths[1].c_str(),
+        sources[1],
+        paths[2].empty() ? nullptr : paths[2].c_str(),
+        sources[2]);
+}
+
+void hdArtAttachButtonArt(int win, const FrmImage* images, int count, unsigned char* const* copies)
+{
+    Window* window = windowGetWindow(win);
+    if (window == nullptr || !windowHdIsActive()) {
+        return;
+    }
+
+    auto find = [&](const unsigned char* data) -> const FrmImage* {
+        if (data == nullptr) {
+            return nullptr;
+        }
+        for (int index = 0; index < count; index++) {
+            if (!images[index].isLocked()) {
+                continue;
+            }
+            if (images[index].getData() == data) {
+                return &images[index];
+            }
+            if (copies != nullptr && copies[index] == data && copies[index] != reinterpret_cast<unsigned char*>(-1)) {
+                return &images[index];
+            }
+        }
+        return nullptr;
+    };
+
+    for (Button* button = window->buttonListHead; button != nullptr; button = button->next) {
+        if (button->hdArt != nullptr || (button->flags & BUTTON_FLAG_GRAPHIC) == 0) {
+            continue;
+        }
+
+        const FrmImage* normal = find(button->normalImage);
+        const FrmImage* pressed = find(button->pressedImage);
+        const FrmImage* hover = find(button->hoverImage);
+        if (normal != nullptr || pressed != nullptr || hover != nullptr) {
+            hdArtSetButtonArt(button->id, normal, pressed, hover);
+        }
+    }
+}
+
 void hdArtGetStats(HdArtStats* stats)
 {
     stats->assetsResolved = static_cast<int>(gHdArt.assets.size());

@@ -14,6 +14,7 @@
 #include "game_mouse.h"
 #include "game_sound.h"
 #include "graph_lib.h"
+#include "hd_art.h"
 #include "input.h"
 #include "interface.h"
 #include "kb.h"
@@ -161,6 +162,7 @@ namespace {
 
         hub.buffer = windowGetBuffer(hub.window);
         memcpy(hub.buffer, hub.background.getData(), static_cast<size_t>(panelWidth) * panelHeight);
+        hdArtDrawImage(hub.window, hub.background, 0, 0);
         hubDrawHeader(hub);
 
         fontSetCurrent(kButtonFont);
@@ -175,6 +177,7 @@ namespace {
                 // Not available yet: draw the plate with a dim label and no button.
                 blitBufferToBufferTrans(hub.buttonUp.getData(), buttonWidth, buttonHeight, buttonWidth,
                     hub.buffer + panelWidth * slotY + kPanelSlotX, panelWidth);
+                hdArtDrawImage(hub.window, hub.buttonUp, kPanelSlotX, slotY);
                 fontDrawText(hub.buffer + panelWidth * (slotY + textY) + kPanelSlotX + textX, label, buttonWidth, panelWidth, COLOR_DARK_GREY_2);
                 continue;
             }
@@ -207,6 +210,8 @@ namespace {
                 BUTTON_FLAG_TRANSPARENT);
             if (button != -1) {
                 buttonSetCallbacks(button, _gsound_lrg_butt_press, _gsound_lrg_butt_release);
+                // HD plates; the labels drawn into the copies stay legacy.
+                hdArtSetButtonArt(button, &hub.buttonUp, &hub.buttonDown);
             }
         }
 

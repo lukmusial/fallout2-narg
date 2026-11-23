@@ -37,6 +37,21 @@ cd tools/hd
 .venv/bin/python test_pipeline.py -v
 ```
 
+Interface screens (Phase 2.6) and installing the packs for the game:
+
+```sh
+cd tools/hd
+.venv/bin/python extract.py            # also SCREENS (f2_res.dat HR_* art) and ce.dat PNGs
+NAMES=$(.venv/bin/python -c "import json;print(' '.join(a['key'] for a in json.load(open('work/manifest.json'))['assets'] if a['type']=='intrface'))")
+.venv/bin/python enhance_scripted.py $NAMES
+.venv/bin/python enhance_ai.py $NAMES
+.venv/bin/python install.py            # -> out/build/macos/data/hd/{scripted,ai}/
+.venv/bin/python screens_sheet.py      # runs the game hidden -> docs/screens/phase2.6/
+```
+
+Select a pack with `[graphics] hd=1` and `[graphics] hd_pack=scripted` (or
+`ai`, or a mixed pack with a `manifest.txt`, see `src/hd_art.h`).
+
 `extract.py --extra art/scenery/car2.frm` adds assets. The game folder
 defaults to `~/Games/Fallout 2`; override it with `FALLOUT2_DIR`. Multi-frame
 FRMs use frame 0, direction 0 for now (critters come in Phase 2.9).
@@ -71,6 +86,32 @@ FRMs use frame 0, direction 0 for now (critters come in Phase 2.9).
 **Tiles** (both enhancers): before processing, each tile is surrounded by
 copies of itself on the isometric floor lattice (+48,-12 per column, +32,+24
 per row, as in `squareTileToScreenXY`). The result is cropped back.
+
+## Interface screens in the engine (Phase 2.6)
+
+Main menu (vanilla `mainmenu_sp.png`, hi-res `HR_MAINMENU.FRM` +
+`hr_menu_bg_sp.png`, `menuup`/`menudown`), load/save screen, character
+editor (with its dialogs and the perk dialog) and the Stimpack hub draw the
+pack's HD image right after each legacy blit of the same art
+(`hdArtDrawImage`, `hdArtDrawImageRegion`, button HD art via
+`buttonSetHdArt` / `hdArtAttachButtonArt`). An HD pixel is only drawn where
+the window buffer still equals the legacy art, so text and numbers drawn into
+or over the art (button labels, stats) stay legacy whatever the draw order.
+The Stimpack editor's background is the same composite in HD as in 8 bits:
+`edtrcrte` with the level box of `edtredt`.
+
+Named PNG art from `ce.dat` (`mainmenu_sp.png`, `opbase_sp.png`, ...) is
+looked up like FRM art: `hd/<pack>/art/intrface/mainmenu_sp.png`.
+
+Observations (see `docs/screens/phase2.6/`):
+
+- AI keeps the painted textures (power armour, leather, metal plates, the
+  parchment) and is the better choice for backgrounds and panels.
+- Very small glyph-like buttons are where AI fails: the 11x14 scroll arrows
+  (`uparwoff`, `dnarwoff`, ...) come out as blobs. Scripted keeps them. A
+  mixed pack (`* = ai`, the arrow FRMs `= scripted`) fixes that.
+- Scripted is faithful but soft; on the 3440x1440 menu its plates look
+  smeared next to AI.
 
 ## Timings (Apple M5 Pro, 64 GB; per asset, warm)
 

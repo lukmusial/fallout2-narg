@@ -10,6 +10,7 @@
 #include "debug.h"
 #include "dinput.h"
 #include "draw.h"
+#include "hd_art.h"
 #include "hd_layer.h"
 #include "input.h"
 #include "memory.h"
@@ -43,6 +44,13 @@ static int _win_group_check_buttons(int buttonCount, int* btns, int maxChecked, 
 static int _button_check_group(Button* button);
 static void _button_draw(Button* button, Window* window, unsigned char* data, bool draw, Rect* bound, bool sound);
 static void _GNW_button_refresh(Window* window, Rect* rect);
+static void buttonDrawHd(Button* button, Window* window, unsigned char* data, const Rect* clippedRect);
+
+// CE: HD art of a graphic button (see buttonSetHdArt): normal, pressed, hover.
+struct ButtonHdArt {
+    std::string path[3];
+    const unsigned char* source[3] = {};
+};
 
 // 0x50FA30 path_patches
 static char _path_patches[] = "";
@@ -853,6 +861,11 @@ bool windowHdIsActive()
 
 bool windowHdDrawImage(int win, int x, int y, int width, int height, const HdImage& image)
 {
+    return windowHdDrawImageEx(win, x, y, width, height, image, HdDrawOptions());
+}
+
+bool windowHdDrawImageEx(int win, int x, int y, int width, int height, const HdImage& image, const HdDrawOptions& options)
+{
     if (!windowHdIsActive()) {
         return false;
     }
@@ -873,8 +886,81 @@ bool windowHdDrawImage(int win, int x, int y, int width, int height, const HdIma
         basePalette8[index] = colorExpand6(_cmap[index]);
     }
 
-    hdLayerDrawImage(window->hdLayer, window->buffer, window->width, x, y, width, height, image, basePalette8);
+    hdLayerDrawImageEx(window->hdLayer, window->buffer, window->width, x, y, width, height, image, basePalette8, options);
     return true;
+}
+
+static int gHdDarkenWindow = -1;
+static HdLayer gHdDarkenBackup;
+static std::vector<unsigned char> gHdDarkenShows;
+
+void windowHdDarkenBegin(int win)
+{
+    Window* window = windowGetWindow(win);
+    if (window == nullptr || window->hdLayer == nullptr) {
+        gHdDarkenWindow = -1;
+        return;
+    }
+
+    gHdDarkenWindow = win;
+    gHdDarkenBackup = *window->hdLayer;
+
+    // Only what the layer shows now gets darkened (not stale HD pixels under
+    // legacy text); the copy put back by End keeps the full layer.
+    gHdDarkenShows.assign(gHdDarkenBackup.valid.size(), 0);
+    for (size_t offset = 0; offset < gHdDarkenShows.size(); offset++) {
+        gHdDarkenShows[offset] = gHdDarkenBackup.valid[offset] != 0 && gHdDarkenBackup.shadow[offset] == window->buffer[offset];
+    }
+}
+
+void windowHdDarken(int win, int intensity)
+{
+    Window* window = windowGetWindow(win);
+    if (win != gHdDarkenWindow || window == nullptr || window->hdLayer == nullptr
+        || window->hdLayer->width != gHdDarkenBackup.width || window->hdLayer->height != gHdDarkenBackup.height) {
+        return;
+    }
+
+    HdLayer* layer = window->hdLayer;
+    const HdLayer& backup = gHdDarkenBackup;
+    unsigned int scale = static_cast<unsigned int>(std::clamp(intensity, 0, 0x10000));
+    int pitch = layer->width * kHdScale;
+    for (int y = 0; y < layer->height; y++) {
+        for (int x = 0; x < layer->width; x++) {
+            size_t offset = static_cast<size_t>(y) * layer->width + x;
+            unsigned char index = window->buffer[offset];
+            if (!gHdDarkenShows[offset] || hdIsCyclingIndex(index)) {
+                layer->valid[offset] = 0;
+                continue;
+            }
+
+            for (int sy = 0; sy < kHdScale; sy++) {
+                size_t row = static_cast<size_t>(y * kHdScale + sy) * pitch + x * kHdScale;
+                for (int sx = 0; sx < kHdScale; sx++) {
+                    uint32_t pixel = backup.pixels[row + sx];
+                    uint32_t r = (((pixel >> 16) & 0xFF) * scale) >> 16;
+                    uint32_t g = (((pixel >> 8) & 0xFF) * scale) >> 16;
+                    uint32_t b = ((pixel & 0xFF) * scale) >> 16;
+                    layer->pixels[row + sx] = (r << 16) | (g << 8) | b;
+                }
+            }
+            layer->shadow[offset] = index;
+            layer->valid[offset] = 1;
+        }
+    }
+}
+
+void windowHdDarkenEnd(int win)
+{
+    Window* window = windowGetWindow(win);
+    if (win == gHdDarkenWindow && window != nullptr && window->hdLayer != nullptr
+        && window->hdLayer->width == gHdDarkenBackup.width && window->hdLayer->height == gHdDarkenBackup.height) {
+        *window->hdLayer = std::move(gHdDarkenBackup);
+    }
+
+    gHdDarkenWindow = -1;
+    gHdDarkenBackup = HdLayer();
+    gHdDarkenShows.clear();
 }
 
 void windowHdClear(int win)
@@ -1857,6 +1943,7 @@ Button* buttonCreateInternal(int win, int x, int y, int width, int height, int m
     button->releaseSoundFunc = nullptr;
     button->buttonGroup = nullptr;
     button->prev = nullptr;
+    button->hdArt = nullptr;
 
     button->next = window->buttonListHead;
     if (button->next != nullptr) {
@@ -2361,6 +2448,9 @@ void buttonFree(Button* button)
         }
     }
 
+    delete button->hdArt;
+    button->hdArt = nullptr;
+
     button->frmImages.~vector();
 
     internal_free(button);
@@ -2661,6 +2751,10 @@ void _button_draw(Button* button, Window* window, unsigned char* data, bool draw
                         window->buffer + window->width * clippedRect.top + clippedRect.left,
                         window->width);
                 }
+
+                if (button->hdArt != nullptr) {
+                    buttonDrawHd(button, window, data, &clippedRect);
+                }
             }
 
             previousImage = button->currentImage;
@@ -2681,6 +2775,72 @@ void _button_draw(Button* button, Window* window, unsigned char* data, bool draw
             }
         }
     }
+}
+
+// CE: draws the HD art of the button image `data` (already blitted to the
+// window buffer) within `clippedRect` (window coordinates).
+static void buttonDrawHd(Button* button, Window* window, unsigned char* data, const Rect* clippedRect)
+{
+    int slot;
+    if (data == button->normalImage) {
+        slot = 0;
+    } else if (data == button->pressedImage) {
+        slot = 1;
+    } else if (data == button->hoverImage) {
+        slot = 2;
+    } else {
+        return;
+    }
+
+    const ButtonHdArt* art = button->hdArt;
+    if (art->path[slot].empty() || !windowHdIsActive()) {
+        return;
+    }
+
+    std::shared_ptr<const HdImage> image = hdArtFindFrame(art->path[slot].c_str(), 0, 0);
+    if (image == nullptr) {
+        return;
+    }
+
+    int width = button->rect.right - button->rect.left + 1;
+    int height = button->rect.bottom - button->rect.top + 1;
+    HdDrawOptions options;
+    options.clipLeft = clippedRect->left;
+    options.clipTop = clippedRect->top;
+    options.clipRight = clippedRect->right + 1;
+    options.clipBottom = clippedRect->bottom + 1;
+    options.source = art->source[slot] != nullptr ? art->source[slot] : data;
+    options.sourcePitch = width;
+    windowHdDrawImageEx(window->id, button->rect.left, button->rect.top, width, height, *image, options);
+}
+
+int buttonSetHdArt(int btn, const char* normalPath, const unsigned char* normalSource,
+    const char* pressedPath, const unsigned char* pressedSource,
+    const char* hoverPath, const unsigned char* hoverSource)
+{
+    Window* window;
+    Button* button = buttonGetButton(btn, &window);
+    if (button == nullptr || (button->flags & BUTTON_FLAG_GRAPHIC) == 0) {
+        return -1;
+    }
+
+    if (button->hdArt == nullptr) {
+        button->hdArt = new ButtonHdArt();
+    }
+
+    const char* paths[3] = { normalPath, pressedPath, hoverPath };
+    const unsigned char* sources[3] = { normalSource, pressedSource, hoverSource };
+    for (int slot = 0; slot < 3; slot++) {
+        button->hdArt->path[slot] = paths[slot] != nullptr ? paths[slot] : "";
+        button->hdArt->source[slot] = sources[slot];
+    }
+
+    // The button drew its legacy image when it was created.
+    if (button->currentImage != nullptr) {
+        buttonDrawHd(button, window, button->currentImage, &(button->rect));
+    }
+
+    return 0;
 }
 
 // 0x4D9A58

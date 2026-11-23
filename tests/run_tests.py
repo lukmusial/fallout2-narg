@@ -39,6 +39,10 @@ class TestFailure(Exception):
     pass
 
 
+class TestSkipped(Exception):
+    pass
+
+
 def reset_saves():
     subprocess.run([str(ROOT / "tools/dev/reset-saves.sh")], check=True, stdout=subprocess.DEVNULL)
 
@@ -208,6 +212,162 @@ def test_hd_art_lookup(update):
     return f"png/fhd/manifest/fallback ok, cache {stats} ({seconds:.0f}s)"
 
 
+# --- Phase 2.6: interface screens with the real HD packs --------------------
+#
+# The packs come from tools/hd (enhance_scripted.py, enhance_ai.py, then
+# install.py copies them to RUN_DIR/data/hd/<pack>/); they are derived from the
+# game's art and never committed, so these tests are skipped without them.
+
+HD_SCREENS = ("menu", "load", "hub", "editor", "editor_slider", "perks", "creation")
+# Screens with a golden per pack (full frame at 1280x960).
+HD_SCREEN_GOLDENS = ("menu", "load", "hub", "editor")
+# Rectangles (logical 640x480) of static art that must show HD detail.
+HD_ART_REGIONS = {
+    "menu": [(300, 40, 620, 400)],            # power armour background
+    "load": [(330, 30, 620, 200), (420, 400, 560, 470)],  # frame, vault-boy plate
+    "hub": [(238, 76, 401, 112)],            # panel header plate
+    "editor": [(10, 30, 180, 270), (340, 260, 630, 300)],  # SPECIAL plates, skill points plate
+    "editor_slider": [(10, 30, 180, 270)],
+    "perks": [(40, 300, 290, 340), (305, 140, 600, 320)],  # Done/Rank plate, card parchment
+    "creation": [(10, 30, 180, 270)],
+}
+# Legacy text colours (8-bit presented RGB) and where to look for them: these
+# pixels must stay exactly the legacy (pixel-doubled) colour over HD art.
+TEXT_COLOURS = [(186, 158, 40), (60, 251, 0), (255, 255, 125)]
+HD_TEXT_REGIONS = {
+    "menu": [(60, 15, 200, 300)],             # button labels
+    "load": [(40, 20, 300, 440), (390, 250, 560, 320)],  # title, slot list, info box
+    "hub": [(238, 76, 401, 404)],
+    "editor": [(180, 30, 340, 300), (370, 20, 640, 240)],  # derived stats, skills
+    "creation": [(180, 30, 340, 300)],
+    "perks": [(70, 165, 280, 300)],           # perk list
+}
+HD_GOLDEN_MAX_DIFF = 0.01  # fraction of pixels differing by more than 12 levels
+
+
+def pack_installed(pack):
+    return (RUN_DIR / f"data/hd/{pack}/art/intrface/mainmenu_sp.png").exists()
+
+
+def blocks_detail(image, region):
+    left, top, right, bottom = region
+    return nonuniform_blocks(image[top * 2:bottom * 2, left * 2:right * 2])
+
+
+def legacy_text_kept(fb, legacy, region):
+    """Fraction of legacy text pixels in a region that the HD frame shows
+    unchanged (pixel-doubled), and how many there are."""
+    left, top, right, bottom = region
+    ref = legacy[top:bottom, left:right]
+    mask = np.zeros(ref.shape[:2], dtype=bool)
+    for colour in TEXT_COLOURS:
+        mask |= np.all(ref == np.array(colour), axis=2)
+    if not mask.any():
+        return 1.0, 0
+    hd = fb[top * 2:bottom * 2, left * 2:right * 2].reshape(bottom - top, 2, right - left, 2, 3)
+    same = np.all(hd == ref[:, None, :, None, :], axis=(1, 3, 4))
+    return float(same[mask].mean()), int(mask.sum())
+
+
+def compare_hd_golden(actual_path, golden_name, update, mask=()):
+    golden_path = GOLDEN / golden_name
+    if update or not golden_path.exists():
+        golden_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(actual_path, golden_path)
+        return "golden written"
+    actual = load_png(actual_path)
+    golden = load_png(golden_path)
+    if actual.shape != golden.shape:
+        raise TestFailure(f"{golden_name}: size {actual.shape} != golden {golden.shape}")
+    differs = np.abs(actual - golden).max(axis=2) > 12
+    for left, top, right, bottom in mask:
+        differs[top * 2:bottom * 2, left * 2:right * 2] = False
+    changed = differs.mean()
+    if changed > HD_GOLDEN_MAX_DIFF:
+        raise TestFailure(f"{golden_name}: {changed:.2%} of pixels differ (limit {HD_GOLDEN_MAX_DIFF:.0%})")
+    return f"{changed:.2%}"
+
+
+def screenshots_in_run_dir():
+    return set(RUN_DIR.glob("scr*.png")) | set(RUN_DIR.glob("scr*.bmp"))
+
+
+_hd_screens_legacy_out = None
+
+
+def hd_screens_legacy_reference():
+    """The same script with hd=0: the plain 640x480 frames (run once per session)."""
+    global _hd_screens_legacy_out
+    if _hd_screens_legacy_out is None:
+        before = screenshots_in_run_dir()
+        reset_saves()
+        _hd_screens_legacy_out, _ = run_game("hd_screens_legacy", "hd_screens.txt")
+        for path in screenshots_in_run_dir() - before:
+            path.unlink()
+    return _hd_screens_legacy_out
+
+
+def make_hd_screens_test(pack):
+    def test(update):
+        """Main menu, load screen, Stimpack hub and editor, perk dialog, creation
+        screen with a real HD pack: HD detail on the art, legacy text intact,
+        fade, named-PNG lookup, F12 full-resolution screenshot, goldens."""
+        if not pack_installed(pack):
+            raise TestSkipped(f"pack '{pack}' not installed (tools/hd: enhance_*.py, install.py)")
+        legacy_out = hd_screens_legacy_reference()
+        before = screenshots_in_run_dir()
+        reset_saves()
+        out, seconds = run_game(f"hd_screens_{pack}", "hd_screens.txt", [*HD_ARGS, f"[graphics]hd_pack={pack}"])
+        new_shots = sorted(screenshots_in_run_dir() - before)
+        try:
+            notes = []
+            for screen in HD_SCREENS:
+                fb = load_png(out / f"{screen}.png")
+                legacy = load_png(legacy_out / f"{screen}.png")
+                if fb.shape != (960, 1280, 3) or legacy.shape != (480, 640, 3):
+                    raise TestFailure(f"{screen}: unexpected sizes {fb.shape} / {legacy.shape}")
+                for region in HD_ART_REGIONS[screen]:
+                    detail = blocks_detail(fb, region)
+                    if detail < 0.3:
+                        raise TestFailure(f"{screen}: no HD detail in {region} ({detail:.0%} of 2x2 blocks)")
+                for region in HD_TEXT_REGIONS.get(screen, ()):
+                    kept, count = legacy_text_kept(fb, legacy, region)
+                    if count < 50 or kept < 0.98:
+                        raise TestFailure(f"{screen}: legacy text in {region}: {kept:.1%} of {count} pixels kept")
+            notes.append(f"{len(HD_SCREENS)} screens HD + text ok")
+
+            # Fades modulate the HD pixels (the step captured can vary when the machine is busy).
+            ratio = load_png(out / "fade_out_50.png").mean() / load_png(out / "menu.png").mean()
+            if not 0.3 < ratio < 0.7:
+                raise TestFailure(f"fade-out frame is {ratio:.2f} of full brightness, expected ~0.5")
+            notes.append(f"fade {ratio:.2f}")
+
+            probe = json.loads((out / "probe_named.json").read_text())
+            if not probe["found"] or probe["from_legacy"] or (probe["width"], probe["height"]) != (1280, 960):
+                raise TestFailure(f"named PNG lookup: {probe}")
+            reference = np.asarray(Image.open(RUN_DIR / f"data/hd/{pack}/art/intrface/mainmenu_sp.png").convert("RGBA"))
+            if not np.array_equal(np.asarray(Image.open(out / "probe_named.png").convert("RGBA")), reference):
+                raise TestFailure("named PNG lookup: image differs from the pack PNG")
+
+            if len(new_shots) != 1 or new_shots[0].suffix != ".png":
+                raise TestFailure(f"F12 wrote {[p.name for p in new_shots]}, expected one PNG")
+            shot = load_png(new_shots[0])
+            if shot.shape != (960, 1280, 3) or nonuniform_blocks(shot) < 0.5:
+                raise TestFailure(f"F12 screenshot is {shot.shape}, detail {nonuniform_blocks(shot):.0%}")
+            notes.append("named PNG + F12 ok")
+
+            goldens = [compare_hd_golden(out / f"{screen}.png", f"hd_{pack}_{screen}.png", update,
+                                         MAIN_MENU_MASK if screen == "menu" else ())
+                       for screen in HD_SCREEN_GOLDENS]
+            notes.append("goldens " + "/".join(goldens))
+        finally:
+            for path in new_shots:
+                path.unlink()
+        return ", ".join(notes) + f" ({seconds:.0f}s)"
+    test.__name__ = f"test_hd_screens_{pack}"
+    return test
+
+
 def make_slot_test(slot, hd=False):
     def test(update):
         reset_saves()
@@ -311,7 +471,8 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
           test_hd_art_lookup]
          + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
          + [make_slot_test(slot, hd=True) for slot in HD_SLOTS]
-         + [test_stimpack_save_unchanged, test_character_screens, test_stimpack_edit_player, test_stimpack_cancel])
+         + [test_stimpack_save_unchanged, test_character_screens, test_stimpack_edit_player, test_stimpack_cancel]
+         + [make_hd_screens_test(pack) for pack in ("scripted", "ai")])
 
 
 PERF_CONFIGS = [
@@ -353,15 +514,19 @@ def main():
 
     selected = [t for t in TESTS if not args.pattern or args.pattern in t.__name__]
     failures = 0
+    skipped = 0
     for test in selected:
         try:
             note = test(args.update_golden)
             print(f"PASS {test.__name__}: {note}", flush=True)
+        except TestSkipped as reason:
+            skipped += 1
+            print(f"SKIP {test.__name__}: {reason}", flush=True)
         except TestFailure as error:
             failures += 1
             print(f"FAIL {test.__name__}: {error}", flush=True)
     reset_saves()
-    print(f"{len(selected) - failures}/{len(selected)} passed")
+    print(f"{len(selected) - failures - skipped}/{len(selected)} passed" + (f", {skipped} skipped" if skipped else ""))
     return 1 if failures else 0
 
 

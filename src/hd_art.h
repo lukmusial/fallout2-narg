@@ -11,6 +11,7 @@
 namespace fallout {
 
 class FrmId;
+class FrmImage;
 
 // HD art lookup and cache (file formats: see hd_format.h).
 //
@@ -52,6 +53,40 @@ bool hdArtDrawInterface(int win, const char* artPath, int x, int y, int width, i
 // is expanded 2x when the pack has no image.
 bool hdArtDrawFrame(int win, const FrmId& frmId, int frame, int direction, int x, int y, int width, int height,
     const unsigned char* legacyData, int legacyPitch, bool allowFallback);
+
+// The pack's HD image for a locked image (its art path and frame), or null.
+std::shared_ptr<const HdImage> hdArtFindImage(const FrmImage& image);
+
+// Interface screens (Phase 2.6). These draw the pack's HD version of a locked
+// legacy image that the caller has just drawn into window `win`; HD pixels go
+// only where the window buffer still equals the image, so text, numbers or
+// other legacy drawing into or over the art stay legacy. No fallback: they
+// return false and draw nothing when HD is off or the pack has no image.
+
+// Whole image, drawn by the legacy code at (x, y) (window coordinates).
+bool hdArtDrawImage(int win, const FrmImage& image, int x, int y);
+
+// The rectangle (srcX, srcY, width, height) of the image, drawn at (destX, destY).
+bool hdArtDrawImageRegion(int win, const FrmImage& image, int srcX, int srcY, int width, int height, int destX, int destY);
+
+// Same for an HD image the caller made itself (e.g. a composite of two
+// screens), with `source` (sourceWidth x sourceHeight, 1x) the legacy pixels
+// it stands for.
+bool hdArtDrawRegion(int win, const HdImage& hd, const unsigned char* source, int sourceWidth, int sourceHeight,
+    int srcX, int srcY, int width, int height, int destX, int destY);
+
+// Gives a graphic button the HD art of the images it was made from (see
+// buttonSetHdArt). The button images must be the size of these images; they
+// may be copies with labels drawn in.
+int hdArtSetButtonArt(int btn, const FrmImage* normal, const FrmImage* pressed, const FrmImage* hover = nullptr);
+
+// For every graphic button of window `win` without HD art yet whose normal,
+// pressed or hover image is the data of one of `images` (or of the matching
+// entry of `copies`, a same-size copy with a label drawn in; entries may be
+// null or (unsigned char*)-1), sets that image's HD art. Lets a screen that
+// builds its buttons from a table of locked images get HD buttons in one
+// call; call again after creating more buttons.
+void hdArtAttachButtonArt(int win, const FrmImage* images, int count, unsigned char* const* copies = nullptr);
 
 struct HdArtStats {
     int assetsResolved; // distinct art paths looked up

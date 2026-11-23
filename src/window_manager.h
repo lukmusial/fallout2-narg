@@ -11,6 +11,7 @@
 
 namespace fallout {
 
+struct HdDrawOptions;
 struct HdImage;
 struct HdLayer;
 
@@ -166,6 +167,7 @@ typedef void WindowBlitProc(const unsigned char* src, int width, int height, int
 
 typedef struct Button Button;
 typedef struct ButtonGroup ButtonGroup;
+struct ButtonHdArt;
 
 typedef struct Window {
     int id;
@@ -225,6 +227,9 @@ typedef struct Button {
     // (path-based). Data pointers are stored separately in normalImage /
     // pressedImage / etc.
     std::vector<FrmImage> frmImages;
+
+    // CE: HD art for the button's images (see buttonSetHdArt), or null.
+    ButtonHdArt* hdArt;
 } Button;
 
 typedef struct ButtonGroup {
@@ -288,7 +293,16 @@ bool windowHdIsActive();
 // rectangle (x, y, width, height), which must already hold the legacy
 // drawing of the same art. The image is resampled if it is not exactly 2x.
 bool windowHdDrawImage(int win, int x, int y, int width, int height, const HdImage& image);
+// Same with a clip rectangle and/or the legacy source art (see HdDrawOptions).
+bool windowHdDrawImageEx(int win, int x, int y, int width, int height, const HdImage& image, const HdDrawOptions& options);
 void windowHdClear(int win);
+// HD side of darkening a whole window by a palette blit (the main menu behind
+// overlay subscreens): Begin keeps a copy of the window's HD layer; Darken,
+// called after each darkening of the window buffer, shows the copy scaled by
+// intensity / 0x10000 wherever it was valid; End puts the copy back.
+void windowHdDarkenBegin(int win);
+void windowHdDarken(int win, int intensity);
+void windowHdDarkenEnd(int win);
 void _win_get_mouse_buf(unsigned char* dest);
 bool windowIsValidWindowId(int win);
 Window* windowGetWindow(int win);
@@ -309,6 +323,14 @@ int buttonCreateWithFrm(int win, int x, int y, int mouseEnterEventCode, int mous
 // Same as _win_register_button_disable, but accepts FrmId instead of direct data pointers. Frames will be locked from cache and unlocked automatically when the button is destroyed.
 // Only normalId is required to be non-empty.
 int buttonSetDisabledFrm(int btn, const InterfaceFrmId& normalId, const InterfaceFrmId& pressedId = {}, const InterfaceFrmId& hoverId = {});
+// CE: HD art for a graphic button. Whenever the button draws its normal,
+// pressed or hover image, the HD image of the given art path (hd_art.h) is
+// drawn over it where the window still shows `source`: the legacy art the
+// image was made from, button-sized (null = the button image itself). Labels
+// drawn into a copy of the art therefore stay legacy. Paths may be null.
+int buttonSetHdArt(int btn, const char* normalPath, const unsigned char* normalSource,
+    const char* pressedPath, const unsigned char* pressedSource,
+    const char* hoverPath = nullptr, const unsigned char* hoverSource = nullptr);
 int _win_register_text_button(int win, int x, int y, int mouseEnterEventCode, int mouseExitEventCode, int mouseDownEventCode, int mouseUpEventCode, const char* title, ButtonFlags flags);
 int _win_register_button_disable(int btn, unsigned char* normal, unsigned char* pressed, unsigned char* hover);
 int _win_register_button_image(int btn, unsigned char* normal, unsigned char* pressed, unsigned char* hover, bool draw);

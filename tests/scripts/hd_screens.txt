@@ -1,0 +1,48 @@
+# Phase 2.6 interface screens in HD (run with [graphics]hd=1 and an hd_pack):
+# main menu, load screen, Stimpack hub, Stimpack character editor (with the
+# skill slider and the perk dialog), creation screen. fbshot writes the
+# presented framebuffer: output resolution with hd=1, the plain 640x480 legacy
+# frame with hd=0 (the reference the tests compare legacy text against).
+until mainmenu 20000
+wait 500
+fbshot menu
+# Named PNG art (ce.dat) resolves to HD like FRM art.
+hdprobe art/intrface/mainmenu_sp.png probe_named
+# F12 in HD mode: full-resolution PNG (scrNNNNN.png in the working directory).
+key f12
+wait 300
+fadeshot fade_out_50 50 out
+key l
+wait 2500
+fbshot load
+key esc
+wait 2500
+key s
+wait 1500
+key home
+key enter
+until stimpack 30000
+wait 1000
+fbshot hub
+key c
+wait 1500
+fbshot editor
+click 420 30
+wait 300
+fbshot editor_slider
+key p
+wait 800
+fbshot perks
+key esc
+wait 500
+key esc
+wait 800
+key e
+until mainmenu 30000
+wait 1000
+key n
+wait 2500
+key c
+wait 2500
+fbshot creation
+quit 0
