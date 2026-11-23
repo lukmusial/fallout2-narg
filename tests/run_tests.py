@@ -694,7 +694,7 @@ HD_INVENTORY_ART = {
     "barter": [(100, 310, 220, 470), (460, 310, 540, 470)],
 }
 HD_INVENTORY_TEXT = {"inventory": [(390, 40, 550, 240)], "loot": [(230, 320, 410, 340)]}
-HD_INVENTORY_MAX_CHANGED = 0.002   # 8-bit pixels differing from hd=0 inside the windows
+HD_INVENTORY_MAX_CHANGED = 0.01  # the body views animate; a frame apart is ~0.5%
 
 _hd_inventory_legacy_out = None
 
