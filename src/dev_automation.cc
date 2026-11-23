@@ -69,6 +69,7 @@ namespace {
         unsigned int waitUntil = 0;
         unsigned int untilDeadline = 0;
         int clickPhase = 0; // 0 = idle, 1..n polls since start
+        int keyRepeatDone = 0;
         bool clickRight = false;
 
         // Synthetic mouse.
@@ -413,7 +414,13 @@ namespace {
             if (code < 0) {
                 fail(command, "unknown key");
             }
+            // Optional repeat count: one key per input poll, so every press is handled.
+            int count = args.size() > 1 ? atoi(args[1].c_str()) : 1;
             enqueueInputEvent(code);
+            if (++gAutomation.keyRepeatDone < count) {
+                return false;
+            }
+            gAutomation.keyRepeatDone = 0;
             return true;
         }
 

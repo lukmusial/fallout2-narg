@@ -15,7 +15,7 @@ namespace fallout {
 //   until <state> [<ms>]      wait until the engine reports a state (mainmenu,
 //                             game, stimpack, input = a text input dialog is open),
 //                             fail after timeout (default 30000)
-//   key <name|char|code>      send one key (esc, enter, space, tab, backspace,
+//   key <name|char|code> [n]  send a key (n times, one per input poll) (esc, enter, space, tab, backspace,
 //                             up, down, left, right, home, end, pageup, pagedown, f1..f12)
 //   text <string>             type the rest of the line
 //   move <x> <y>              move the cursor (logical screen coordinates)

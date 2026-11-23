@@ -531,12 +531,39 @@ def test_hd_mixed_pack(update):
     return f"arrow from scripted, menu from ai ({seconds:.0f}s)"
 
 
+def test_stimpack_perk_scan(update):
+    """Every perk's card in the Stimpack perk editor can be shown (no crash)."""
+    reset_saves()
+    out, seconds = run_game("stimpack_perk_scan", "stimpack_perk_scan.txt")
+    return f"all perk cards shown ({seconds:.0f}s)"
+
+
+def test_english_interface_bar(update):
+    """At 800+ logical pixels the 800-wide interface bar comes from ce.dat
+    (English labels), not the Russian one in f2_res.dat."""
+    reset_saves()
+    out, seconds = run_game("iface800", "load_slot.txt", ["--dev-load-game=1", "[screen]resolution_x=1600",
+                                                          "[screen]resolution_y=960", "[ui]iface_bar_width=800"])
+    game = load_png(out / "game.png")
+    bar = game[-99:, (game.shape[1] - 800) // 2:(game.shape[1] + 800) // 2]
+    # Live content (messages, item, numbers) covers much of the bar, so compare
+    # how well it matches the English art against the Russian one.
+    def match(name):
+        art = np.asarray(Image.open(GOLDEN / name).convert("RGB"), dtype=np.int16)
+        return float(np.all(np.abs(bar - art) <= 8, axis=2).mean())
+    english, russian = match("hr_iface_800_en.png"), match("hr_iface_800_ru.png")
+    if english < 0.25 or english < 2 * russian:
+        raise TestFailure(f"bar matches English art {english:.0%}, Russian art {russian:.0%}")
+    return f"English {english:.0%} vs Russian {russian:.0%} ({seconds:.0f}s)"
+
+
 TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_art, test_main_menu_hd_fhd,
           test_hd_art_lookup]
          + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
          + [make_slot_test(slot, hd=True) for slot in HD_SLOTS]
          + [test_stimpack_save_unchanged, test_character_screens, test_stimpack_edit_player, test_stimpack_cancel,
-            test_stimpack_edit_companion, test_stimpack_lists]
+            test_stimpack_edit_companion, test_stimpack_lists, test_stimpack_perk_scan,
+            test_english_interface_bar]
          + [make_hd_screens_test(pack) for pack in ("scripted", "ai")]
          + [test_hd_mixed_pack])
 

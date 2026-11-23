@@ -8114,7 +8114,12 @@ static void characterEditorStimpackEditPerks()
         Perk perk = static_cast<Perk>(options[topLine + currentLine].value);
         char rankBuffer[32];
         snprintf(rankBuffer, sizeof(rankBuffer), "(%d)", perkGetRank(characterEditorSubject(), perk));
-        perkDialogDrawCard(perkGetFrmId(perk), perkGetName(perk), rankBuffer, perkGetDescription(perk));
+        // Some engine-internal perks have no description (or name) text.
+        static char emptyText[] = "";
+        char* perkName = perkGetName(perk);
+        char* perkDescription = perkGetDescription(perk);
+        perkDialogDrawCard(perkGetFrmId(perk), perkName != nullptr ? perkName : emptyText, rankBuffer,
+            perkDescription != nullptr ? perkDescription : emptyText);
         windowRefresh(gPerkDialogWindow);
     };
 
