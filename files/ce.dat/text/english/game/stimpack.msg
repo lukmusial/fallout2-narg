@@ -10,3 +10,12 @@
 {107}{}{EXIT}
 
 {110}{}{This game was saved during combat and cannot be edited.}
+{111}{}{Leave without saving your changes?}
+
+{120}{}{PERKS}
+{121}{}{LEVEL}
+{122}{}{EXPERIENCE}
+{123}{}{HIT POINTS (CUR/MAX)}
+{124}{}{SKILL POINTS}
+{130}{}{PERKS}
+{131}{}{RANK}

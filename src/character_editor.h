@@ -20,6 +20,9 @@ enum PerkCarryOverMode {
 };
 
 int characterEditorShow(bool isCreationMode);
+// Stimpack: free editing of the loaded player character. Returns 0 (done) or
+// 1 (cancelled, all changes reverted).
+int characterEditorShowStimpack();
 void characterEditorInit();
 bool _isdoschar(int ch);
 char* _strmfe(char* dest, const char* name, const char* ext);

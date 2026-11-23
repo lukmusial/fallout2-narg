@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "art.h"
+#include "character_editor.h"
 #include "color.h"
 #include "combat.h"
 #include "critter.h"
@@ -54,7 +55,7 @@ namespace {
     };
 
     constexpr HubEntrySpec kHubEntries[HUB_ENTRY_COUNT] = {
-        { STIMPACK_MSG_CHARACTER, "CHARACTER", KEY_LOWERCASE_C, false },
+        { STIMPACK_MSG_CHARACTER, "CHARACTER", KEY_LOWERCASE_C, true },
         { STIMPACK_MSG_COMPANIONS, "COMPANIONS", KEY_LOWERCASE_O, false },
         { STIMPACK_MSG_ROSTER, "ROSTER", KEY_LOWERCASE_R, false },
         { STIMPACK_MSG_QUESTS, "QUESTS", KEY_LOWERCASE_Q, false },
@@ -153,7 +154,7 @@ namespace {
         int panelHeight = hub.background.getHeight();
         int x = (screenGetWidth() - panelWidth) / 2;
         int y = (screenGetHeight() - panelHeight) / 2;
-        hub.window = windowCreate(x, y, panelWidth, panelHeight, static_cast<ColorWithFlags>(256), WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
+        hub.window = windowCreate(x, y, panelWidth, panelHeight, static_cast<ColorWithFlags>(256), WINDOW_MODAL | WINDOW_DONT_MOVE_TOP);
         if (hub.window == -1) {
             return false;
         }
@@ -240,6 +241,12 @@ namespace {
         showDialogBox(nullptr, body, 1, 169, 116, COLOR_AMBER, nullptr, COLOR_AMBER, DIALOG_BOX_LARGE);
     }
 
+    bool confirm(int messageId, const char* fallback)
+    {
+        const char* body[] = { stimpackGetMessage(messageId, fallback) };
+        return showDialogBox(nullptr, body, 1, 169, 116, COLOR_AMBER, nullptr, COLOR_AMBER, DIALOG_BOX_LARGE | DIALOG_BOX_YES_NO) != 0;
+    }
+
     // Returns the selected entry, or -1 when nothing was chosen this frame.
     int hubEntryForKey(int keyCode)
     {
@@ -299,23 +306,38 @@ bool stimpackRun()
     devAutomationSetState("stimpack");
 
     bool saved = false;
+    bool edited = false;
     bool done = false;
     while (!done) {
         sharedFpsLimiter.mark();
 
         int keyCode = inputGetInput();
         switch (hubEntryForKey(keyCode)) {
+        case HUB_ENTRY_CHARACTER:
+            // Sub-screens open above the hub; hide it so it does not show around them.
+            windowHide(hub.window);
+            if (characterEditorShowStimpack() == 0) {
+                edited = true;
+            }
+            windowShow(hub.window);
+            windowRefreshAll(&_scr_size);
+            break;
         case HUB_ENTRY_SAVE_AS:
             lsgRequestEmptySlotOnNextSave();
+            windowHide(hub.window);
             if (lsgSaveGame(LoadSaveMode::Normal) == 1) {
                 saved = true;
                 done = true;
             } else {
+                windowShow(hub.window);
                 windowRefreshAll(&_scr_size);
             }
             break;
         case HUB_ENTRY_EXIT:
-            done = true;
+            if (!edited || confirm(STIMPACK_MSG_DISCARD_CHANGES, "Leave without saving your changes?")) {
+                done = true;
+            }
+            windowRefreshAll(&_scr_size);
             break;
         default:
             break;

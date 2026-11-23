@@ -154,7 +154,52 @@ def test_stimpack_save_unchanged(update):
     return ", ".join(notes) + f" ({seconds:.0f}s)"
 
 
-TESTS = [test_main_menu] + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)] + [test_stimpack_save_unchanged]
+def test_character_screens(update):
+    """The normal level-up and creation screens must look as before Stimpack."""
+    reset_saves()
+    out, _ = run_game("char_levelup", "char_screens.txt", ["--dev-load-game=1"])
+    notes = [compare_image(out / "levelup.png", "character_levelup.png", update)]
+    out, _ = run_game("char_creation", "creation_screen.txt")
+    notes.append(compare_image(out / "creation.png", "character_creation.png", update))
+    return ", ".join(notes)
+
+
+def test_stimpack_edit_player(update):
+    """Stimpack: ST 7->10, Small Guns +10 clicks, one perk, level 12 on slot 1, saved as slot 11."""
+    reset_saves()
+    out, seconds = run_game("stimpack_edit_player", "stimpack_edit_player.txt")
+    notes = [compare_image(out / "editor_final.png", "stimpack_editor_final.png", update, 0.01)]
+    if slot_description(11) != "stimpack edit":
+        raise TestFailure(f"slot 11 description is {slot_description(11)!r}")
+    out11, _ = run_game("stimpack_edit_load11", "load_slot.txt", ["--dev-load-game=11"])
+    notes.append(compare_state(out11 / "state.json", "stimpack_edit_player_state.json", update))
+
+    # Everything except the edited player values must still match slot 1.
+    original = json.loads((GOLDEN / "slot01_state.json").read_text())
+    edited = stable_state(json.loads((out11 / "state.json").read_text()))
+    for key in ("party", "world", "gvars"):
+        if original[key] != edited[key]:
+            raise TestFailure(f"Stimpack changed {key}")
+    for key in ("name", "tagged_skills", "traits"):
+        if original["player"][key] != edited["player"][key]:
+            raise TestFailure(f"Stimpack changed player {key}")
+    return ", ".join(notes) + f" ({seconds:.0f}s)"
+
+
+def test_stimpack_cancel(update):
+    """Stimpack: Cancel in the player editor reverts stats and perks."""
+    reset_saves()
+    run_game("stimpack_cancel", "stimpack_cancel.txt")
+    out11, _ = run_game("stimpack_cancel_load11", "load_slot.txt", ["--dev-load-game=11"])
+    return compare_state(out11 / "state.json", "slot01_state.json", False)
+
+
+TESTS = [test_main_menu] + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)] + [
+    test_stimpack_save_unchanged,
+    test_character_screens,
+    test_stimpack_edit_player,
+    test_stimpack_cancel,
+]
 
 
 def main():

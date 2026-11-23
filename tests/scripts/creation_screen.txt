@@ -1,0 +1,10 @@
+# Reference capture: character creation screen (New Game -> Create).
+until mainmenu 20000
+wait 500
+key n
+wait 2500
+shot selector
+key c
+wait 2500
+shot creation
+quit 0

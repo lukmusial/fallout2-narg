@@ -36,8 +36,11 @@ namespace {
 
     constexpr int kDefaultUntilTimeout = 30000;
 
-    // A click holds the button for this many input polls, then releases it for the
-    // same number, so that both the press and the release are seen by every screen.
+    // A click first rests the cursor on the target (the window manager accepts a
+    // press only on a button that was already hovered, and leaving the previous
+    // button takes a poll of its own), then holds the button and releases it, so
+    // that both the press and the release are seen by every screen.
+    constexpr int kClickPollsSettle = 3;
     constexpr int kClickPollsDown = 2;
     constexpr int kClickPollsUp = 2;
 
@@ -393,10 +396,10 @@ namespace {
             }
 
             gAutomation.clickPhase++;
-            bool down = gAutomation.clickPhase > 1 && gAutomation.clickPhase <= 1 + kClickPollsDown;
+            bool down = gAutomation.clickPhase > kClickPollsSettle && gAutomation.clickPhase <= kClickPollsSettle + kClickPollsDown;
             gAutomation.buttonLeft = down && !gAutomation.clickRight;
             gAutomation.buttonRight = down && gAutomation.clickRight;
-            if (gAutomation.clickPhase > 1 + kClickPollsDown + kClickPollsUp) {
+            if (gAutomation.clickPhase > kClickPollsSettle + kClickPollsDown + kClickPollsUp) {
                 gAutomation.clickPhase = 0;
                 return true;
             }

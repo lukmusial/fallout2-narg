@@ -1,0 +1,9 @@
+# Reference captures: level-up character screen (slot 1) is opened with C.
+until game 30000
+wait 500
+key c
+wait 1500
+shot levelup
+key esc
+wait 500
+quit 0
