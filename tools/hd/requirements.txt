@@ -1,0 +1,5 @@
+# HD art pipeline (Phase 2.5). Python 3.15 venv: tools/hd/.venv
+pillow>=12
+numpy>=2
+# AI enhancer only (PyTorch with the MPS backend on Apple silicon)
+torch>=2.15
