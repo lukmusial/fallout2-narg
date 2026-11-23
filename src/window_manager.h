@@ -291,6 +291,9 @@ void windowRefreshAll(Rect* rect);
 
 // CE: HD layers (see hd_layer.h). Active only with [graphics] hd=1 at scale 2.
 bool windowHdIsActive();
+// CE: HD lights (hd_lights.h): the window whose pixels the presenter lights
+// (the map window), or -1. Its composited pixels get kHdMaskLit.
+void windowHdSetLitWindow(int win);
 // Draws a true-colour image into the window's HD layer over the logical
 // rectangle (x, y, width, height), which must already hold the legacy
 // drawing of the same art. The image is resampled if it is not exactly 2x.

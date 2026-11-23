@@ -17,6 +17,8 @@
 #include "draw.h"
 #include "game.h"
 #include "hd_layer.h"
+#include "hd_lights.h"
+#include "hd_lights_map.h"
 #include "hd_text.h"
 #include "interface.h"
 #include "memory.h"
@@ -59,6 +61,8 @@ namespace {
         uint64_t paletteTicks;
         uint64_t paletteUpdates;
         uint64_t uploadedPixels;
+        uint64_t lightTicks;
+        uint64_t lightUpdates;
     };
 
 } // namespace
@@ -107,6 +111,14 @@ static bool gHdSourceIsStaging = false;
 // mapping from it to the presented palette.
 static unsigned char gHdBase8[256 * 3];
 static HdModulation gHdModulation;
+
+// HD lights (hd_lights.h): the field applied to map pixels (kHdMaskLit), and
+// the next one being built. `gHdLightsOn` is set while the field may hold
+// anything; with hd_lights=0 it stays false and nothing below runs.
+static bool gHdLightsOn = false;
+static HdLightField gHdLightField;
+static HdLightField gHdLightFieldNext;
+static std::vector<HdLightRect> gHdLightDirty;
 
 static void presenterAllocateFramebuffer()
 {
@@ -175,7 +187,7 @@ static inline void presenterWriteBlock(int x, int y, uint32_t* dest, int fbWidth
 {
     size_t offset = static_cast<size_t>(y) * gScreenWidth + x;
     unsigned char index = gScreenIndex[offset];
-    if (gHdMask[offset]) {
+    if ((gHdMask[offset] & kHdMaskShows) != 0) {
         const uint32_t* hd = gHdStagingRgb.data() + static_cast<size_t>(y) * kHdScale * fbWidth + x * kHdScale;
         dest[0] = hdModulate(&gHdModulation, hd[0], index);
         dest[1] = hdModulate(&gHdModulation, hd[1], index);
@@ -208,6 +220,9 @@ static void presenterConvertRect(int left, int top, int width, int height)
         if (gHdActive) {
             for (int x = 0; x < width; x++) {
                 presenterWriteBlock(left + x, y, dest + x * kHdScale, fbWidth);
+            }
+            if (gHdLightsOn) {
+                hdLightApplyRow(gHdLightField, y, left, width, gHdMask.data() + static_cast<size_t>(y) * gScreenWidth + left, dest, fbWidth);
             }
         } else if (scale == 1) {
             for (int x = 0; x < width; x++) {
@@ -257,6 +272,9 @@ static void presenterApplyPaletteChanges()
             for (int x = 0; x < gScreenWidth; x++) {
                 if (gPaletteChanged[src[x]]) {
                     presenterWriteBlock(x, y, dest + x * kHdScale, fbWidth);
+                    if (gHdLightsOn) {
+                        hdLightApplyRow(gHdLightField, y, x, 1, gHdMask.data() + static_cast<size_t>(y) * gScreenWidth + x, dest + x * kHdScale, fbWidth);
+                    }
                     rowChanged = true;
                 }
             }
@@ -812,6 +830,64 @@ void renderFpsCounter()
     presenterConvertRect(0, 0, width, height);
 }
 
+// Rebuilds the light field when the map side reports a change and converts
+// the areas where it changed.
+static void presenterUpdateLights()
+{
+    if (!gHdActive || gScreenIndex.empty()) {
+        return;
+    }
+
+    if (!gHdLightsOn && !hdLightsMapEnabled()) {
+        return;
+    }
+
+    // Building the field may load art, and file reads refresh the mouse,
+    // which presents again.
+    static bool busy = false;
+    if (busy) {
+        return;
+    }
+    busy = true;
+
+    uint64_t startCounter = SDL_GetPerformanceCounter();
+
+    HdLightScreen screen;
+    screen.index = gScreenIndex.data();
+    screen.mask = gHdMask.data();
+    screen.width = gScreenWidth;
+    screen.height = gScreenHeight;
+    screen.palette8 = gPalette8;
+    if (gHdLightFieldNext.width != gHdLightField.width || gHdLightFieldNext.height != gHdLightField.height) {
+        gHdLightFieldNext = gHdLightField;
+    }
+    bool changed = hdLightsMapUpdate(screen, &gHdLightFieldNext);
+    busy = false;
+    if (!changed) {
+        return;
+    }
+
+    if (gHdLightField.width != gScreenWidth || gHdLightField.height != gScreenHeight) {
+        hdLightFieldInit(&gHdLightField, gScreenWidth, gScreenHeight);
+        hdLightFieldFinish(&gHdLightField);
+    }
+    hdLightFieldDiff(gHdLightField, gHdLightFieldNext, &gHdLightDirty);
+    std::swap(gHdLightField, gHdLightFieldNext);
+    gHdLightsOn = hdLightsMapEnabled();
+
+    for (const HdLightRect& rect : gHdLightDirty) {
+        presenterConvertRect(rect.left, rect.top, rect.width, rect.height);
+    }
+
+    gStats.lightTicks += SDL_GetPerformanceCounter() - startCounter;
+    gStats.lightUpdates++;
+}
+
+const HdLightField* presenterGetLightField()
+{
+    return gHdLightsOn ? &gHdLightField : nullptr;
+}
+
 void renderPresent()
 {
     if (gSdlTexture == nullptr || gFramebuffer.empty()) {
@@ -819,6 +895,8 @@ void renderPresent()
     }
 
     uint64_t startCounter = SDL_GetPerformanceCounter();
+
+    presenterUpdateLights();
 
     presenterApplyPaletteChanges();
 
@@ -883,6 +961,8 @@ void presenterGetStats(PresenterStats* stats)
     stats->paletteMs = gStats.paletteTicks * 1000.0 / frequency;
     stats->paletteUpdates = gStats.paletteUpdates;
     stats->uploadedPixels = gStats.uploadedPixels;
+    stats->lightMs = gStats.lightTicks * 1000.0 / frequency;
+    stats->lightUpdates = gStats.lightUpdates;
     stats->framebufferWidth = screenGetFramebufferWidth();
     stats->framebufferHeight = screenGetFramebufferHeight();
 }

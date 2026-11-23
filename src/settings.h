@@ -117,6 +117,11 @@ struct GraphicsSettings {
     // 2x glyph source: sharp (edge-preserving 2x of the original glyphs) or
     // smooth (re-rasterised with anti-aliasing), see hd_glyph.h.
     std::string hd_text_style = "sharp";
+    // With hd=1: coloured light, glow and shadows on the map (see
+    // hd_lights_map.h); `hd_lights_effects` is a mask of the effect groups
+    // (1 coloured light, 2 glow, 4 shadows).
+    bool hd_lights = false;
+    int hd_lights_effects = 7;
 };
 
 struct UISettings {

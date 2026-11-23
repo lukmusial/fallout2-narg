@@ -42,6 +42,9 @@ namespace fallout {
 //   loot [<n>]                open the loot window on party member n
 //                             (default 1, the first companion; 0 = player)
 //   talk [<n>]                start a dialogue with party member n
+//   hdlights off|colour|glow|shadows|all|<mask>
+//                             switch HD lights live (glow = colour + glow)
+//   hdlights dump <name>      write the HD light emitters to <name>.json
 //   refresh                   redraw the whole map window (in a game)
 //   benchrefresh <name> <n>   redraw it n times in a row; min/median/max ms
 //                             per redraw (and HD tile drawing) to <name>.json

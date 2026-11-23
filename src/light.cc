@@ -16,6 +16,9 @@ static int gAmbientIntensity = LIGHT_INTENSITY_MAX;
 // 0x59E994 tile_intensity
 static int gTileIntensity[ELEVATION_COUNT][HEX_GRID_SIZE];
 
+// CE: see lightGetGeneration.
+static unsigned int gLightGeneration = 0;
+
 // 0x47A8F0 light_init
 int lightInit()
 {
@@ -49,6 +52,7 @@ void lightSetAmbientIntensity(int intensity, bool shouldUpdateScreen)
 
     int oldAmbientIntensity = gAmbientIntensity;
     gAmbientIntensity = normalizedIntensity;
+    gLightGeneration++;
 
     if (shouldUpdateScreen) {
         if (oldAmbientIntensity != normalizedIntensity) {
@@ -97,6 +101,7 @@ void lightSetTileIntensity(MapElevation elevation, int tile, int intensity)
     }
 
     gTileIntensity[elevation][tile] = intensity;
+    gLightGeneration++;
 }
 
 // 0x47AA10 light_add_to_tile
@@ -111,6 +116,7 @@ void lightIncreaseTileIntensity(MapElevation elevation, int tile, int intensity)
     }
 
     gTileIntensity[elevation][tile] += intensity;
+    gLightGeneration++;
 }
 
 // 0x47AA48 light_subtract_from_tile
@@ -125,6 +131,7 @@ void lightDecreaseTileIntensity(MapElevation elevation, int tile, int intensity)
     }
 
     gTileIntensity[elevation][tile] -= intensity;
+    gLightGeneration++;
 }
 
 // 0x47AA84 light_reset_tiles
@@ -135,6 +142,7 @@ void lightResetTileIntensity()
             gTileIntensity[elevation][tile] = 655;
         }
     }
+    gLightGeneration++;
 }
 
 void lightDecreaseAmbient(int val)
@@ -145,6 +153,11 @@ void lightDecreaseAmbient(int val)
 void lightIncreaseAmbient(int val)
 {
     lightSetAmbientIntensity(gAmbientIntensity + val, true);
+}
+
+unsigned int lightGetGeneration()
+{
+    return gLightGeneration;
 }
 
 } // namespace fallout

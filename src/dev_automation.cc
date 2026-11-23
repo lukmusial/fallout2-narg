@@ -21,6 +21,8 @@
 #include "display_monitor.h"
 #include "game.h"
 #include "hd_art.h"
+#include "hd_lights.h"
+#include "hd_lights_map.h"
 #include "hd_text.h"
 #include "input.h"
 #include "item.h"
@@ -636,6 +638,62 @@ namespace {
             return true;
         }
 
+        if (name == "hdlights") {
+            // `hdlights off|colour|glow|shadows|all|<mask>` switches HD lights
+            // live; `hdlights dump <name>` writes the emitters to <name>.json.
+            if (args.empty()) {
+                fail(command, "usage: hdlights off|colour|glow|shadows|all|<mask> | dump <name>");
+            }
+            if (args[0] == "field") {
+                // The applied field at light-cell resolution: <name>_mul.png
+                // (extra light, 1.0 = 255), <name>_add.png (glow) and
+                // <name>_shade.png (shadow cells, darkness as grey).
+                if (args.size() < 2) {
+                    fail(command, "usage: hdlights field <name>");
+                }
+                const HdLightField* field = presenterGetLightField();
+                if (field != nullptr) {
+                    for (int kind = 0; kind < 3; kind++) {
+                        int width = kind == 2 ? field->shadeX : field->cellsX;
+                        int height = kind == 2 ? field->shadeY : field->cellsY;
+                        std::vector<unsigned char> rgb(static_cast<size_t>(width) * height * 3);
+                        for (size_t index = 0; index < rgb.size(); index++) {
+                            float value = kind == 0 ? field->mul[index] * 255.0f
+                                                    : (kind == 1 ? field->add[index] : field->shade[index / 3] * 255.0f);
+                            rgb[index] = static_cast<unsigned char>(std::clamp(value, 0.0f, 255.0f));
+                        }
+                        static const char* suffix[3] = { "_mul", "_add", "_shade" };
+                        lodepng::encode(outputPath(args[1] + suffix[kind], ".png"), rgb, width, height, LCT_RGB, 8);
+                    }
+                }
+                return true;
+            }
+            if (args[0] == "dump") {
+                if (args.size() < 2) {
+                    fail(command, "usage: hdlights dump <name>");
+                }
+                std::ofstream out(outputPath(args[1], ".json"));
+                out << hdLightsMapDescribe() << "\n";
+                return true;
+            }
+            unsigned effects;
+            if (args[0] == "off") {
+                effects = 0;
+            } else if (args[0] == "colour") {
+                effects = kHdLightColour;
+            } else if (args[0] == "glow") {
+                effects = kHdLightColour | kHdLightGlow;
+            } else if (args[0] == "shadows") {
+                effects = kHdLightShadows;
+            } else if (args[0] == "all") {
+                effects = kHdLightAll;
+            } else {
+                effects = static_cast<unsigned>(atoi(args[0].c_str()));
+            }
+            hdLightsMapSetEffects(effects);
+            return true;
+        }
+
         if (name == "refresh") {
             // Redraws the whole map window (timed by `perf`).
             if (strcmp(devAutomationGetState(), "game") == 0) {
@@ -787,22 +845,27 @@ namespace {
                 }
                 TileRenderStats render;
                 tileGetRenderStats(&render);
+                HdLightsStats lights;
+                hdLightsMapGetStats(&lights);
                 fprintf(stream,
                     "{\n \"framebuffer\": [%d, %d],\n \"presents\": %llu,\n \"present_avg_ms\": %.4f,\n \"present_max_ms\": %.4f,\n"
                     " \"convert_total_ms\": %.4f,\n \"converted_pixels\": %llu,\n \"palette_total_ms\": %.4f,\n \"palette_updates\": %llu,\n"
                     " \"elapsed_ms\": %.1f,\n \"map_refreshes\": %llu,\n \"map_refresh_total_ms\": %.4f,\n \"map_refresh_max_ms\": %.4f,\n"
                     " \"scrolls\": %llu,\n \"scroll_total_ms\": %.4f,\n \"scroll_max_ms\": %.4f,\n \"hd_tiles_total_ms\": %.4f,\n"
-                    " \"hd_objects_total_ms\": %.4f,\n \"uploaded_pixels\": %llu\n}\n",
+                    " \"hd_objects_total_ms\": %.4f,\n \"uploaded_pixels\": %llu,\n \"light_total_ms\": %.4f,\n \"light_updates\": %llu,\n"
+                    " \"light_field_total_ms\": %.4f,\n \"light_field_max_ms\": %.4f,\n \"light_rebuilds\": %d,\n \"light_rebuild_total_ms\": %.4f\n}\n",
                     stats.framebufferWidth, stats.framebufferHeight, static_cast<unsigned long long>(stats.presents), stats.presentMs, stats.presentMaxMs,
                     stats.convertMs, static_cast<unsigned long long>(stats.convertedPixels), stats.paletteMs, static_cast<unsigned long long>(stats.paletteUpdates),
                     tileRenderClockMs() - gAutomation.perfStartMs, render.refreshes, render.refreshMs, render.refreshMaxMs,
                     render.scrolls, render.scrollMs, render.scrollMaxMs, render.hdTilesMs, render.hdObjectsMs,
-                    static_cast<unsigned long long>(stats.uploadedPixels));
+                    static_cast<unsigned long long>(stats.uploadedPixels), stats.lightMs, static_cast<unsigned long long>(stats.lightUpdates),
+                    lights.updateMs, lights.updateMaxMs, lights.rebuilds, lights.rebuildMs);
                 fclose(stream);
                 debugPrint("AUTOMATION: wrote %s\n", path.c_str());
             }
             presenterResetStats();
             tileResetRenderStats();
+            hdLightsMapResetStats();
             gAutomation.perfStartMs = tileRenderClockMs();
             return true;
         }

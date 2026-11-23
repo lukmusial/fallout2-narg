@@ -966,6 +966,122 @@ def test_load_save_with_hidden_bar(update):
     return f"bar shown ({seconds:.0f}s)"
 
 
+# --- Phase 2.11: HD lights ----------------------------------------------------
+#
+# tests/scripts/hd_lights.txt loads the Den at night (slot 8) with
+# hd_lights=1 and captures the view with lights off, coloured light only,
+# + glow and + shadows, the light field (`hdlights field`), the emitters
+# (`hdlights dump`) and eight frames for the fire flicker.
+
+HD_LIGHTS_SLOT = 8
+HD_LIGHTS_TIME_GVARS = {104}
+HD_LIGHTS_ARGS = [*HD_ARGS, "[graphics]hd_pack=mixed", "[graphics]hd_lights=1"]
+# Where the field is neutral, frames with and without lights may differ only
+# where the scene animates (critters, colour cycling): share of pixels off by
+# more than a few levels.
+HD_LIGHTS_MAX_FAR_CHANGE = 0.03
+# Near a fire (within 2 hexes): the lit frame is brighter and warmer.
+HD_LIGHTS_MIN_WARMTH = 6.0
+# Fire flicker: consecutive frames differ near the fire, but the mean stays
+# within a few levels.
+HD_LIGHTS_MAX_FLICKER = 12.0
+
+
+def field_neutral_mask(out, shape):
+    """Logical-resolution mask of the pixels the light field leaves alone,
+    from the `hdlights field` dumps (light cells 4 px, shadow cells 2 px)."""
+    h, w = shape
+    neutral = np.ones((h, w), dtype=bool)
+    for name, cell, scale in (("mul", 4, 255.0), ("add", 4, 1.0), ("shade", 2, 255.0)):
+        grid = np.asarray(Image.open(out / f"field_{name}.png").convert("RGB")).max(axis=2) > 0
+        # A pixel reads the cells around it: grow by one cell.
+        grown = grid.copy()
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                grown |= np.roll(np.roll(grid, dy, 0), dx, 1)
+        neutral &= ~grown.repeat(cell, 0).repeat(cell, 1)[:h, :w]
+    return neutral
+
+
+def test_hd_lights(update):
+    """Den at night with hd_lights=1: warm light and glow near the fire,
+    nothing changes where the light field is neutral, shadows only darken,
+    the fire flickers within bounds, state unchanged."""
+    if not map_pack_installed("mixed"):
+        raise TestSkipped("pack 'mixed' lacks the area art")
+    reset_saves()
+    out, seconds = run_game("hd_lights", "hd_lights.txt", [f"--dev-load-game={HD_LIGHTS_SLOT}", *HD_LIGHTS_ARGS])
+    compare_state(out / "state.json", f"slot{HD_LIGHTS_SLOT:02d}_state.json", False)
+    # A few seconds of play later the state is the same, except global var
+    # 104, which the Den's scripts advance with game time (also with lights off).
+    before = stable_state(json.loads((out / "state.json").read_text()))
+    after = stable_state(json.loads((out / "state_after.json").read_text()))
+    for state in (before, after):
+        state["gvars"] = [v for i, v in enumerate(state["gvars"]) if i not in HD_LIGHTS_TIME_GVARS]
+    if before != after:
+        raise TestFailure("state changed while the lights were on: " + str([k for k in before if before[k] != after[k]]))
+
+    lights = json.loads((out / "lights.json").read_text())
+    fires = [l for l in lights["lights"] if l["kind"] == "fire"]
+    if not fires:
+        raise TestFailure("no fire light found in the Den")
+    if lights["darkness"] < 0.9:
+        raise TestFailure(f"the Den save should be at night (darkness {lights['darkness']})")
+
+    frames = {name: load_png(out / f"{name}.png") for name in ("off", "colour", "glow", "all")}
+    h, w = frames["off"].shape[0] // 2, frames["off"].shape[1] // 2
+    small = {name: frame.reshape(h, 2, w, 2, 3).mean(axis=(1, 3)) for name, frame in frames.items()}
+
+    # Unchanged where the field is neutral (animation aside).
+    neutral = field_neutral_mask(out, (h, w))
+    if neutral.mean() < 0.3:
+        raise TestFailure(f"the light field covers {1 - neutral.mean():.0%} of the screen")
+    far = np.abs(small["all"] - small["off"]).max(axis=2)[neutral]
+    far_change = float((far > 6).mean())
+    if far_change > HD_LIGHTS_MAX_FAR_CHANGE:
+        raise TestFailure(f"{far_change:.1%} of the pixels outside the light field changed")
+
+    # Brighter and warmer next to a fire on screen.
+    warmth = []
+    for fire in fires:
+        x, y = int(fire["x"]), int(fire["y"])
+        if not (40 <= x < w - 40 and 40 <= y < h - 40):
+            continue
+        box = (slice(y - 30, y + 30), slice(x - 50, x + 50))
+        off, lit = small["off"][box], small["colour"][box]
+        gain = float((lit - off).mean())
+        warm = float(((lit[..., 0] - lit[..., 2]) - (off[..., 0] - off[..., 2])).mean())
+        if gain <= 0:
+            raise TestFailure(f"fire at ({x}, {y}): not brighter with coloured light ({gain:.1f})")
+        warmth.append(warm)
+    if not warmth:
+        raise TestFailure("no fire within the test view")
+    if max(warmth) < HD_LIGHTS_MIN_WARMTH:
+        raise TestFailure(f"coloured light near the fire is not warm enough ({max(warmth):.1f})")
+
+    # Glow adds light, shadows only remove it.
+    if float((small["glow"] - small["colour"]).mean()) < -0.5:
+        raise TestFailure("glow darkened the frame")
+    if float((small["all"] - small["glow"]).mean()) > 0.5:
+        raise TestFailure("shadows brightened the frame")
+
+    # Fire flicker: frames differ near the fire, mean bounded.
+    fire = fires[0]
+    x, y = int(fire["x"]), int(fire["y"])
+    box = (slice(max(y - 40, 0) * 2, (y + 40) * 2), slice(max(x - 60, 0) * 2, (x + 60) * 2))
+    anim = [load_png(out / f"anim{i:02d}.png")[box] for i in range(1, 9)]
+    changes = [float(np.abs(a - b).mean()) for a, b in zip(anim, anim[1:])]
+    means = [float(a.mean()) for a in anim]
+    if max(changes) < 0.2:
+        raise TestFailure("no flicker: the fire's surroundings do not change between frames")
+    if max(means) - min(means) > HD_LIGHTS_MAX_FLICKER:
+        raise TestFailure(f"flicker too strong: mean varies by {max(means) - min(means):.1f} levels")
+
+    return (f"{len(lights['lights'])} lights ({len(fires)} fire), field covers {1 - neutral.mean():.0%}, "
+            f"outside changed {far_change:.1%}, warmth +{max(warmth):.1f}, flicker {max(means) - min(means):.1f} "
+            f"({seconds:.0f}s)")
+
+
 TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_art, test_main_menu_hd_fhd,
           test_hd_art_lookup]
          + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
@@ -977,7 +1093,7 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
          + [make_hd_map_test(pack, slot) for pack in HD_MAP_PACKS for slot in range(1, SLOT_COUNT + 1)]
          + [test_hd_mixed_pack]
          + [make_hd_text_screens_test(style) for style in HD_TEXT_STYLES]
-         + [test_hd_text_game]
+         + [test_hd_text_game, test_hd_lights]
          + [make_hd_inventory_test(pack) for pack in HD_INVENTORY_PACKS])
 
 

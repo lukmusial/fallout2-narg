@@ -2292,6 +2292,18 @@ Object* objectFindNext()
 }
 
 // 0x48B48C obj_find_first_at
+void objectVisitAtElevation(MapElevation elevation, void (*visit)(Object* object, void* context), void* context)
+{
+    for (int tile = 0; tile < HEX_GRID_SIZE; tile++) {
+        for (ObjectListNode* node = gObjectListHeadByTile[tile]; node != nullptr; node = node->next) {
+            Object* object = node->obj;
+            if (object->elevation == elevation && !artIsObjectTypeHidden(FrmId(object).objectType())) {
+                visit(object, context);
+            }
+        }
+    }
+}
+
 Object* objectFindFirstAtElevation(MapElevation elevation)
 {
     gObjectFindElevation = elevation;
@@ -4082,6 +4094,21 @@ static int _obj_connect_to_tile(ObjectListNode* node, int tile, MapElevation ele
 }
 
 // 0x48DC28 obj_adjust_light
+// CE: when set, _obj_adjust_light reports the tiles it would light here
+// instead of changing their light (see objectVisitLightTiles).
+static AdjustLightIntensityProc* gLightTileVisitor = nullptr;
+
+void objectVisitLightTiles(Object* obj, AdjustLightIntensityProc* visit)
+{
+    if (obj == nullptr || visit == nullptr) {
+        return;
+    }
+
+    gLightTileVisitor = visit;
+    _obj_adjust_light(obj, 0, nullptr);
+    gLightTileVisitor = nullptr;
+}
+
 static int _obj_adjust_light(Object* obj, int a2, Rect* rect)
 {
     if (obj == nullptr) {
@@ -4105,6 +4132,9 @@ static int _obj_adjust_light(Object* obj, int a2, Rect* rect)
     }
 
     AdjustLightIntensityProc* adjustLightIntensity = a2 ? lightDecreaseTileIntensity : lightIncreaseTileIntensity;
+    if (gLightTileVisitor != nullptr) {
+        adjustLightIntensity = gLightTileVisitor;
+    }
     adjustLightIntensity(obj->elevation, obj->tile, obj->lightIntensity);
 
     Rect objectRect;
@@ -4118,7 +4148,7 @@ static int _obj_adjust_light(Object* obj, int a2, Rect* rect)
         obj->lightIntensity = 65536;
     }
 
-    int(*v70)[36] = _light_offsets[obj->tile & 1];
+    int (*v70)[36] = _light_offsets[obj->tile & 1];
     int v7 = (obj->lightIntensity - 655) / (obj->lightDistance + 1);
     int v28[36];
     v28[0] = obj->lightIntensity - v7;

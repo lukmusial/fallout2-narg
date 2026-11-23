@@ -148,6 +148,10 @@ set(FALLOUT_ENGINE_SOURCES
     "src/hd_glyph.h"
     "src/hd_layer.cc"
     "src/hd_layer.h"
+    "src/hd_lights_map.cc"
+    "src/hd_lights_map.h"
+    "src/hd_lights.cc"
+    "src/hd_lights.h"
     "src/hd_text.cc"
     "src/hd_text.h"
     "src/heap.cc"
@@ -655,6 +659,13 @@ if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
     )
     target_include_directories(hd_format_test PRIVATE "src" "third_party/lodepng")
     add_test(NAME hd_format_test COMMAND hd_format_test)
+
+    add_executable(hd_lights_test
+        "tests/unit/hd_lights_test.cc"
+        "src/hd_lights.cc"
+    )
+    target_include_directories(hd_lights_test PRIVATE "src")
+    add_test(NAME hd_lights_test COMMAND hd_lights_test)
 endif()
 
 if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
