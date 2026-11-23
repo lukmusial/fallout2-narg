@@ -467,6 +467,11 @@ bool screenshotSavePng(const char* path)
         return screenshotSaveFramebufferPng(path);
     }
 
+    return screenshotSaveLegacyPng(path);
+}
+
+bool screenshotSaveLegacyPng(const char* path)
+{
     int width;
     int height;
     if (!screenshotCapture(&width, &height)) {

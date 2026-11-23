@@ -5,6 +5,7 @@
 #include "draw.h"
 
 #include <algorithm>
+#include <vector>
 
 namespace fallout {
 
@@ -44,10 +45,19 @@ extern FontManagerGetLetterSpacingProc* fontGetLetterSpacing;
 extern FontManagerGetBufferSizeProc* fontGetBufferSize;
 extern FontManagerGetMonospacedCharacterWidth* fontGetMonospacedCharacterWidth;
 
+// CE: HD text (hd_text.h): with [graphics] hd=1 and hd_text=1 every text
+// draw also draws the string at 2x into the window's HD layer.
+extern bool gHdTextActive;
+void hdTextDraw(unsigned char* buffer, const char* string, int length, int pitch, ColorWithFlags color);
+
 inline void fontDrawText(unsigned char* buffer, const char* string, int length, int pitch, ColorWithFlags color)
 {
     if (fontDrawTextPtr != nullptr) {
-        fontDrawTextPtr(buffer, string, length, pitch, color);
+        if (gHdTextActive) {
+            hdTextDraw(buffer, string, length, pitch, color);
+        } else {
+            fontDrawTextPtr(buffer, string, length, pitch, color);
+        }
     }
 }
 
@@ -62,6 +72,29 @@ inline void fontDrawText2D(const Buffer2D& dest, int xPos, int yPos, const char*
 {
     fontDrawText2D(dest, xPos, yPos, string, length, color | DRAW_TEXT_FLAG_NONE);
 }
+
+// CE: font data for the HD text renderer (hd_text.cc), which lays out the
+// same glyphs at 2x.
+struct FontHdInfo {
+    // Interface font (AAF, 100+) or bitmap font (FON).
+    bool interfaceFont = false;
+    // Rows glyphs are drawn in: FON line height, AAF maximum glyph height.
+    int rows = 0;
+    int letterSpacing = 0;
+    // AAF: advance of a space.
+    int wordSpacing = 0;
+    // FON: number of glyphs.
+    int glyphCount = 0;
+    // What fontGetMonospacedCharacterWidth returns for the font.
+    int monospacedWidth = 0;
+};
+
+bool fontGetHdInfo(int font, FontHdInfo* info);
+
+// Glyph `index` of `font` as levels (0 background .. 7 text colour, see
+// hd_glyph.h), row-major `width` x `height`. FON glyphs are `rows` tall,
+// AAF glyphs are drawn bottom-aligned in `rows`.
+bool fontGetHdGlyph(int font, int index, int* width, int* height, std::vector<unsigned char>* levels);
 
 int textFontsInit();
 void textFontsExit();

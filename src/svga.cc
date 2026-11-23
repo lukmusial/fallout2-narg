@@ -17,6 +17,7 @@
 #include "draw.h"
 #include "game.h"
 #include "hd_layer.h"
+#include "hd_text.h"
 #include "interface.h"
 #include "memory.h"
 #include "mouse.h"
@@ -423,6 +424,9 @@ int _GNW95_init_mode_ex(int width, int height, int bpp)
     _scr_blit = _GNW95_ShowRect;
     _zero_mem = _GNW95_zero_vid_mem;
     _mouse_blit = gFramebufferScale == kHdScale ? _GNW95_ShowCursorRect : _GNW95_ShowRect;
+
+    // CE: HD text needs the HD presenter.
+    hdTextUpdateActive();
 
     return 0;
 }

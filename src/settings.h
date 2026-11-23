@@ -112,6 +112,11 @@ struct GraphicsSettings {
     std::string hd_pack;
     // Memory for decoded HD frames (LRU), in MiB.
     int hd_cache_mb = 256;
+    // With hd=1: text drawn at 2x (see hd_text.h).
+    bool hd_text = true;
+    // 2x glyph source: sharp (edge-preserving 2x of the original glyphs) or
+    // smooth (re-rasterised with anti-aliasing), see hd_glyph.h.
+    std::string hd_text_style = "smooth";
 };
 
 struct UISettings {

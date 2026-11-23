@@ -15,6 +15,10 @@ void interfaceFontsExit();
 void interfaceFontDrawTextScaled2D(const Buffer2D& dest, int x, int y, const char* string, ColorWithFlags color, float scale);
 int interfaceFontGetStringWidthScaled(const char* string, ColorWithFlags color, float scale);
 
+// CE: see fontGetHdInfo / fontGetHdGlyph (fonts 100+).
+bool interfaceFontGetHdInfo(int font, FontHdInfo* info);
+bool interfaceFontGetHdGlyph(int font, int index, int* width, int* height, std::vector<unsigned char>* levels);
+
 } // namespace fallout
 
 #endif /* FONT_MANAGER_H */

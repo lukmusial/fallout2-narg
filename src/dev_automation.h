@@ -23,6 +23,9 @@ namespace fallout {
 //   shot <name>               write <out>/<name>.png
 //   dump <name>               write <out>/<name>.json with player, party, quest and world state
 //   fbshot <name>             write the presented framebuffer (output resolution)
+//   legacyshot <name>         write the 8-bit window composition (logical
+//                             resolution) through the presented palette, also
+//                             in HD mode (where `shot` equals `fbshot`)
 //   fadeshot <name> <pct> [in|out]
 //                             during the next palette fade (in: to a non-black
 //                             palette, out: to black) write the framebuffer at
@@ -32,6 +35,10 @@ namespace fallout {
 //   hdprobe <art path> <name> look up the HD image of frame 0 (2x legacy
 //                             fallback); write <name>.png and <name>.json
 //   hdstats <name>            write HD art cache counters to <name>.json
+//   hdtext off|sharp|smooth   switch HD text live (text drawn later uses it)
+//   hdtextstats <name>        write HD text counters to <name>.json
+//   floattext <text>          floating text over the player (in a game)
+//   monitor <text>            a line in the interface bar's message monitor
 //   refresh                   redraw the whole map window (in a game)
 //   benchrefresh <name> <n>   redraw it n times in a row; min/median/max ms
 //                             per redraw (and HD tile drawing) to <name>.json

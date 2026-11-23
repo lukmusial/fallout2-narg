@@ -14,6 +14,7 @@ namespace fallout {
 struct HdDrawOptions;
 struct HdImage;
 struct HdLayer;
+struct HdTextDraw;
 
 // The maximum number of buttons in one radio group.
 #define BUTTON_GROUP_BUTTON_LIST_CAPACITY (64)
@@ -309,6 +310,11 @@ void windowHdGetBasePalette(unsigned char* palette8);
 void windowHdDarkenBegin(int win);
 void windowHdDarken(int win, int intensity);
 void windowHdDarkenEnd(int win);
+// CE: the window whose buffer holds the pixel at `ptr` for drawing code that
+// uses the row pitch `pitch` (the window's width), and the pixel's position.
+bool windowFindBufferPixel(const unsigned char* ptr, int pitch, int* win, int* x, int* y);
+// Records 2x text in the window's HD layer (see hdLayerDrawText).
+bool windowHdDrawText(int win, const HdTextDraw& draw);
 void _win_get_mouse_buf(unsigned char* dest);
 bool windowIsValidWindowId(int win);
 Window* windowGetWindow(int win);

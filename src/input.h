@@ -25,6 +25,9 @@ void tickersDisable();
 void takeScreenshot();
 // Composites all windows (including the cursor) and writes an RGB PNG to `path`.
 bool screenshotSavePng(const char* path);
+// CE: the 8-bit window composition through the presented palette, also in
+// HD mode (where screenshotSavePng writes the presented framebuffer).
+bool screenshotSaveLegacyPng(const char* path);
 // CE: the presented framebuffer (output resolution) as RGB PNG.
 bool screenshotSaveFramebufferPng(const char* path);
 int screenshotHandlerDefaultImpl(int width, int height, unsigned char* data, unsigned char* palette);

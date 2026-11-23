@@ -838,6 +838,12 @@ static void windowComposeHd(Window* window, const Rect* rect)
         return;
     }
 
+    unsigned char basePalette8[256 * 3];
+    bool hasText = window->hdLayer != nullptr && !window->hdLayer->textGuard.empty();
+    if (hasText) {
+        windowHdGetBasePalette(basePalette8);
+    }
+
     hdComposeRect(window->hdLayer,
         window->buffer,
         window->width,
@@ -849,7 +855,46 @@ static void windowComposeHd(Window* window, const Rect* rect)
         screenWidth,
         rgbOrigin,
         screenWidth * kHdScale,
-        (window->flags & WINDOW_TRANSPARENT) != 0);
+        (window->flags & WINDOW_TRANSPARENT) != 0,
+        hasText ? basePalette8 : nullptr);
+}
+
+bool windowFindBufferPixel(const unsigned char* ptr, int pitch, int* winPtr, int* xPtr, int* yPtr)
+{
+    if (!gWindowSystemInitialized || ptr == nullptr) {
+        return false;
+    }
+
+    for (int index = 0; index < gWindowsLength; index++) {
+        Window* window = gWindows[index];
+        if (window == nullptr || window->buffer == nullptr || window->width != pitch) {
+            continue;
+        }
+
+        ptrdiff_t offset = ptr - window->buffer;
+        if (offset < 0 || offset >= static_cast<ptrdiff_t>(window->width) * window->height) {
+            continue;
+        }
+
+        *winPtr = window->id;
+        *xPtr = static_cast<int>(offset % window->width);
+        *yPtr = static_cast<int>(offset / window->width);
+        return true;
+    }
+
+    return false;
+}
+
+bool windowHdDrawText(int win, const HdTextDraw& draw)
+{
+    HdLayer* layer = windowHdGetLayer(win);
+    if (layer == nullptr) {
+        return false;
+    }
+
+    Window* window = windowGetWindow(win);
+    hdLayerDrawText(layer, window->buffer, window->width, draw);
+    return true;
 }
 
 bool windowHdIsActive()
@@ -909,6 +954,8 @@ bool windowHdDrawImageEx(int win, int x, int y, int width, int height, const HdI
 static int gHdDarkenWindow = -1;
 static HdLayer gHdDarkenBackup;
 static std::vector<unsigned char> gHdDarkenShows;
+// The layer's pixels to darken: the backup's, with the text overlay baked in.
+static std::vector<uint32_t> gHdDarkenSource;
 
 void windowHdDarkenBegin(int win)
 {
@@ -921,11 +968,20 @@ void windowHdDarkenBegin(int win)
     gHdDarkenWindow = win;
     gHdDarkenBackup = *window->hdLayer;
 
+    // HD text is darkened with the pixels under it.
+    if (!window->hdLayer->textGuard.empty()) {
+        unsigned char basePalette8[256 * 3];
+        windowHdGetBasePalette(basePalette8);
+        hdLayerBakeText(window->hdLayer, window->buffer, window->width, basePalette8);
+    }
+    gHdDarkenSource = window->hdLayer->pixels;
+
     // Only what the layer shows now gets darkened (not stale HD pixels under
     // legacy text); the copy put back by End keeps the full layer.
-    gHdDarkenShows.assign(gHdDarkenBackup.valid.size(), 0);
+    const HdLayer* layer = window->hdLayer;
+    gHdDarkenShows.assign(layer->valid.size(), 0);
     for (size_t offset = 0; offset < gHdDarkenShows.size(); offset++) {
-        gHdDarkenShows[offset] = gHdDarkenBackup.valid[offset] != 0 && gHdDarkenBackup.shadow[offset] == window->buffer[offset];
+        gHdDarkenShows[offset] = layer->valid[offset] != 0 && layer->shadow[offset] == window->buffer[offset];
     }
 }
 
@@ -938,7 +994,6 @@ void windowHdDarken(int win, int intensity)
     }
 
     HdLayer* layer = window->hdLayer;
-    const HdLayer& backup = gHdDarkenBackup;
     unsigned int scale = static_cast<unsigned int>(std::clamp(intensity, 0, 0x10000));
     int pitch = layer->width * kHdScale;
     for (int y = 0; y < layer->height; y++) {
@@ -953,7 +1008,7 @@ void windowHdDarken(int win, int intensity)
             for (int sy = 0; sy < kHdScale; sy++) {
                 size_t row = static_cast<size_t>(y * kHdScale + sy) * pitch + x * kHdScale;
                 for (int sx = 0; sx < kHdScale; sx++) {
-                    uint32_t pixel = backup.pixels[row + sx];
+                    uint32_t pixel = gHdDarkenSource[row + sx];
                     uint32_t r = (((pixel >> 16) & 0xFF) * scale) >> 16;
                     uint32_t g = (((pixel >> 8) & 0xFF) * scale) >> 16;
                     uint32_t b = ((pixel & 0xFF) * scale) >> 16;
@@ -977,6 +1032,7 @@ void windowHdDarkenEnd(int win)
     gHdDarkenWindow = -1;
     gHdDarkenBackup = HdLayer();
     gHdDarkenShows.clear();
+    gHdDarkenSource.clear();
 }
 
 void windowHdClear(int win)

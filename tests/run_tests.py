@@ -114,7 +114,10 @@ def load_png(path):
 MAIN_MENU_MASK = [(300, 446, 640, 472)]
 
 
-HD_ARGS = ["[graphics]hd=1"]
+# HD text (Phase 2.9) is on by default with hd=1; the earlier HD tests check
+# art and compositing against their own goldens with it off.
+HD_ARGS = ["[graphics]hd=1", "[graphics]hd_text=0"]
+HD_TEXT_ARGS = ["[graphics]hd=1", "[graphics]hd_text=1"]
 # Placeholder HD art made by tools/dev/make_test_hd_art.py (main menu background).
 HD_ART_ARGS = [*HD_ARGS, "[graphics]hd_pack=test"]
 
@@ -486,6 +489,150 @@ def make_hd_floors_test(pack):
     return test
 
 
+# --- Phase 2.9: text at 2x ----------------------------------------------------
+#
+# With hd_text=1 every string is drawn a second time with 2x glyphs into the
+# window's HD layer; the 8-bit buffers must not change at all. Text regions
+# (logical 640x480) are checked for 2x detail: the share of the legacy text
+# pixels whose 2x2 output block is not a single colour.
+
+HD_TEXT_STYLES = ("smooth", "sharp")
+HD_TEXT_SCREENS = ("menu", "load", "hub", "editor")
+# Minimum share of text pixels with 2x detail. Smooth re-rasterises every
+# edge; sharp (EPX) only changes diagonal steps and corners, so on the bold
+# menu font few blocks change, but with hd_text=0 the share is exactly 0.
+HD_TEXT_MIN_DETAIL = {"smooth": 0.25, "sharp": 0.03}
+
+
+def text_pixels(legacy, region):
+    """Mask of the legacy text pixels (TEXT_COLOURS) in a region."""
+    left, top, right, bottom = region
+    ref = legacy[top:bottom, left:right]
+    mask = np.zeros(ref.shape[:2], dtype=bool)
+    for colour in TEXT_COLOURS:
+        mask |= np.all(ref == np.array(colour), axis=2)
+    return mask
+
+
+def text_detail(fb, legacy, region):
+    """Share of legacy text pixels shown as a non-uniform 2x2 block, and
+    how many text pixels there are."""
+    left, top, right, bottom = region
+    mask = text_pixels(legacy, region)
+    if not mask.any():
+        return 0.0, 0
+    blocks = fb[top * 2:bottom * 2, left * 2:right * 2].reshape(bottom - top, 2, right - left, 2, 3)
+    uniform = np.all(blocks == blocks[:, :1, :, :1, :], axis=(1, 3, 4))
+    return float((~uniform)[mask].mean()), int(mask.sum())
+
+
+def make_hd_text_screens_test(style):
+    def test(update):
+        """Main menu, load screen, Stimpack hub and editor with 2x text over
+        the scripted pack: text regions show 2x detail, the 8-bit frames are
+        exactly the hd=0 frames, fades dim the text, goldens."""
+        if not pack_installed("scripted"):
+            raise TestSkipped("pack 'scripted' not installed (tools/hd: enhance_*.py, install.py)")
+        reset_saves()
+        legacy_out, _ = run_game(f"hd_text_{style}_legacy", "hd_text_screens.txt", fast=False)
+        reset_saves()
+        out, seconds = run_game(f"hd_text_{style}", "hd_text_screens.txt",
+                                [*HD_TEXT_ARGS, f"[graphics]hd_text_style={style}", "[graphics]hd_pack=scripted"],
+                                fast=False)
+        notes = []
+        details = []
+        for screen in HD_TEXT_SCREENS:
+            legacy = load_png(legacy_out / f"{screen}.png")
+            fb = load_png(out / f"{screen}.png")
+            if not np.array_equal(load_png(out / f"{screen}_legacy.png"), legacy):
+                raise TestFailure(f"{screen}: HD text changed the 8-bit frame")
+            for region in HD_TEXT_REGIONS[screen]:
+                detail, count = text_detail(fb, legacy, region)
+                if count < 50 or detail < HD_TEXT_MIN_DETAIL[style]:
+                    raise TestFailure(f"{screen}: text in {region} not drawn at 2x "
+                                      f"({detail:.0%} of {count} text pixels have 2x detail)")
+                details.append(f"{detail:.0%}")
+            # Off text, the frame is what the art phases produce: the legacy
+            # frame box-downsampled stays close.
+            small = fb.reshape(480, 2, 640, 2, 3).mean(axis=(1, 3))
+            colour = float(np.abs(small - legacy).mean())
+            if colour > HD_FLOOR_MAX_COLOUR_DIFF:
+                raise TestFailure(f"{screen}: frame differs from the legacy frame by {colour:.1f} levels")
+        notes.append("8-bit frames unchanged, text detail " + "/".join(details))
+
+        # The fade reaches the 2x text: the label pixels dim like the rest.
+        menu = load_png(out / "menu.png")
+        fade = load_png(out / "fade_out_50.png")
+        left, top, right, bottom = HD_TEXT_REGIONS["menu"][0]
+        mask = text_pixels(load_png(legacy_out / "menu.png"), (left, top, right, bottom))
+        mask2 = mask.repeat(2, axis=0).repeat(2, axis=1)
+        full = menu[top * 2:bottom * 2, left * 2:right * 2][mask2].mean()
+        faded = fade[top * 2:bottom * 2, left * 2:right * 2][mask2].mean()
+        if not 0.3 < faded / full < 0.7:
+            raise TestFailure(f"text in the fade-out frame is {faded / full:.2f} of full brightness, expected ~0.5")
+        notes.append(f"text fade {faded / full:.2f}")
+
+        stats = json.loads((out / "stats.json").read_text())
+        if not stats["active"] or stats["style"] != style or stats["draws"] < 50 or stats["replays"] < 1:
+            raise TestFailure(f"HD text not active as expected: {stats}")
+        notes.append(f"{stats['draws']} strings + {stats['replays']} button labels in {stats['total_ms']:.0f} ms")
+
+        goldens = [compare_hd_golden(out / f"{screen}.png", f"hd_text_{style}_{screen}.png", update,
+                                     MAIN_MENU_MASK if screen == "menu" else ())
+                   for screen in HD_TEXT_SCREENS]
+        notes.append("goldens " + "/".join(goldens))
+        return ", ".join(notes) + f" ({seconds:.0f}s)"
+    test.__name__ = f"test_hd_text_screens_{style}"
+    return test
+
+
+# Logical 640x480 rectangles: the message monitor of the interface bar.
+HD_TEXT_MONITOR = (20, 384, 200, 470)
+
+
+def test_hd_text_game(update):
+    """A game view with 2x text: interface bar messages and floating text
+    over the player (white with a black outline) are drawn at 2x; the
+    message monitor's 8-bit pixels are exactly those of an hd=0 run."""
+    if not tile_pack_installed("scripted"):
+        raise TestSkipped("pack 'scripted' has no tiles (tools/hd: extract.py --areas, enhance_*.py, install.py)")
+    reset_saves()
+    legacy_out, _ = run_game("hd_text_game_legacy", "hd_text_game.txt", ["--dev-load-game=1"])
+    reset_saves()
+    out, seconds = run_game("hd_text_game", "hd_text_game.txt",
+                            ["--dev-load-game=1", *HD_TEXT_ARGS, "[graphics]hd_text_style=smooth", "[graphics]hd_pack=scripted"])
+    fb = load_png(out / "game.png")
+    legacy = load_png(out / "game_legacy.png")
+    if fb.shape != (960, 1280, 3):
+        raise TestFailure(f"frame is {fb.shape}")
+
+    left, top, right, bottom = HD_TEXT_MONITOR
+    if not np.array_equal(legacy[top:bottom, left:right], load_png(legacy_out / "game_legacy.png")[top:bottom, left:right]):
+        raise TestFailure("HD text changed the message monitor's 8-bit pixels")
+    detail, count = text_detail(fb, legacy, HD_TEXT_MONITOR)
+    if count < 200 or detail < HD_TEXT_MIN_DETAIL["smooth"]:
+        raise TestFailure(f"message monitor not drawn at 2x ({detail:.0%} of {count} text pixels)")
+
+    # Floating text: white legacy pixels in the map area.
+    white = np.all(legacy[:380] == (252, 252, 252), axis=2) | np.all(legacy[:380] == (255, 255, 255), axis=2)
+    ys, xs = np.nonzero(white)
+    if len(ys) < 50:
+        raise TestFailure(f"no floating text found ({len(ys)} white pixels)")
+    region = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
+    blocks = fb[region[1] * 2:region[3] * 2, region[0] * 2:region[2] * 2]
+    h, w = region[3] - region[1], region[2] - region[0]
+    blocks = blocks.reshape(h, 2, w, 2, 3)
+    uniform = np.all(blocks == blocks[:, :1, :, :1, :], axis=(1, 3, 4))
+    float_detail = float((~uniform)[white[region[1]:region[3], region[0]:region[2]]].mean())
+    if float_detail < HD_TEXT_MIN_DETAIL["smooth"]:
+        raise TestFailure(f"floating text not drawn at 2x ({float_detail:.0%} of its pixels)")
+
+    stats = json.loads((out / "stats.json").read_text())
+    golden = compare_hd_golden_live(out / "game.png", "hd_text_game_slot01.png", update)
+    return (f"monitor {detail:.0%} of {count}, floating text {float_detail:.0%}, "
+            f"{stats['draws']} strings + {stats['replays']} replays in {stats['total_ms']:.0f} ms, golden {golden} ({seconds:.0f}s)")
+
+
 def compare_hd_golden_live(actual_path, golden_name, update):
     golden_path = GOLDEN / golden_name
     if update or not golden_path.exists():
@@ -717,7 +864,9 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
             test_english_interface_bar, test_load_save_with_hidden_bar]
          + [make_hd_screens_test(pack) for pack in ("scripted", "ai")]
          + [make_hd_floors_test(pack) for pack in ("scripted", "ai")]
-         + [test_hd_mixed_pack])
+         + [test_hd_mixed_pack]
+         + [make_hd_text_screens_test(style) for style in HD_TEXT_STYLES]
+         + [test_hd_text_game])
 
 
 PERF_CONFIGS = [
@@ -805,7 +954,7 @@ def main():
         results[test.__name__] = outcome[0]
 
     # Longest tests first so the pool finishes together.
-    order = sorted(selected, key=lambda t: 0 if any(k in t.__name__ for k in ("hd_screens", "stimpack", "lists")) else 1)
+    order = sorted(selected, key=lambda t: 0 if any(k in t.__name__ for k in ("hd_screens", "hd_text", "stimpack", "lists")) else 1)
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         list(pool.map(run_one, order))
 

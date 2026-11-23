@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "color.h"
+#include "hd_text.h"
 #include "svga.h"
 
 namespace fallout {
@@ -212,12 +213,23 @@ void blitBufferToBufferStretchTrans(const unsigned char* src, int srcWidth, int 
 // 0x4D36D4
 void blitBufferToBuffer(const unsigned char* src, int width, int height, int srcPitch, unsigned char* dest, int destPitch)
 {
+    // CE: text drawn into an off-screen buffer is drawn at 2x where it lands.
+    if (gHdTextActive && hdTextHasRecords()) {
+        hdTextBlit(src, width, height, srcPitch, dest, destPitch, false);
+        return;
+    }
+
     srcCopy(dest, destPitch, src, srcPitch, width, height);
 }
 
 // 0x4D3704
 void blitBufferToBufferTrans(const unsigned char* src, int width, int height, int srcPitch, unsigned char* dest, int destPitch)
 {
+    if (gHdTextActive && hdTextHasRecords()) {
+        hdTextBlit(src, width, height, srcPitch, dest, destPitch, true);
+        return;
+    }
+
     transSrcCopy(dest, destPitch, src, srcPitch, width, height);
 }
 

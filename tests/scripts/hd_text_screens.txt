@@ -1,0 +1,34 @@
+# Phase 2.9 HD text on the interface screens (run with [graphics]hd=1, an
+# hd_pack and hd_text=1; with hd=0 the fbshots are the plain 640x480 frames
+# the tests compare against). Each screen is captured as the presented
+# framebuffer (fbshot) and as the 8-bit window composition (legacyshot), which HD
+# text must leave exactly as without it.
+until mainmenu 20000
+wait 500
+fbshot menu
+legacyshot menu_legacy
+fadeshot fade_out_50 50 out
+key l
+wait 2500
+fbshot load
+legacyshot load_legacy
+key esc
+wait 2500
+key s
+wait 1500
+key home
+key enter
+until stimpack 30000
+wait 1000
+fbshot hub
+legacyshot hub_legacy
+key c
+wait 1500
+fbshot editor
+legacyshot editor_legacy
+hdtextstats stats
+key esc
+wait 800
+key e
+until mainmenu 30000
+quit 0

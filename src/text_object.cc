@@ -6,6 +6,7 @@
 #include "color.h"
 #include "debug.h"
 #include "draw.h"
+#include "hd_text.h"
 #include "input.h"
 #include "memory.h"
 #include "object.h"
@@ -268,6 +269,7 @@ int textObjectAdd(Object* object, char* string, int font, ColorWithFlags color, 
 
     if (outlineColor != COLOR_INVALID) {
         bufferOutline(textObject->data, textObject->width, textObject->height, textObject->width, static_cast<Color>(outlineColor & COLOR_LAST));
+        hdTextOutline(textObject->data, textObject->width, textObject->height, textObject->width, static_cast<Color>(outlineColor & COLOR_LAST));
     }
 
     if (object != nullptr) {

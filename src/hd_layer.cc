@@ -15,11 +15,253 @@ void hdLayerInit(HdLayer* layer, int width, int height)
     layer->pixels.assign(logical * kHdScale * kHdScale, 0);
     layer->shadow.assign(logical, 0);
     layer->valid.assign(logical, 0);
+    layer->textPixels.clear();
+    layer->textGuard.clear();
+    layer->textShadow.clear();
+    layer->textUnder.clear();
+    layer->textTop = 0;
+    layer->textBottom = 0;
+}
+
+static void clearTextRows(HdLayer* layer, int top, int bottom)
+{
+    if (top < bottom) {
+        std::fill(layer->textGuard.begin() + static_cast<size_t>(top) * layer->width,
+            layer->textGuard.begin() + static_cast<size_t>(bottom) * layer->width, 0);
+    }
 }
 
 void hdLayerClear(HdLayer* layer)
 {
     std::fill(layer->valid.begin(), layer->valid.end(), 0);
+    clearTextRows(layer, layer->textTop, layer->textBottom);
+    layer->textTop = 0;
+    layer->textBottom = 0;
+}
+
+static inline uint32_t paletteColor(const unsigned char* palette8, unsigned char index)
+{
+    return (static_cast<uint32_t>(palette8[index * 3]) << 16)
+        | (static_cast<uint32_t>(palette8[index * 3 + 1]) << 8)
+        | palette8[index * 3 + 2];
+}
+
+// Premultiplied `src` over opaque `under`.
+static inline uint32_t premultipliedOver(uint32_t src, uint32_t under)
+{
+    uint32_t alpha = src >> 24;
+    if (alpha == 0) {
+        return under & 0xFFFFFF;
+    }
+    if (alpha == 255) {
+        return src & 0xFFFFFF;
+    }
+
+    uint32_t inverse = 255 - alpha;
+    uint32_t r = ((src >> 16) & 0xFF) + (((under >> 16) & 0xFF) * inverse + 127) / 255;
+    uint32_t g = ((src >> 8) & 0xFF) + (((under >> 8) & 0xFF) * inverse + 127) / 255;
+    uint32_t b = (src & 0xFF) + ((under & 0xFF) * inverse + 127) / 255;
+    return (std::min(r, 255u) << 16) | (std::min(g, 255u) << 8) | std::min(b, 255u);
+}
+
+// Premultiplied `src` over premultiplied `under`.
+static inline uint32_t premultipliedOverAlpha(uint32_t src, uint32_t under)
+{
+    uint32_t inverse = 255 - (src >> 24);
+    uint32_t result = 0;
+    for (int shift = 0; shift < 32; shift += 8) {
+        uint32_t value = ((src >> shift) & 0xFF) + (((under >> shift) & 0xFF) * inverse + 127) / 255;
+        result |= std::min(value, 255u) << shift;
+    }
+    return result;
+}
+
+static void ensureTextOverlay(HdLayer* layer)
+{
+    size_t logical = static_cast<size_t>(layer->width) * layer->height;
+    if (layer->textGuard.size() != logical) {
+        layer->textPixels.assign(logical * kHdScale * kHdScale, 0);
+        layer->textGuard.assign(logical, 0);
+        layer->textShadow.assign(logical, 0);
+        layer->textUnder.assign(logical, 0);
+        layer->textTop = 0;
+        layer->textBottom = 0;
+    }
+}
+
+void hdLayerDrawText(HdLayer* layer, const unsigned char* buffer, int bufferPitch, const HdTextDraw& draw)
+{
+    if (layer == nullptr || draw.mask == nullptr || draw.pixels == nullptr || draw.before == nullptr || draw.width <= 0 || draw.height <= 0) {
+        return;
+    }
+
+    int left = std::max(draw.x, 0);
+    int top = std::max(draw.y, 0);
+    int right = std::min(draw.x + draw.width, layer->width);
+    int bottom = std::min(draw.y + draw.height, layer->height);
+    if (left >= right || top >= bottom) {
+        return;
+    }
+
+    ensureTextOverlay(layer);
+    if (layer->textTop >= layer->textBottom) {
+        layer->textTop = top;
+        layer->textBottom = bottom;
+    } else {
+        layer->textTop = std::min(layer->textTop, top);
+        layer->textBottom = std::max(layer->textBottom, bottom);
+    }
+
+    const int layerPitch = layer->width * kHdScale;
+    const int drawPitch = draw.width * kHdScale;
+
+    // Whether a pixel of the draw becomes a text pixel (so fringe pixels can
+    // depend on it), and whether the overlay showed at each pixel before.
+    auto isTextPixel = [&](int dx, int dy) {
+        if (dx < 0 || dy < 0 || dx >= draw.width || dy >= draw.height) {
+            return false;
+        }
+        int lx = draw.x + dx;
+        int ly = draw.y + dy;
+        if (lx < left || ly < top || lx >= right || ly >= bottom) {
+            return false;
+        }
+        return draw.mask[static_cast<size_t>(dy) * draw.width + dx] != 0
+            && !hdIsCyclingIndex(buffer[static_cast<size_t>(ly) * bufferPitch + lx]);
+    };
+
+    std::vector<unsigned char> showed(static_cast<size_t>(right - left) * (bottom - top));
+    for (int ly = top; ly < bottom; ly++) {
+        for (int lx = left; lx < right; lx++) {
+            showed[static_cast<size_t>(ly - top) * (right - left) + (lx - left)] = hdLayerTextShows(layer, buffer, bufferPitch, lx, ly);
+        }
+    }
+
+    for (int ly = top; ly < bottom; ly++) {
+        for (int lx = left; lx < right; lx++) {
+            int dx = lx - draw.x;
+            int dy = ly - draw.y;
+            size_t offset = static_cast<size_t>(ly) * layer->width + lx;
+            const uint32_t* src = draw.pixels + static_cast<size_t>(dy) * kHdScale * drawPitch + dx * kHdScale;
+            uint32_t* dest = layer->textPixels.data() + static_cast<size_t>(ly) * kHdScale * layerPitch + lx * kHdScale;
+            unsigned char after = buffer[static_cast<size_t>(ly) * bufferPitch + lx];
+
+            if (draw.mask[static_cast<size_t>(dy) * draw.width + dx] != 0) {
+                if (hdIsCyclingIndex(after)) {
+                    layer->textGuard[offset] = 0;
+                    continue;
+                }
+
+                unsigned char under = draw.before[static_cast<size_t>(dy) * draw.width + dx];
+                if (under == after && (layer->textGuard[offset] & kHdTextSelf) != 0 && layer->textShadow[offset] == after) {
+                    // The same text drawn again over itself: it is still
+                    // over what it was first drawn over.
+                    under = layer->textUnder[offset];
+                }
+
+                for (int sy = 0; sy < kHdScale; sy++) {
+                    for (int sx = 0; sx < kHdScale; sx++) {
+                        dest[sy * layerPitch + sx] = src[sy * drawPitch + sx];
+                    }
+                }
+                layer->textGuard[offset] = kHdTextSelf;
+                layer->textShadow[offset] = after;
+                layer->textUnder[offset] = under;
+                continue;
+            }
+
+            uint32_t alphaOr = (src[0] | src[1] | src[drawPitch] | src[drawPitch + 1]) >> 24;
+            if (alphaOr == 0 || hdIsCyclingIndex(after)) {
+                continue;
+            }
+
+            uint16_t depends = 0;
+            for (int bit = 0; bit < 8; bit++) {
+                if (isTextPixel(dx + kHdTextNeighbours[bit].dx, dy + kHdTextNeighbours[bit].dy)) {
+                    depends |= static_cast<uint16_t>(1 << bit);
+                }
+            }
+            if (depends == 0) {
+                continue;
+            }
+
+            uint16_t guard = layer->textGuard[offset];
+            bool merge = showed[static_cast<size_t>(ly - top) * (right - left) + (lx - left)] != 0;
+            if (merge && (guard & kHdTextSelf) != 0) {
+                // A text pixel of other text that is still shown wins.
+                continue;
+            }
+
+            for (int sy = 0; sy < kHdScale; sy++) {
+                for (int sx = 0; sx < kHdScale; sx++) {
+                    uint32_t value = src[sy * drawPitch + sx];
+                    dest[sy * layerPitch + sx] = merge ? premultipliedOverAlpha(value, dest[sy * layerPitch + sx]) : value;
+                }
+            }
+            layer->textGuard[offset] = merge ? static_cast<uint16_t>(guard | depends) : depends;
+        }
+    }
+}
+
+void hdLayerTextBlock(const HdLayer* layer, const unsigned char* buffer, int bufferPitch, int x, int y,
+    const unsigned char* basePalette8, uint32_t* block, int blockPitch)
+{
+    size_t offset = static_cast<size_t>(y) * layer->width + x;
+    unsigned char baseIndex = (layer->textGuard[offset] & kHdTextSelf) != 0
+        ? layer->textUnder[offset]
+        : buffer[static_cast<size_t>(y) * bufferPitch + x];
+    bool layerShows = layer->valid[offset] != 0 && layer->shadow[offset] == baseIndex;
+    uint32_t flat = paletteColor(basePalette8, baseIndex);
+
+    const int layerPitch = layer->width * kHdScale;
+    const uint32_t* text = layer->textPixels.data() + static_cast<size_t>(y) * kHdScale * layerPitch + x * kHdScale;
+    const uint32_t* hd = layer->pixels.data() + static_cast<size_t>(y) * kHdScale * layerPitch + x * kHdScale;
+    for (int sy = 0; sy < kHdScale; sy++) {
+        for (int sx = 0; sx < kHdScale; sx++) {
+            uint32_t under = layerShows ? hd[sy * layerPitch + sx] : flat;
+            block[sy * blockPitch + sx] = premultipliedOver(text[sy * layerPitch + sx], under);
+        }
+    }
+}
+
+void hdLayerBakeText(HdLayer* layer, const unsigned char* buffer, int bufferPitch, const unsigned char* basePalette8)
+{
+    if (layer == nullptr || layer->textGuard.empty()) {
+        return;
+    }
+
+    const int layerPitch = layer->width * kHdScale;
+    std::vector<uint32_t> blocks;
+    std::vector<size_t> offsets;
+    for (int y = layer->textTop; y < layer->textBottom; y++) {
+        for (int x = 0; x < layer->width; x++) {
+            if (hdLayerTextShows(layer, buffer, bufferPitch, x, y)) {
+                uint32_t block[kHdScale * kHdScale];
+                hdLayerTextBlock(layer, buffer, bufferPitch, x, y, basePalette8, block, kHdScale);
+                blocks.insert(blocks.end(), block, block + kHdScale * kHdScale);
+                offsets.push_back(static_cast<size_t>(y) * layer->width + x);
+            }
+        }
+    }
+
+    // Written after all blocks are made: a block reads the layer's pixels.
+    for (size_t index = 0; index < offsets.size(); index++) {
+        size_t offset = offsets[index];
+        int x = static_cast<int>(offset % layer->width);
+        int y = static_cast<int>(offset / layer->width);
+        uint32_t* dest = layer->pixels.data() + static_cast<size_t>(y) * kHdScale * layerPitch + x * kHdScale;
+        for (int sy = 0; sy < kHdScale; sy++) {
+            for (int sx = 0; sx < kHdScale; sx++) {
+                dest[sy * layerPitch + sx] = blocks[index * kHdScale * kHdScale + sy * kHdScale + sx];
+            }
+        }
+        layer->shadow[offset] = buffer[static_cast<size_t>(y) * bufferPitch + x];
+        layer->valid[offset] = 1;
+    }
+
+    clearTextRows(layer, layer->textTop, layer->textBottom);
+    layer->textTop = 0;
+    layer->textBottom = 0;
 }
 
 static inline uint32_t blendOver(uint32_t src, uint32_t under)
@@ -277,9 +519,24 @@ void hdLayerScroll(HdLayer* layer, int dx, int dy)
     int count = width - std::abs(dx);
     int pitch = width * kHdScale;
 
+    // Text rows move like the others, but only the rows that hold text.
+    int oldTop = layer->textTop;
+    int oldBottom = layer->textBottom;
+    int newTop = std::max(oldTop - dy, 0);
+    int newBottom = std::min(oldBottom - dy, height);
+    if (newTop >= newBottom) {
+        newTop = 0;
+        newBottom = 0;
+    }
+
     auto moveRow = [&](int destY) {
         int srcY = destY + dy;
         unsigned char* valid = layer->valid.data() + static_cast<size_t>(destY) * width;
+        bool textRow = destY >= newTop && destY < newBottom;
+        if (!textRow && destY >= oldTop && destY < oldBottom) {
+            clearTextRows(layer, destY, destY + 1);
+        }
+
         if (srcY < 0 || srcY >= height) {
             memset(valid, 0, width);
             return;
@@ -301,6 +558,23 @@ void hdLayerScroll(HdLayer* layer, int dx, int dy)
         } else if (dx < 0) {
             memset(valid, 0, -dx);
         }
+
+        if (textRow) {
+            uint16_t* guard = layer->textGuard.data() + static_cast<size_t>(destY) * width;
+            memmove(layer->textGuard.data() + destOffset, layer->textGuard.data() + srcOffset, sizeof(uint16_t) * count);
+            memmove(layer->textShadow.data() + destOffset, layer->textShadow.data() + srcOffset, count);
+            memmove(layer->textUnder.data() + destOffset, layer->textUnder.data() + srcOffset, count);
+            for (int sy = 0; sy < kHdScale; sy++) {
+                uint32_t* destPixels = layer->textPixels.data() + static_cast<size_t>(destY * kHdScale + sy) * pitch + destLeft * kHdScale;
+                const uint32_t* srcPixels = layer->textPixels.data() + static_cast<size_t>(srcY * kHdScale + sy) * pitch + (destLeft + dx) * kHdScale;
+                memmove(destPixels, srcPixels, sizeof(uint32_t) * count * kHdScale);
+            }
+            if (dx > 0) {
+                std::fill(guard + width - dx, guard + width, 0);
+            } else if (dx < 0) {
+                std::fill(guard, guard - dx, 0);
+            }
+        }
     };
 
     // Copy in the direction that never overwrites rows still to be read.
@@ -313,14 +587,21 @@ void hdLayerScroll(HdLayer* layer, int dx, int dy)
             moveRow(y);
         }
     }
+
+    layer->textTop = newTop;
+    layer->textBottom = newBottom;
 }
 
 void hdComposeRect(const HdLayer* layer, const unsigned char* buffer, int bufferPitch,
     int srcX, int srcY, int width, int height,
-    unsigned char* mask, int maskPitch, uint32_t* rgb, int rgbPitch, bool transparent)
+    unsigned char* mask, int maskPitch, uint32_t* rgb, int rgbPitch, bool transparent,
+    const unsigned char* basePalette8)
 {
+    bool anyText = layer != nullptr && basePalette8 != nullptr && layer->textTop < layer->textBottom;
+
     for (int y = 0; y < height; y++) {
         const unsigned char* src = buffer + static_cast<size_t>(srcY + y) * bufferPitch + srcX;
+        bool hasText = anyText && srcY + y >= layer->textTop && srcY + y < layer->textBottom;
         unsigned char* maskRow = mask + static_cast<size_t>(y) * maskPitch;
         uint32_t* rgbRow = rgb + static_cast<size_t>(y) * kHdScale * rgbPitch;
 
@@ -332,7 +613,10 @@ void hdComposeRect(const HdLayer* layer, const unsigned char* buffer, int buffer
 
             int lx = srcX + x;
             int ly = srcY + y;
-            if (layer != nullptr && lx < layer->width && ly < layer->height && hdLayerShows(layer, lx, ly, index)) {
+            if (hasText && lx < layer->width && ly < layer->height && hdLayerTextShows(layer, buffer, bufferPitch, lx, ly)) {
+                hdLayerTextBlock(layer, buffer, bufferPitch, lx, ly, basePalette8, rgbRow + x * kHdScale, rgbPitch);
+                maskRow[x] = 1;
+            } else if (layer != nullptr && lx < layer->width && ly < layer->height && hdLayerShows(layer, lx, ly, index)) {
                 const uint32_t* hd = layer->pixels.data() + static_cast<size_t>(ly) * kHdScale * layer->width * kHdScale + lx * kHdScale;
                 for (int sy = 0; sy < kHdScale; sy++) {
                     memcpy(rgbRow + sy * rgbPitch + x * kHdScale, hd + static_cast<size_t>(sy) * layer->width * kHdScale, sizeof(uint32_t) * kHdScale);
