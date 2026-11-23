@@ -1026,10 +1026,14 @@ bool stimpackRun()
         case HUB_ENTRY_SAVE_AS:
             lsgRequestEmptySlotOnNextSave();
             windowHide(hub.window);
+            // The save records whether the interface bar is hidden; the hub
+            // hides it, so show it while saving or the game loads without it.
+            interfaceBarShow();
             if (lsgSaveGame(LoadSaveMode::Normal) == 1) {
                 saved = true;
                 done = true;
             } else {
+                shadeMapView();
                 windowShow(hub.window);
                 windowRefreshAll(&_scr_size);
             }

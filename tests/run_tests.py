@@ -397,6 +397,12 @@ def test_stimpack_save_unchanged(update):
     out11, _ = run_game("stimpack_load11", "load_slot.txt", ["--dev-load-game=11"])
     # Same golden as slot 3: the re-save must not change any state.
     notes.append(compare_state(out11 / "state.json", "slot03_state.json", False))
+    # The interface bar must be back: the hub hides it while editing.
+    bar = load_png(out11 / "game.png")[-99:]
+    golden_bar = load_png(GOLDEN / "slot03_game.png")[-99:]
+    bar_diff = float(np.any(bar != golden_bar, axis=2).mean())
+    if bar_diff > 0.2:
+        raise TestFailure(f"interface bar missing after a Stimpack save ({bar_diff:.0%} of bar pixels differ)")
     return ", ".join(notes) + f" ({seconds:.0f}s)"
 
 
