@@ -414,3 +414,8 @@ GEMINI.md
 opencode.json
 # Local development (mods)
 /.venv/
+# HD art pipeline (Phase 2.5): venv, model weights, extracted art, HD packs
+/tools/hd/.venv/
+/tools/hd/models/
+/tools/hd/work/
+/assets/hd/
