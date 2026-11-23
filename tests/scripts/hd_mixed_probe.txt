@@ -3,4 +3,5 @@ until mainmenu 20000
 hdprobe art/intrface/uparwoff.frm arrow
 hdprobe art/intrface/mainmenu.frm menu
 hdprobe art/tiles/ruf1000.frm roof
+hdprobe art/walls/jds1000.frm wall
 quit 0

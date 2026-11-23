@@ -687,8 +687,10 @@ def test_hd_mixed_pack(update):
                 return pack
         return "unknown"
     arrow, menu, roof = source("arrow", "uparwoff"), source("menu", "mainmenu"), source("roof", "ruf1000", "tiles")
-    if (arrow, menu, roof) != ("scripted", "ai", "scripted"):
-        raise TestFailure(f"mixed pack resolved the arrow from {arrow}, the menu from {menu}, the metal roof from {roof}")
+    wall = source("wall", "jds1000", "walls")
+    if (arrow, menu, roof, wall) != ("scripted", "ai", "scripted", "scripted"):
+        raise TestFailure(f"mixed pack resolved the arrow from {arrow}, the menu from {menu}, "
+                          f"the metal roof from {roof}, the scrap wall from {wall}")
     return f"arrow and metal roof from scripted, menu from ai ({seconds:.0f}s)"
 
 

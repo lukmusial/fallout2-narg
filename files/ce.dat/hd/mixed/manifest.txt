@@ -32,3 +32,29 @@ art/tiles/ruf2008.frm = scripted
 art/tiles/ruf3000.frm = scripted
 art/tiles/ruf3001.frm = scripted
 art/tiles/ruf4000.frm = scripted
+
+# Scrap-metal walls (jds*, jdd*): the AI invents vertical streaks.
+art/walls/jds1000.frm = scripted
+art/walls/jds1001.frm = scripted
+art/walls/jds2000.frm = scripted
+art/walls/jds2001.frm = scripted
+art/walls/jds3000.frm = scripted
+art/walls/jds3001.frm = scripted
+art/walls/jds3002.frm = scripted
+art/walls/jds3003.frm = scripted
+art/walls/jdd1000.frm = scripted
+art/walls/jdd1001.frm = scripted
+art/walls/jdd1002.frm = scripted
+art/walls/jdd1003.frm = scripted
+art/walls/jdd1004.frm = scripted
+art/walls/jdd1005.frm = scripted
+
+# Tables: the AI adds blue/white outlines that are not in the art.
+art/scenery/crptbl01.frm = scripted
+art/scenery/crptbl02.frm = scripted
+art/scenery/crptbl03.frm = scripted
+art/scenery/crptbl04.frm = scripted
+art/scenery/crptbl05.frm = scripted
+
+# Beer bottle: AI colour error.
+art/items/beer.frm = scripted
