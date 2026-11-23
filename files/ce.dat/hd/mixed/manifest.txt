@@ -1,0 +1,11 @@
+# HD art pack "mixed": the AI pack, except where the AI upscale does poorly.
+# Each line: <art path> = <pack>; "*" is the default for everything else.
+# The packs themselves (data/hd/ai, data/hd/scripted) are generated locally by
+# tools/hd (derived from the game's own art, never distributed).
+* = ai
+
+# 11x14 scroll arrows: the AI model turns them into blobs.
+art/intrface/uparwoff.frm = scripted
+art/intrface/uparwon.frm = scripted
+art/intrface/dnarwoff.frm = scripted
+art/intrface/dnarwon.frm = scripted

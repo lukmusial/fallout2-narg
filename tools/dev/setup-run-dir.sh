@@ -46,6 +46,8 @@ if [[ ! -f "$CFG" || $FORCE_CONFIG -eq 1 ]]; then
         -e 's/^show_script_messages=.*/show_script_messages=0/' \
         -e 's/^show_tile_num=.*/show_tile_num=0/' \
         -e 's/^output_map_data_info=.*/output_map_data_info=0/' \
+        -e 's/^hd=.*/hd=0/' \
+        -e 's/^hd_pack=.*/hd_pack=/' \
         "$REPO_DIR/files/fallout2.cfg" >"$CFG"
     echo "wrote $CFG"
 fi

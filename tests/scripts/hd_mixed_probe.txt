@@ -1,0 +1,5 @@
+# hd_pack=mixed: arrows from the scripted pack, everything else from ai.
+until mainmenu 20000
+hdprobe art/intrface/uparwoff.frm arrow
+hdprobe art/intrface/mainmenu.frm menu
+quit 0

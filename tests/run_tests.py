@@ -509,13 +509,36 @@ def test_stimpack_lists(update):
     return ", ".join(notes) + f" ({seconds:.0f}s)"
 
 
+def test_hd_mixed_pack(update):
+    """The shipped `mixed` manifest (ce.dat hd/mixed/manifest.txt) picks the
+    scripted arrows and AI art for everything else."""
+    for pack in ("ai", "scripted"):
+        if not (RUN_DIR / f"data/hd/{pack}").exists():
+            return f"SKIP (pack {pack} not installed; run tools/hd/install.py)"
+    out, seconds = run_game("hd_mixed_probe", "hd_mixed_probe.txt", [*HD_ARGS, "[graphics]hd_pack=mixed"])
+    def source(name, art):
+        if json.loads((out / f"{name}.json").read_text())["from_legacy"]:
+            return "legacy"
+        probed = np.asarray(Image.open(out / f"{name}.png").convert("RGBA"))
+        for pack in ("ai", "scripted"):
+            path = RUN_DIR / f"data/hd/{pack}/art/intrface/{art}.png"
+            if path.exists() and np.array_equal(probed, np.asarray(Image.open(path).convert("RGBA"))):
+                return pack
+        return "unknown"
+    arrow, menu = source("arrow", "uparwoff"), source("menu", "mainmenu")
+    if (arrow, menu) != ("scripted", "ai"):
+        raise TestFailure(f"mixed pack resolved the arrow from {arrow}, the menu from {menu}")
+    return f"arrow from scripted, menu from ai ({seconds:.0f}s)"
+
+
 TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_art, test_main_menu_hd_fhd,
           test_hd_art_lookup]
          + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
          + [make_slot_test(slot, hd=True) for slot in HD_SLOTS]
          + [test_stimpack_save_unchanged, test_character_screens, test_stimpack_edit_player, test_stimpack_cancel,
             test_stimpack_edit_companion, test_stimpack_lists]
-         + [make_hd_screens_test(pack) for pack in ("scripted", "ai")])
+         + [make_hd_screens_test(pack) for pack in ("scripted", "ai")]
+         + [test_hd_mixed_pack])
 
 
 PERF_CONFIGS = [

@@ -58,18 +58,29 @@ namespace {
 
     HdArtState gHdArt;
 
+    // .dat archives (ce.dat, master.dat) store names with backslashes; loose
+    // files accept either, so look everything up in the engine's own form.
+    std::string dbPath(const std::string& path)
+    {
+        std::string result = path;
+        std::replace(result.begin(), result.end(), '/', '\\');
+        return result;
+    }
+
     bool readWholeFile(const std::string& path, std::vector<unsigned char>& data)
     {
+        std::string name = dbPath(path);
         int size = 0;
-        if (dbGetFileSize(path.c_str(), &size) != 0 || size <= 0) {
+        if (dbGetFileSize(name.c_str(), &size) != 0 || size <= 0) {
             return false;
         }
         data.resize(size);
-        return dbGetFileContents(path.c_str(), data.data()) == 0;
+        return dbGetFileContents(name.c_str(), data.data()) == 0;
     }
 
-    bool fileExists(const std::string& path)
+    bool fileExists(const std::string& rawPath)
     {
+        std::string path = dbPath(rawPath);
         int size = 0;
         return dbGetFileSize(path.c_str(), &size) == 0 && size > 0;
     }
