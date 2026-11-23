@@ -1,0 +1,51 @@
+# Stimpack on slot 1: Goris joins, Sulik leaves, a quest becomes ACTIVE,
+# the Den becomes VISITED and the party travels there; saved as slot 11.
+until mainmenu 20000
+wait 300
+key s
+wait 1200
+key home
+key enter
+until stimpack 30000
+wait 500
+key r
+wait 800
+key g
+key +
+wait 500
+key s
+wait 300
+shot roster_sulik
+key -
+wait 500
+shot roster_done
+key esc
+wait 500
+key q
+wait 800
+key +
+wait 300
+shot quests_done
+key esc
+wait 500
+key l
+wait 800
+key d
+key +
+wait 300
+shot location_den
+click 460 316
+wait 800
+shot travel_confirm
+key enter
+until stimpack 30000
+wait 1500
+shot hub_in_den
+key s
+wait 1200
+key enter
+wait 800
+text stimpack lists
+key enter
+until mainmenu 30000
+quit 0

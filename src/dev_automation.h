@@ -12,8 +12,9 @@ namespace fallout {
 //
 // Script format: one command per line, `#` starts a comment.
 //   wait <ms>                 pause
-//   until <state> [<ms>]      wait until the engine reports a state
-//                             (mainmenu, game, ...), fail after timeout (default 30000)
+//   until <state> [<ms>]      wait until the engine reports a state (mainmenu,
+//                             game, stimpack, input = a text input dialog is open),
+//                             fail after timeout (default 30000)
 //   key <name|char|code>      send one key (esc, enter, space, tab, backspace,
 //                             up, down, left, right, home, end, pageup, pagedown, f1..f12)
 //   text <string>             type the rest of the line
@@ -56,6 +57,7 @@ void devAutomationOnFadeStep(int step, int steps, bool toBlack);
 
 // Engine state marks matched by `until`.
 void devAutomationSetState(const char* state);
+const char* devAutomationGetState();
 
 } // namespace fallout
 

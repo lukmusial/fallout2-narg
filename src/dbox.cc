@@ -9,6 +9,7 @@
 #include "character_editor.h"
 #include "color.h"
 #include "debug.h"
+#include "dev_automation.h"
 #include "draw.h"
 #include "game.h"
 #include "game_sound.h"
@@ -599,6 +600,14 @@ const char* showDescriptionInputDialog(const char* title, const char* currentInp
 
     ScopedFont mainFontGuard(101);
     static std::string result;
+
+    // Test harness: scripts wait for `input` before typing.
+    std::string previousAutomationState = devAutomationGetState();
+    devAutomationSetState("input");
+    struct AutomationStateRestore {
+        std::string state;
+        ~AutomationStateRestore() { devAutomationSetState(state.c_str()); }
+    } automationStateRestore { previousAutomationState };
 
     descriptionInput::DialogFrms frms;
     if (!descriptionInput::loadImages(frms)) return nullptr;

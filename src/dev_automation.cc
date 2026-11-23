@@ -730,6 +730,11 @@ bool devAutomationOverrideMouse(MouseData* mouseData)
     return true;
 }
 
+const char* devAutomationGetState()
+{
+    return gAutomation.engineState.c_str();
+}
+
 void devAutomationSetState(const char* state)
 {
     if (gAutomation.engineState != state) {

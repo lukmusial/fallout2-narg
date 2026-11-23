@@ -327,12 +327,34 @@ def test_stimpack_edit_companion(update):
     return ", ".join(notes) + f" ({seconds:.0f}s)"
 
 
+def test_stimpack_lists(update):
+    """Stimpack on slot 1: Goris joins, Sulik leaves, a quest becomes ACTIVE,
+    the Den becomes VISITED and the party travels there; saved as slot 11."""
+    reset_saves()
+    out, seconds = run_game("stimpack_lists", "stimpack_lists.txt")
+    notes = [compare_image(out / "location_den.png", "stimpack_location.png", update, LIVE_VIEW_MAX_DIFF)]
+    out11, _ = run_game("stimpack_lists_load11", "load_slot.txt", ["--dev-load-game=11"])
+    state = json.loads((out11 / "state.json").read_text())
+    party = [member["name"] for member in state["party"]]
+    if party != ["Goris"]:
+        raise TestFailure(f"party is {party}, expected only Goris")
+    if (state["world"]["map_name"], state["world"]["area"]) != ("DENBUS1.SAV", 1):
+        raise TestFailure(f"saved in {state['world']}, expected the Den")
+    # Entering the Den runs its map scripts, which set their own variables too;
+    # the whole result is deterministic, so it is compared with a golden.
+    notes.append(compare_state(out11 / "state.json", "stimpack_lists_state.json", update))
+    original = json.loads((GOLDEN / "slot01_state.json").read_text())
+    if stable_state(state)["player"] != original["player"]:
+        raise TestFailure("the player changed")
+    return ", ".join(notes) + f" ({seconds:.0f}s)"
+
+
 TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_art, test_main_menu_hd_fhd,
           test_hd_art_lookup]
          + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
          + [make_slot_test(slot, hd=True) for slot in HD_SLOTS]
          + [test_stimpack_save_unchanged, test_character_screens, test_stimpack_edit_player, test_stimpack_cancel,
-            test_stimpack_edit_companion])
+            test_stimpack_edit_companion, test_stimpack_lists])
 
 
 PERF_CONFIGS = [

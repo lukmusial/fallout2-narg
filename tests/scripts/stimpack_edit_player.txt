@@ -39,8 +39,9 @@ shot perks
 key enter
 wait 500
 # Level 12: click the Level line, clear the field, type
+wait 500
 click 60 283
-wait 800
+until input 10000
 shot level_dialog
 key backspace
 key backspace
