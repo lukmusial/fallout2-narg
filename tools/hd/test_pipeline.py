@@ -85,6 +85,27 @@ class Synthetic(unittest.TestCase):
         inside = hdlib.nearest2x(idx != 0)
         self.assertGreater(big[inside].min(), 195)
 
+    def test_fill_holes_bounded_at_image_edges(self):
+        # Opaque art touching the frame edge next to a hole: the fill must
+        # stay within the colours around it (it used to grow without bound).
+        rgb = np.zeros((6, 8, 3), np.float32)
+        rgb[:, :3] = 200.0
+        holes = np.zeros((6, 8), bool)
+        holes[:, 3:] = True
+        out = hdlib.fill_holes(rgb, holes)
+        self.assertLessEqual(float(out.max()), 200.0 + 1e-3)
+        self.assertGreaterEqual(float(out[holes].min()), 200.0 - 1e-3)
+
+    def test_fhd_container_layout(self):
+        import install
+        blob = b"\x89PNG\r\n\x1a\n" + b"x" * 8
+        data = install.fhd_bytes(1, 3, {(0, 0): blob, (0, 2): blob})
+        magic, directions, frames, flags = install.FHD_HEADER.unpack_from(data, 0)
+        self.assertEqual((magic, directions, frames, flags), (b"FHD1", 1, 3, 0))
+        entries = [install.FHD_ENTRY.unpack_from(data, install.FHD_HEADER.size + i * 8) for i in range(3)]
+        self.assertEqual(entries[1], (0, 0))
+        self.assertEqual(data[entries[2][0]:entries[2][0] + entries[2][1]], blob)
+
     def test_tile_lattice_wrap_covers_surroundings(self):
         # a fully opaque floor diamond, wrapped on the lattice, must leave no
         # holes in the band around the centre tile
@@ -162,6 +183,18 @@ class RealArt(unittest.TestCase):
         self.assertGreater(len(used), 900)
         for pack in PACKS:
             missing = sorted(n for n in used if not (hdlib.ASSETS_DIR / pack / f"art/tiles/{n}.png").exists())
+            self.assertEqual(missing, [], pack)
+
+    def test_area_objects_complete(self):
+        # Phase 2.8: every wall, scenery and item art on the area maps and
+        # in the reference saves, every frame of multi-frame art, in both packs.
+        assets = [a for a in hdlib.load_manifest() if a["type"] in ("walls", "scenery", "items") and a.get("area")]
+        if not assets:
+            self.skipTest("extract.py --areas --objects not run")
+        self.assertGreater(len({a.get("fhd", a["key"]) for a in assets}), 1200)
+        self.assertTrue(any("fhd" in a for a in assets))
+        for pack in PACKS:
+            missing = sorted(a["key"] for a in assets if not hdlib.out_path(pack, a).exists())
             self.assertEqual(missing, [], pack)
 
     def test_tile_seams(self):

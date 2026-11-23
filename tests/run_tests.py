@@ -210,8 +210,9 @@ def test_main_menu_hd_art(update):
     label = menu[36:76, 180:320]
     if nonuniform_blocks(label) > 0.9:
         raise TestFailure("button label shows no legacy (pixel-doubled) text")
+    # (Same bounds as the HD screens tests: the step captured varies with load.)
     ratio = load_png(out / "fade_out_50.png").mean() / menu.mean()
-    if not 0.4 < ratio < 0.6:
+    if not 0.3 < ratio < 0.7:
         raise TestFailure(f"fade-out frame is {ratio:.2f} of full brightness, expected ~0.5")
     note = compare_image(out / "menu_fb.png", "main_menu_hd_art.png", update, mask=MAIN_MENU_MASK)
     return f"{note}, detail {detail:.0%}, cursor {cursor:.0%}, fade {ratio:.2f} ({seconds:.0f}s)"
@@ -407,31 +408,38 @@ def make_hd_screens_test(pack):
     return test
 
 
-# --- Phase 2.7: floors and roofs with the real HD packs ----------------------
+# --- Phase 2.7/2.8: the map with the real HD packs ---------------------------
 #
 # tests/scripts/hd_map.txt loads a save with hd=1 and a pack, captures the
 # frame, then runs `hdcheck` (tileHdCheck in src/tile.cc) before and after
 # scrolling: the iso window's HD layer is compared with a fresh redraw of the
-# same view (stale pixels) and with a redraw without objects (pixels objects
-# cover must stay legacy).
+# same view (stale pixels) and with a redraw without objects. Floors, roofs,
+# walls, scenery and items are HD; critters and other objects stay legacy.
 
 HD_FLOOR_MIN_TILE_HD = 0.97     # floor/roof pixels (no object drawn there) showing HD
+HD_MIN_SCENERY_HD = 0.95        # wall/scenery/item pixels showing HD (not: colour cycling)
+HD_MIN_SCENERY_DETAIL = 0.25    # of those, 2x2 output blocks with HD detail
 HD_FLOOR_MAX_COLOUR_DIFF = 12.0  # mean abs difference, HD frame box-downsampled vs the legacy golden
 HD_FLOOR_GOLDEN_MAX_DIFF = 0.05  # live views animate: fraction of pixels off by > 12 levels
 HD_FLOOR_MAX_STALE = 16          # isolated pixels on scroll-strip edges, see hd_check
+HD_MAP_PACKS = ("scripted", "ai", "mixed")
 
 
-def tile_pack_installed(pack):
-    return (RUN_DIR / f"data/hd/{pack}/art/tiles/edg5000.png").exists()
+def map_pack_installed(pack):
+    """Area tiles and objects (one-image and multi-frame art) in the pack;
+    `mixed` takes them from both."""
+    packs = ("scripted", "ai") if pack == "mixed" else (pack,)
+    return all((RUN_DIR / f"data/hd/{p}/art/{art}").exists() for p in packs
+               for art in ("tiles/edg5000.png", "walls/adb1026.png", "scenery/door1.fhd"))
 
 
 def hd_check(out, name):
     check = json.loads((out / f"{name}.json").read_text())
     if not check["active"]:
         raise TestFailure(f"{name}: no HD layer on the map")
-    if check["object_pixels_hd"] != 0 or check["cycling_hd"] != 0:
-        raise TestFailure(f"{name}: {check['object_pixels_hd']} object pixels and {check['cycling_hd']} "
-                          f"colour-cycling pixels show HD (see {out / name}.png)")
+    if check["legacy_object_pixels_hd"] != 0 or check["cycling_hd"] != 0:
+        raise TestFailure(f"{name}: {check['legacy_object_pixels_hd']} critter/misc object pixels and "
+                          f"{check['cycling_hd']} colour-cycling pixels show HD (see {out / name}.png)")
     # Stale = same legacy index as a fresh redraw but different HD. The
     # legacy engine's partial redraws after a scroll leave a few single
     # pixels on strip edges that differ from a fresh redraw (an overlapping
@@ -445,44 +453,57 @@ def hd_check(out, name):
                      for dy in (-1, 0, 1) for dx in (-1, 0, 1) if dy or dx)
     clustered = int((stale & (neighbours >= 2)).sum())
     if stale.sum() > HD_FLOOR_MAX_STALE or clustered:
-        raise TestFailure(f"{name}: {int(stale.sum())} stale HD pixels ({clustered} clustered) on floors/roofs "
+        raise TestFailure(f"{name}: {int(stale.sum())} stale HD pixels ({clustered} clustered) "
                           f"vs a fresh redraw (see {out / name}.png)")
     share = check["tile_pixels_hd"] / max(check["tile_pixels"], 1)
     if share < HD_FLOOR_MIN_TILE_HD:
         raise TestFailure(f"{name}: only {share:.1%} of floor/roof pixels show HD")
-    return check, share
+    scenery = check["scenery_pixels_hd"] / max(check["scenery_pixels"], 1)
+    if check["scenery_pixels"] > 1000 and scenery < HD_MIN_SCENERY_HD:
+        raise TestFailure(f"{name}: only {scenery:.1%} of wall/scenery/item pixels show HD")
+    return check, share, scenery
 
 
-def make_hd_floors_test(pack):
+def scenery_detail(fb, out, name):
+    """Fraction of the 2x2 output blocks of HD wall/scenery/item pixels
+    (green in the hdcheck mask) that are not one flat colour."""
+    mask = np.all(np.asarray(Image.open(out / f"{name}.png").convert("RGB")) == (0, 200, 0), axis=2)
+    h, w = mask.shape
+    blocks = fb[:h * 2, :w * 2].reshape(h, 2, w, 2, 3)
+    detail = np.abs(blocks - blocks[:, :1, :, :1, :]).sum(axis=(1, 3, 4)) > 0
+    return float(detail[mask].mean()) if mask.any() else 1.0
+
+
+def make_hd_map_test(pack, slot):
     def test(update):
-        """All ten saves with a real HD pack: HD floors and roofs, objects and
-        critters legacy, colour-cycling legacy, nothing stale after keyboard
-        and edge scrolling, lighting close to the legacy frame, state
-        unchanged, per-slot goldens."""
-        if not tile_pack_installed(pack):
-            raise TestSkipped(f"pack '{pack}' has no tiles (tools/hd: extract.py --areas, enhance_*.py, install.py)")
-        notes = []
-        started = time.time()
-        for slot in range(1, SLOT_COUNT + 1):
-            reset_saves()
-            out, _ = run_game(f"hd_floors_{pack}_slot{slot:02d}", "hd_map.txt",
-                              [f"--dev-load-game={slot}", *HD_ARGS, f"[graphics]hd_pack={pack}"])
-            compare_state(out / "state.json", f"slot{slot:02d}_state.json", False)
-            check, share = hd_check(out, "check")
-            scrolled, _ = hd_check(out, "scrolled")
-            fb = load_png(out / "game.png")
-            if fb.shape != (960, 1280, 3):
-                raise TestFailure(f"slot {slot}: frame is {fb.shape}")
-            legacy = load_png(GOLDEN / f"slot{slot:02d}_game.png")
-            small = fb.reshape(480, 2, 640, 2, 3).mean(axis=(1, 3))
-            colour = float(np.abs(small - legacy).mean())
-            if colour > HD_FLOOR_MAX_COLOUR_DIFF:
-                raise TestFailure(f"slot {slot}: HD frame differs from the legacy view by {colour:.1f} levels on average")
-            detail = nonuniform_blocks(fb[:760])
-            golden = compare_hd_golden_live(out / "game.png", f"hd_{pack}_slot{slot:02d}.png", update)
-            notes.append(f"{slot}:{share:.0%}/{detail:.0%}/{golden}")
-        return "tiles HD/detail/golden " + " ".join(notes) + f" ({time.time() - started:.0f}s)"
-    test.__name__ = f"test_hd_floors_{pack}"
+        """One save with a real HD pack: HD floors, roofs, walls, scenery and
+        items; critters and colour cycling legacy; nothing stale after
+        keyboard and edge scrolling; lighting close to the legacy frame;
+        state unchanged; golden with tolerance."""
+        if not map_pack_installed(pack):
+            raise TestSkipped(f"pack '{pack}' lacks the area art (tools/hd: extract.py --areas --objects, "
+                              "enhance_*.py, install.py)")
+        reset_saves()
+        out, seconds = run_game(f"hd_map_{pack}_slot{slot:02d}", "hd_map.txt",
+                                [f"--dev-load-game={slot}", *HD_ARGS, f"[graphics]hd_pack={pack}"])
+        compare_state(out / "state.json", f"slot{slot:02d}_state.json", False)
+        check, share, scenery = hd_check(out, "check")
+        hd_check(out, "scrolled")
+        fb = load_png(out / "game.png")
+        if fb.shape != (960, 1280, 3):
+            raise TestFailure(f"slot {slot}: frame is {fb.shape}")
+        legacy = load_png(GOLDEN / f"slot{slot:02d}_game.png")
+        small = fb.reshape(480, 2, 640, 2, 3).mean(axis=(1, 3))
+        colour = float(np.abs(small - legacy).mean())
+        if colour > HD_FLOOR_MAX_COLOUR_DIFF:
+            raise TestFailure(f"slot {slot}: HD frame differs from the legacy view by {colour:.1f} levels on average")
+        detail = scenery_detail(fb, out, "check")
+        if check["scenery_pixels"] > 1000 and detail < HD_MIN_SCENERY_DETAIL:
+            raise TestFailure(f"slot {slot}: only {detail:.0%} of HD wall/scenery blocks show detail")
+        golden = compare_hd_golden_live(out / "game.png", f"hd_{pack}_slot{slot:02d}.png", update)
+        return (f"floors/roofs {share:.0%} HD, walls/scenery/items {scenery:.0%} HD ({detail:.0%} detail), "
+                f"colour diff {colour:.1f}, golden {golden} ({seconds:.0f}s)")
+    test.__name__ = f"test_hd_map_{pack}_slot{slot:02d}"
     return test
 
 
@@ -716,7 +737,7 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
             test_stimpack_edit_companion, test_stimpack_lists, test_stimpack_perk_scan,
             test_english_interface_bar, test_load_save_with_hidden_bar]
          + [make_hd_screens_test(pack) for pack in ("scripted", "ai")]
-         + [make_hd_floors_test(pack) for pack in ("scripted", "ai")]
+         + [make_hd_map_test(pack, slot) for pack in HD_MAP_PACKS for slot in range(1, SLOT_COUNT + 1)]
          + [test_hd_mixed_pack])
 
 
@@ -728,6 +749,8 @@ PERF_CONFIGS = [
                                  "[graphics]hd_pack=scripted"]),
     ("3440x1440 hd=1 ai", ["[screen]resolution_x=3440", "[screen]resolution_y=1440", "[screen]scale=2", *HD_ARGS,
                            "[graphics]hd_pack=ai"]),
+    ("3440x1440 hd=1 mixed", ["[screen]resolution_x=3440", "[screen]resolution_y=1440", "[screen]scale=2", *HD_ARGS,
+                              "[graphics]hd_pack=mixed"]),
 ]
 
 
@@ -748,12 +771,13 @@ def run_perf(slot):
                   f"map redraw {stats['map_refreshes']:4d} x {stats['map_refresh_total_ms'] / max(stats['map_refreshes'], 1):6.3f} "
                   f"max {stats['map_refresh_max_ms']:7.3f}  "
                   f"scroll {stats['scrolls']:3d} x {stats['scroll_total_ms'] / max(stats['scrolls'], 1):6.3f} "
-                  f"max {stats['scroll_max_ms']:7.3f}  HD tiles {stats['hd_tiles_total_ms']:7.1f} ms  work/frame {work:6.3f} ms")
+                  f"max {stats['scroll_max_ms']:7.3f}  HD tiles {stats['hd_tiles_total_ms']:7.1f} objects "
+                  f"{stats.get('hd_objects_total_ms', 0):7.1f} ms  work/frame {work:6.3f} ms")
         bench = json.loads((out / "bench.json").read_text())
         if bench["count"]:
-            r, t = bench["refresh_ms"], bench["hd_tiles_ms"]
+            r, t, o = bench["refresh_ms"], bench["hd_tiles_ms"], bench.get("hd_objects_ms") or {"median": 0}
             print(f"  {label:24s} whole-map redraw x{bench['count']}: min {r['min']:6.2f} median {r['median']:6.2f} "
-                  f"max {r['max']:6.2f} ms; HD tiles median {t['median']:6.2f} ms")
+                  f"max {r['max']:6.2f} ms; HD tiles median {t['median']:6.2f} ms, HD objects median {o['median']:6.2f} ms")
 
 
 def main():

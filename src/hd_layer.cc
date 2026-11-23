@@ -222,6 +222,194 @@ void hdLayerDrawLit(HdLayer* layer, const unsigned char* buffer, int bufferPitch
     }
 }
 
+void hdLayerCapture(const HdLayer* layer, const unsigned char* buffer, int bufferPitch,
+    int x, int y, int width, int height, const unsigned char* basePalette8, std::vector<uint32_t>* under)
+{
+    width = std::max(width, 0);
+    height = std::max(height, 0);
+    const int pitch = width * kHdScale;
+    under->assign(static_cast<size_t>(pitch) * height * kHdScale, 0);
+    if (layer == nullptr) {
+        return;
+    }
+
+    const int layerPitch = layer->width * kHdScale;
+    for (int row = 0; row < height; row++) {
+        int ly = y + row;
+        if (ly < 0 || ly >= layer->height) {
+            continue;
+        }
+        uint32_t* out = under->data() + static_cast<size_t>(row) * kHdScale * pitch;
+        for (int column = 0; column < width; column++) {
+            int lx = x + column;
+            if (lx < 0 || lx >= layer->width) {
+                continue;
+            }
+            unsigned char index = buffer[static_cast<size_t>(ly) * bufferPitch + lx];
+            if (hdIsCyclingIndex(index)) {
+                continue;
+            }
+            uint32_t* dest = out + column * kHdScale;
+            if (hdLayerShows(layer, lx, ly, index)) {
+                const uint32_t* src = layer->pixels.data() + static_cast<size_t>(ly) * kHdScale * layerPitch + lx * kHdScale;
+                for (int sy = 0; sy < kHdScale; sy++) {
+                    for (int sx = 0; sx < kHdScale; sx++) {
+                        dest[sy * pitch + sx] = 0xFF000000u | src[sy * layerPitch + sx];
+                    }
+                }
+            } else {
+                uint32_t colour = 0xFF000000u
+                    | (static_cast<uint32_t>(basePalette8[index * 3]) << 16)
+                    | (static_cast<uint32_t>(basePalette8[index * 3 + 1]) << 8)
+                    | basePalette8[index * 3 + 2];
+                for (int sy = 0; sy < kHdScale; sy++) {
+                    for (int sx = 0; sx < kHdScale; sx++) {
+                        dest[sy * pitch + sx] = colour;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// lerp(a, b, t / 256) per channel, t in 0..256.
+static inline uint32_t mixRgb(uint32_t a, uint32_t b, int t)
+{
+    uint32_t weight = static_cast<uint32_t>(t);
+    uint32_t inverse = 256 - weight;
+    uint32_t r = (((a >> 16) & 0xFF) * inverse + ((b >> 16) & 0xFF) * weight + 128) >> 8;
+    uint32_t g = (((a >> 8) & 0xFF) * inverse + ((b >> 8) & 0xFF) * weight + 128) >> 8;
+    uint32_t bl = ((a & 0xFF) * inverse + (b & 0xFF) * weight + 128) >> 8;
+    return (r << 16) | (g << 8) | bl;
+}
+
+void hdLayerDrawBlended(HdLayer* layer, const unsigned char* buffer, int bufferPitch, const HdBlendDraw& draw)
+{
+    if (layer == nullptr || draw.frame == nullptr || draw.image == nullptr || draw.under == nullptr
+        || (draw.mode == HdBlendMode::Mask && draw.mask == nullptr)) {
+        return;
+    }
+
+    const HdImage& image = *draw.image;
+    int left = std::max(draw.x, 0);
+    int top = std::max(draw.y, 0);
+    int right = std::min(draw.x + draw.width, layer->width);
+    int bottom = std::min(draw.y + draw.height, layer->height);
+    if (left >= right || top >= bottom) {
+        return;
+    }
+    if (draw.frameX + (left - draw.x) < 0 || draw.frameY + (top - draw.y) < 0
+        || (draw.frameX + (right - draw.x)) * kHdScale > image.width
+        || (draw.frameY + (bottom - draw.y)) * kHdScale > image.height) {
+        return;
+    }
+
+    const int layerPitch = layer->width * kHdScale;
+    const int underPitch = draw.width * kHdScale;
+    const int greyTotal = std::max(draw.greyR + draw.greyG + draw.greyB, 1);
+
+    for (int ly = top; ly < bottom; ly++) {
+        int fy = draw.frameY + (ly - draw.y);
+        const unsigned char* frameRow = draw.frame + static_cast<size_t>(fy) * draw.framePitch;
+        const unsigned char* bufferRow = buffer + static_cast<size_t>(ly) * bufferPitch;
+        const uint32_t* imageRow = image.pixels.data() + static_cast<size_t>(fy) * kHdScale * image.width;
+        const uint32_t* underRow = draw.under + static_cast<size_t>(ly - draw.y) * kHdScale * underPitch;
+        uint32_t* layerRow = layer->pixels.data() + static_cast<size_t>(ly) * kHdScale * layerPitch;
+        unsigned char* validRow = layer->valid.data() + static_cast<size_t>(ly) * layer->width;
+        unsigned char* shadowRow = layer->shadow.data() + static_cast<size_t>(ly) * layer->width;
+        const unsigned char* maskRow = draw.mask != nullptr
+            ? draw.mask + static_cast<size_t>(ly - draw.y) * draw.maskPitch
+            : nullptr;
+
+        for (int lx = left; lx < right; lx++) {
+            int fx = draw.frameX + (lx - draw.x);
+            if (frameRow[fx] == 0) {
+                continue;
+            }
+
+            unsigned char index = bufferRow[lx];
+            const uint32_t* src = imageRow + fx * kHdScale;
+            const uint32_t* under = underRow + (lx - draw.x) * kHdScale;
+            uint32_t alphaOr = src[0] | src[1] | src[image.width] | src[image.width + 1];
+            int m = maskRow != nullptr ? maskRow[lx - draw.x] : 0;
+            bool needsUnder = draw.mode == HdBlendMode::Tint || m != 0;
+            if (hdIsCyclingIndex(index) || (alphaOr >> 24) == 0 || (needsUnder && (under[0] >> 24) == 0)) {
+                validRow[lx] = 0;
+                continue;
+            }
+
+            uint32_t* dest = layerRow + lx * kHdScale;
+            for (int sy = 0; sy < kHdScale; sy++) {
+                for (int sx = 0; sx < kHdScale; sx++) {
+                    uint32_t pixel = src[sy * image.width + sx];
+                    uint32_t below = under[sy * underPitch + sx];
+                    uint32_t result;
+                    if (draw.mode == HdBlendMode::Tint) {
+                        // Legacy: grey5 = weighted 5-bit grey, level = grey5 >> 2
+                        // (0..7), alpha = level / 7; here without the steps
+                        // (centred on them).
+                        int grey8 = (draw.greyR * static_cast<int>((pixel >> 16) & 0xFF)
+                                        + draw.greyG * static_cast<int>((pixel >> 8) & 0xFF)
+                                        + draw.greyB * static_cast<int>(pixel & 0xFF))
+                            / greyTotal;
+                        int alpha = std::clamp((grey8 * 31 * 256 / 255 - 384) / 28, 0, 256);
+                        if ((pixel >> 24) == 0) {
+                            alpha = 0;
+                        }
+                        result = hdLight(mixRgb(below, draw.tint, alpha), draw.intensity);
+                    } else {
+                        uint32_t lit = hdLight(pixel, draw.intensity);
+                        if ((pixel >> 24) != 255) {
+                            lit = blendOver(lit | (pixel & 0xFF000000u), below);
+                        }
+                        result = m != 0 ? mixRgb(below, lit, std::min(m, 128) * 2) : lit;
+                    }
+                    dest[sy * layerPitch + sx] = result & 0xFFFFFF;
+                }
+            }
+            shadowRow[lx] = index;
+            validRow[lx] = 1;
+        }
+    }
+}
+
+void hdLayerTintChanged(HdLayer* layer, const unsigned char* buffer, int bufferPitch,
+    int x, int y, int width, int height, const unsigned char* before, const uint32_t* under, uint32_t tint, int alpha256)
+{
+    if (layer == nullptr || before == nullptr) {
+        return;
+    }
+
+    const int layerPitch = layer->width * kHdScale;
+    const int underPitch = width * kHdScale;
+    for (int row = std::max(-y, 0); row < height && y + row < layer->height; row++) {
+        int ly = y + row;
+        for (int column = std::max(-x, 0); column < width && x + column < layer->width; column++) {
+            int lx = x + column;
+            unsigned char index = buffer[static_cast<size_t>(ly) * bufferPitch + lx];
+            if (index == before[static_cast<size_t>(row) * width + column]) {
+                continue;
+            }
+
+            size_t offset = static_cast<size_t>(ly) * layer->width + lx;
+            const uint32_t* below = under != nullptr ? under + static_cast<size_t>(row) * kHdScale * underPitch + column * kHdScale : nullptr;
+            if (alpha256 <= 0 || below == nullptr || (below[0] >> 24) == 0 || hdIsCyclingIndex(index)) {
+                layer->valid[offset] = 0;
+                continue;
+            }
+
+            uint32_t* dest = layer->pixels.data() + static_cast<size_t>(ly) * kHdScale * layerPitch + lx * kHdScale;
+            for (int sy = 0; sy < kHdScale; sy++) {
+                for (int sx = 0; sx < kHdScale; sx++) {
+                    dest[sy * layerPitch + sx] = mixRgb(below[sy * underPitch + sx], tint, std::min(alpha256, 256));
+                }
+            }
+            layer->shadow[offset] = index;
+            layer->valid[offset] = 1;
+        }
+    }
+}
+
 void hdLayerInvalidateRect(HdLayer* layer, int x, int y, int width, int height)
 {
     if (layer == nullptr) {

@@ -565,6 +565,7 @@ namespace {
             int count = std::max(atoi(args[1].c_str()), 1);
             std::vector<double> totals;
             std::vector<double> tiles;
+            std::vector<double> objects;
             if (strcmp(devAutomationGetState(), "game") == 0) {
                 for (int index = 0; index < count; index++) {
                     TileRenderStats before;
@@ -575,6 +576,7 @@ namespace {
                     TileRenderStats after;
                     tileGetRenderStats(&after);
                     tiles.push_back(after.hdTilesMs - before.hdTilesMs);
+                    objects.push_back(after.hdObjectsMs - before.hdObjectsMs);
                 }
             }
             auto summary = [](std::vector<double> values) {
@@ -588,7 +590,7 @@ namespace {
                 return std::string(text);
             };
             std::ofstream out(outputPath(args[0], ".json"));
-            out << "{\"count\": " << totals.size() << ", \"refresh_ms\": " << summary(totals) << ", \"hd_tiles_ms\": " << summary(tiles) << "}\n";
+            out << "{\"count\": " << totals.size() << ", \"refresh_ms\": " << summary(totals) << ", \"hd_tiles_ms\": " << summary(tiles) << ", \"hd_objects_ms\": " << summary(objects) << "}\n";
             return true;
         }
 
@@ -596,13 +598,17 @@ namespace {
             // Phase 2.7 self-check of the iso window's HD floors and roofs
             // (see tileHdCheck): <name>.json with the counts, <name>.png
             // with the per-pixel classes (black legacy, grey HD tile, blue
-            // object, red object with HD, yellow stale, cyan legacy pixel
+            // legacy object, red HD on a critter or other legacy object,
+            // green HD wall/scenery/item, yellow stale, cyan legacy pixel
             // differs from a fresh redraw).
             if (args.empty()) {
                 fail(command, "missing name");
             }
             TileHdCheck check;
+            unsigned int cutOutsBefore = objectHdCutOutDraws();
             bool ok = tileHdCheck(&check);
+            // (tileHdCheck redraws the map three times.)
+            unsigned int cutOuts = (objectHdCutOutDraws() - cutOutsBefore) / 3;
             std::ofstream out(outputPath(args[0], ".json"));
             out << "{\"active\": " << (ok ? "true" : "false")
                 << ", \"pixels\": " << check.pixels
@@ -612,11 +618,16 @@ namespace {
                 << ", \"legacy_changed\": " << check.legacyChanged
                 << ", \"object_pixels\": " << check.objectPixels
                 << ", \"object_pixels_hd\": " << check.objectPixelsHd
+                << ", \"scenery_pixels\": " << check.sceneryPixels
+                << ", \"scenery_pixels_hd\": " << check.sceneryPixelsHd
+                << ", \"legacy_object_pixels\": " << check.legacyObjectPixels
+                << ", \"legacy_object_pixels_hd\": " << check.legacyObjectPixelsHd
                 << ", \"tile_pixels\": " << check.tilePixels
                 << ", \"tile_pixels_hd\": " << check.tilePixelsHd
-                << ", \"cycling_hd\": " << check.cyclingHd << "}\n";
+                << ", \"cycling_hd\": " << check.cyclingHd
+                << ", \"cut_out_draws\": " << cutOuts << "}\n";
             if (ok) {
-                static const unsigned char kColors[6][3] = { { 0, 0, 0 }, { 128, 128, 128 }, { 0, 0, 255 }, { 255, 0, 0 }, { 255, 255, 0 }, { 0, 255, 255 } };
+                static const unsigned char kColors[7][3] = { { 0, 0, 0 }, { 128, 128, 128 }, { 0, 0, 255 }, { 255, 0, 0 }, { 255, 255, 0 }, { 0, 255, 255 }, { 0, 200, 0 } };
                 int width = windowGetWidth(gIsoWindow);
                 int height = static_cast<int>(check.mask.size()) / std::max(width, 1);
                 std::vector<unsigned char> rgb(check.mask.size() * 3);
@@ -692,11 +703,11 @@ namespace {
                     " \"convert_total_ms\": %.4f,\n \"converted_pixels\": %llu,\n \"palette_total_ms\": %.4f,\n \"palette_updates\": %llu,\n"
                     " \"elapsed_ms\": %.1f,\n \"map_refreshes\": %llu,\n \"map_refresh_total_ms\": %.4f,\n \"map_refresh_max_ms\": %.4f,\n"
                     " \"scrolls\": %llu,\n \"scroll_total_ms\": %.4f,\n \"scroll_max_ms\": %.4f,\n \"hd_tiles_total_ms\": %.4f,\n"
-                    " \"uploaded_pixels\": %llu\n}\n",
+                    " \"hd_objects_total_ms\": %.4f,\n \"uploaded_pixels\": %llu\n}\n",
                     stats.framebufferWidth, stats.framebufferHeight, static_cast<unsigned long long>(stats.presents), stats.presentMs, stats.presentMaxMs,
                     stats.convertMs, static_cast<unsigned long long>(stats.convertedPixels), stats.paletteMs, static_cast<unsigned long long>(stats.paletteUpdates),
                     tileRenderClockMs() - gAutomation.perfStartMs, render.refreshes, render.refreshMs, render.refreshMaxMs,
-                    render.scrolls, render.scrollMs, render.scrollMaxMs, render.hdTilesMs,
+                    render.scrolls, render.scrollMs, render.scrollMaxMs, render.hdTilesMs, render.hdObjectsMs,
                     static_cast<unsigned long long>(stats.uploadedPixels));
                 fclose(stream);
                 debugPrint("AUTOMATION: wrote %s\n", path.c_str());

@@ -308,6 +308,10 @@ namespace {
         // the HD art cache may evict them. Dropped when the pack changes.
         std::unordered_map<int, std::shared_ptr<const HdImage>> images;
         unsigned int generation = 0;
+
+        // Colours under the roof cut-out (Phase 2.8), captured before the
+        // legacy blend.
+        std::vector<uint32_t> under;
     };
 
     TileHdState gTileHd;
@@ -386,10 +390,20 @@ void tileHdInvalidateRect(const Rect* rect)
     }
 }
 
-// While tileHdCheck redraws the map: the pixels objects cover.
+HdLayer* tileHdCurrentLayer(const unsigned char** basePalette8)
+{
+    if (gTileHd.layer == nullptr || gTileHd.layer != tileHdExistingLayer()) {
+        return nullptr;
+    }
+    *basePalette8 = gTileHd.basePalette8;
+    return gTileHd.layer;
+}
+
+// While tileHdCheck redraws the map: per pixel, 1 + the type of the last
+// object drawn there (0: none).
 static std::vector<unsigned char>* gTileHdCoverage = nullptr;
 
-void tileHdInvalidateMasked(const unsigned char* src, int srcPitch, int x, int y, int width, int height)
+void tileHdInvalidateMasked(const unsigned char* src, int srcPitch, int x, int y, int width, int height, int objectType)
 {
     HdLayer* layer = tileHdExistingLayer();
     if (layer != nullptr) {
@@ -400,7 +414,7 @@ void tileHdInvalidateMasked(const unsigned char* src, int srcPitch, int x, int y
         for (int row = std::max(y, 0); row < std::min(y + height, gTileWindowHeight); row++) {
             for (int column = std::max(x, 0); column < std::min(x + width, gTileWindowPitch); column++) {
                 if (src[(row - y) * srcPitch + (column - x)] != 0) {
-                    (*gTileHdCoverage)[static_cast<size_t>(row) * gTileWindowPitch + column] = 1;
+                    (*gTileHdCoverage)[static_cast<size_t>(row) * gTileWindowPitch + column] = static_cast<unsigned char>(objectType + 1);
                 }
             }
         }
@@ -431,6 +445,11 @@ void tileRenderStatsAdd(bool scroll, double ms)
         gTileRenderStats.refreshMs += ms;
         gTileRenderStats.refreshMaxMs = std::max(gTileRenderStats.refreshMaxMs, ms);
     }
+}
+
+void tileRenderStatsAddHdObjects(double ms)
+{
+    gTileRenderStats.hdObjectsMs += ms;
 }
 
 void tileGetRenderStats(TileRenderStats* stats)
@@ -530,11 +549,30 @@ bool tileHdCheck(TileHdCheck* check)
             check->staleTilePixels++;
         }
         if (index != gTileWindowBuffer[offset]) {
+            // Drawn by objects (or over them); the last object drawn at the
+            // pixel tells its kind: walls, scenery and items are HD, other
+            // objects (critters, misc, interface) stay legacy.
+            int covered = coverage[offset] - 1;
+            bool hdKind = covered == OBJ_TYPE_ITEM || covered == OBJ_TYPE_SCENERY || covered == OBJ_TYPE_WALL;
+            bool legacyKind = covered >= 0 && !hdKind;
             check->objectPixels++;
             check->mask[offset] = 2;
+            if (hdKind) {
+                check->sceneryPixels++;
+            } else if (legacyKind) {
+                check->legacyObjectPixels++;
+            }
             if (withObjectsShown[offset]) {
                 check->objectPixelsHd++;
-                check->mask[offset] = 3;
+                if (hdKind) {
+                    check->sceneryPixelsHd++;
+                    check->mask[offset] = 6;
+                } else {
+                    check->mask[offset] = 3;
+                    if (legacyKind) {
+                        check->legacyObjectPixelsHd++;
+                    }
+                }
             }
         } else if (index != 0 && !hdIsCyclingIndex(index) && coverage[offset] == 0) {
             // (Object pixels of the same index as the tile under them are
@@ -1700,6 +1738,11 @@ static void tileRenderRoof(const TileFrmId& frmId, int x, int y, Rect* rect, int
         CacheEntry* eggFrmHandle;
         Art* eggFrm = artLock(FrmId(gEgg), &eggFrmHandle);
         if (eggFrm != nullptr) {
+            // CE: the cut-out's part of the roof, for the HD side.
+            Rect hdEggRect;
+            const unsigned char* hdEggMask = nullptr;
+            int hdEggPitch = 0;
+
             int eggWidth = artGetWidth(eggFrm);
             int eggHeight = artGetHeight(eggFrm);
 
@@ -1765,6 +1808,14 @@ static void tileRenderRoof(const TileFrmId& frmId, int x, int y, Rect* rect, int
                 }
 
                 unsigned char* eggBuf = artGetFrameData(eggFrm);
+                if (gTileHd.layer != nullptr) {
+                    hdLayerCapture(gTileHd.layer, gTileWindowBuffer, gTileWindowPitch, intersectedRect.left, intersectedRect.top,
+                        intersectedRect.right - intersectedRect.left + 1, intersectedRect.bottom - intersectedRect.top + 1,
+                        gTileHd.basePalette8, &gTileHd.under);
+                    hdEggRect = intersectedRect;
+                    hdEggMask = eggBuf + eggWidth * (intersectedRect.top - eggRect.top) + (intersectedRect.left - eggRect.left);
+                    hdEggPitch = eggWidth;
+                }
                 _intensity_mask_buf_to_buf(tileFrmBuffer + tileWidth * (intersectedRect.top - tileRect.top) + (intersectedRect.left - tileRect.left),
                     intersectedRect.right - intersectedRect.left + 1,
                     intersectedRect.bottom - intersectedRect.top + 1,
@@ -1778,10 +1829,8 @@ static void tileRenderRoof(const TileFrmId& frmId, int x, int y, Rect* rect, int
                 _dark_trans_buf_to_buf(tileFrmBuffer, tileRect.right - tileRect.left + 1, tileRect.bottom - tileRect.top + 1, tileWidth, gTileWindowBuffer, tileRect.left, tileRect.top, gTileWindowPitch, light);
             }
 
-            artUnlock(eggFrmHandle);
-
-            // CE: the HD roof wherever the buffer holds the plain lit roof
-            // (under the cut-out the legacy blend stays).
+            // CE: the HD roof wherever the buffer holds the plain lit roof,
+            // then the cut-out blended in RGB over what is under it.
             if (gTileHd.layer != nullptr) {
                 const HdImage* image = tileHdImage(frmId, tileFrm);
                 if (image != nullptr) {
@@ -1805,9 +1854,30 @@ static void tileRenderRoof(const TileFrmId& frmId, int x, int y, Rect* rect, int
                     draw.expected = expected;
                     double start = tileRenderClockMs();
                     hdLayerDrawLit(gTileHd.layer, gTileWindowBuffer, gTileWindowPitch, draw, gTileHd.basePalette8);
+
+                    if (hdEggMask != nullptr) {
+                        HdBlendDraw blend;
+                        blend.frame = draw.frame;
+                        blend.framePitch = draw.framePitch;
+                        blend.image = image;
+                        blend.frameX = hdEggRect.left - x;
+                        blend.frameY = hdEggRect.top - y;
+                        blend.x = hdEggRect.left;
+                        blend.y = hdEggRect.top;
+                        blend.width = hdEggRect.right - hdEggRect.left + 1;
+                        blend.height = hdEggRect.bottom - hdEggRect.top + 1;
+                        blend.intensity = light;
+                        blend.under = gTileHd.under.data();
+                        blend.mode = HdBlendMode::Mask;
+                        blend.mask = hdEggMask;
+                        blend.maskPitch = hdEggPitch;
+                        hdLayerDrawBlended(gTileHd.layer, gTileWindowBuffer, gTileWindowPitch, blend);
+                    }
                     gTileRenderStats.hdTilesMs += tileRenderClockMs() - start;
                 }
             }
+
+            artUnlock(eggFrmHandle);
         }
     }
 

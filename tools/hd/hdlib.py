@@ -106,7 +106,11 @@ def fill_holes(rgb: np.ndarray, holes: np.ndarray, max_iter: int = 64) -> np.nda
         acc = np.zeros_like(out)
         cnt = np.zeros(out.shape[:2], dtype=np.float32)
         k = known.astype(np.float32)
-        padded = np.pad(out * k[..., None], ((1, 1), (1, 1), (0, 0)), mode="edge")
+        # Zero padding for the sums as for the counts: "edge" padding added
+        # border pixels to the sums without counting them, so fills next to
+        # an opaque border pixel grew without bound (garbage AI output for
+        # sprites whose art touches the frame edge).
+        padded = np.pad(out * k[..., None], ((1, 1), (1, 1), (0, 0)), mode="constant")
         padk = np.pad(k, 1, mode="constant")
         h, w = known.shape
         for dy in (0, 1, 2):
