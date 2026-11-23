@@ -421,7 +421,7 @@ static bool screenshotCapture(int* widthPtr, int* heightPtr)
 // exported colors match brightness-adjusted rendering.
 static unsigned char* screenshotPalette()
 {
-    return gSdlSurface != nullptr ? directDrawGetPalette() : _getSystemPalette();
+    return directDrawGetPalette();
 }
 
 void takeScreenshot()
@@ -445,14 +445,15 @@ bool screenshotSavePng(const char* path)
         return false;
     }
 
-    unsigned char* palette = screenshotPalette();
+    // The presenter's 8-bit palette, so the PNG matches what is on screen.
+    const unsigned char* palette = directDrawGetPalette8();
     size_t pixelCount = static_cast<size_t>(width) * height;
     std::vector<unsigned char> image(pixelCount * 3);
     for (size_t i = 0; i < pixelCount; i++) {
-        unsigned char* entry = palette + gScreenshotBuffer[i] * 3;
-        image[i * 3] = entry[0] << 2;
-        image[i * 3 + 1] = entry[1] << 2;
-        image[i * 3 + 2] = entry[2] << 2;
+        const unsigned char* entry = palette + gScreenshotBuffer[i] * 3;
+        image[i * 3] = entry[0];
+        image[i * 3 + 1] = entry[1];
+        image[i * 3 + 2] = entry[2];
     }
     internal_free(gScreenshotBuffer);
     gScreenshotBuffer = nullptr;

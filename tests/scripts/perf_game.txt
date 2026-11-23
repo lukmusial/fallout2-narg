@@ -1,0 +1,14 @@
+# Presenter timing on a live map (use with --dev-load-game=N): idle, then
+# scroll right and left by holding the cursor at the screen edges.
+until game 30000
+wait 1000
+perf reset
+wait 2000
+perf idle
+move 639 200
+wait 3000
+move 0 200
+wait 3000
+move 320 200
+perf scroll
+quit 0

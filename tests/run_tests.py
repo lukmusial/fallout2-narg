@@ -140,17 +140,64 @@ def make_slot_test(slot):
     return test
 
 
-TESTS = [test_main_menu] + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
+def test_menu_fades(update):
+    """The presenter's framebuffer matches the window composition, and fades run
+    at 8-bit precision (within one 6-bit step of the old presenter)."""
+    out, seconds = run_game("menu_fades", "menu_fades.txt")
+    for fb, shot in (("menu_fb", "menu"), ("load_fb", "load")):
+        if not np.array_equal(load_png(out / f"{fb}.png"), load_png(out / f"{shot}.png")):
+            raise TestFailure(f"{fb}.png differs from the window composition {shot}.png")
+    for name in ("fade_out_50", "fade_in_25", "fade_in_50"):
+        fade = load_png(out / f"{name}.png")
+        legacy = load_png(out / f"{name}_6bit.png")
+        if fade.shape != legacy.shape:
+            raise TestFailure(f"{name}: size {fade.shape} != {legacy.shape}")
+        worst = int(np.abs(fade - legacy).max())
+        if worst > 4:
+            raise TestFailure(f"{name}: differs from the 6-bit fade by {worst} levels")
+        if fade.max() < 16:
+            raise TestFailure(f"{name}: frame is black, fade not captured mid-way")
+    return f"framebuffer matches, fades captured ({seconds:.0f}s)"
+
+
+TESTS = [test_main_menu, test_menu_fades] + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
+
+
+PERF_CONFIGS = [
+    ("1280x960 scale 2", ["[screen]resolution_x=1280", "[screen]resolution_y=960", "[screen]scale=2"]),
+    ("3440x1440 scale 2", ["[screen]resolution_x=3440", "[screen]resolution_y=1440", "[screen]scale=2"]),
+]
+
+
+def run_perf(slot):
+    """Presenter timings (not a pass/fail test): idle map and edge scrolling."""
+    print(f"presenter timings, slot {slot} (avg/max ms per renderPresent; convert = index->RGB total ms)")
+    for label, overrides in PERF_CONFIGS:
+        reset_saves()
+        out, _ = run_game("perf_" + label.split()[0], "perf_game.txt", [f"--dev-load-game={slot}", *overrides])
+        for phase in ("idle", "scroll"):
+            stats = json.loads((out / f"{phase}.json").read_text())
+            fb = "x".join(str(v) for v in stats["framebuffer"])
+            print(f"  {label:20s} fb {fb:9s} {phase:6s} presents {stats['presents']:5d}  "
+                  f"present avg {stats['present_avg_ms']:6.3f} max {stats['present_max_ms']:7.3f}  "
+                  f"convert {stats['convert_total_ms']:8.1f} ms / {stats['converted_pixels'] / 1e6:6.1f} Mpx  "
+                  f"palette {stats['palette_total_ms']:7.1f} ms / {stats['palette_updates']} updates")
 
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--perf", type=int, metavar="SLOT", help="print presenter timings for a save slot and exit")
     parser.add_argument("--update-golden", action="store_true", help="overwrite golden files with this run's output")
     parser.add_argument("-k", dest="pattern", help="run only tests whose name contains this text")
     args = parser.parse_args()
 
     if not EXE.exists():
         sys.exit(f"game not built: {EXE}")
+
+    if args.perf:
+        run_perf(args.perf)
+        reset_saves()
+        return 0
 
     selected = [t for t in TESTS if not args.pattern or args.pattern in t.__name__]
     failures = 0

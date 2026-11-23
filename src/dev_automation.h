@@ -21,6 +21,14 @@ namespace fallout {
 //   click <x> <y> [right]     move and click
 //   shot <name>               write <out>/<name>.png
 //   dump <name>               write <out>/<name>.json with player, party, quest and world state
+//   fbshot <name>             write the presented framebuffer (output resolution)
+//   fadeshot <name> <pct> [in|out]
+//                             during the next palette fade (in: to a non-black
+//                             palette, out: to black) write the framebuffer at
+//                             <pct>% of the fade, plus <name>_6bit.png rendered
+//                             through the 6-bit palette as the old presenter did
+//   perf reset|<name>         reset presenter timing counters, or write them to
+//                             <out>/<name>.json and reset
 //   log <text>                write a line to the debug log
 //   quit [<code>]             exit the process
 
@@ -38,6 +46,9 @@ void devAutomationTick();
 
 // Replaces the hardware mouse state while a script is active.
 bool devAutomationOverrideMouse(MouseData* mouseData);
+
+// Called by palette fades for `fadeshot` captures.
+void devAutomationOnFadeStep(int step, int steps, bool toBlack);
 
 // Engine state marks matched by `until`.
 void devAutomationSetState(const char* state);

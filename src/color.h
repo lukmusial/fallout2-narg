@@ -80,6 +80,14 @@ extern Color intensityColorTable[COLOR_COUNT][COLOR_COUNT];
 extern Color colorMixMulTable[COLOR_COUNT][COLOR_COUNT];
 extern Color _colorTable[COLOR_PALETTE_SIZE_15BIT];
 
+// CE: expands a 6-bit VGA palette component to 8 bits by bit replication
+// (0 -> 0, 63 -> 255).
+inline unsigned char colorExpand6(unsigned char value)
+{
+    value &= 0x3F;
+    return static_cast<unsigned char>((value << 2) | (value >> 4));
+}
+
 Color _calculateColor(int intensity, Color color);
 int Color2RGB(Color c);
 void colorPaletteFadeBetween(unsigned char* oldPalette, unsigned char* newPalette, int steps);

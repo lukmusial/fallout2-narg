@@ -1,0 +1,17 @@
+# Palette fades: main menu -> load screen (fade out, fade in), then back.
+# Each fadeshot writes the framebuffer mid-fade (and a 6-bit reference).
+until mainmenu 20000
+wait 500
+fbshot menu_fb
+shot menu
+fadeshot fade_out_50 50 out
+fadeshot fade_in_25 25 in
+fadeshot fade_in_50 50 in
+key l
+wait 2500
+fbshot load_fb
+shot load
+key esc
+wait 2500
+fbshot menu_again_fb
+quit 0
