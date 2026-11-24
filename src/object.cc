@@ -5116,6 +5116,19 @@ static void objectHdWindRecord(Object* object, HdLayer* layer, const Rect& plant
     int oy;
     windOrigin(&ox, &oy);
     WindPlant& plant = gWindScene.plants[object];
+    if (!plant.base.empty() && (plant.originX != ox || plant.originY != oy)) {
+        // The map scrolled: what was recorded moved with the layer.
+        Rect moved = plant.rect;
+        moved.left += ox - plant.originX;
+        moved.right += ox - plant.originX;
+        moved.top += oy - plant.originY;
+        moved.bottom += oy - plant.originY;
+        if (moved.left == plantRect.left && moved.top == plantRect.top && moved.right == plantRect.right && moved.bottom == plantRect.bottom) {
+            plant.rect = moved;
+            plant.originX = ox;
+            plant.originY = oy;
+        }
+    }
     if (plant.fid != object->fid || plant.frame != object->frame || plant.rotation != object->rotation
         || plant.originX != ox || plant.originY != oy || plant.rect.left != plantRect.left || plant.rect.top != plantRect.top
         || plant.rect.right != plantRect.right || plant.rect.bottom != plantRect.bottom || plant.base.empty()) {

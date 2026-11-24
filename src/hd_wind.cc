@@ -202,6 +202,11 @@ namespace {
         if (!mapShown() || tileHdCurrentLayer(&basePalette8) == nullptr) {
             return;
         }
+        // While the map view pans or zooms the whole view is presented
+        // every frame anyway; the plants wait (a fraction of a second).
+        if (mapViewIsMoving()) {
+            return;
+        }
 
         auto start = std::chrono::steady_clock::now();
         if (gState.elevation != gElevation || gState.drawn.size() > 8192) {

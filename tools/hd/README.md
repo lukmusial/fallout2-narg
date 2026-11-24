@@ -362,11 +362,30 @@ per tile under slow gusts. The baked shadow moves with its rows.
   left (critters in front, roofs, text stay). Unknown plants (new on screen)
   get one ordinary redraw. The test checks that this equals a whole redraw
   pixel for pixel. If a tick costs much (a forest at 3440x1440 on a busy
-  machine) the ticks are spaced to keep it under about a fifth of the time.
+  machine) the ticks are spaced to keep it under about a fifth of the time;
+  while the map view pans or zooms the plants wait.
+
+Performance (Release, 3440x1440 at scale 2, hd_lights=1, smooth_scroll and
+zoom on; presents per second and work per frame from `perf`; the machine
+was running another agent's test suite meanwhile, so the numbers are noisy):
+
+| | wind off | wind on |
+|---|---|---|
+| Arroyo slot 3 (140 trees on screen), idle | 56.4/s, 5.3 ms | 55.5/s, 4.4 ms |
+| Arroyo slot 3, scrolling | 53.6/s, 5.3 ms | 40.8/s, 10.2 ms |
+| Arroyo slot 9 (5 plants), idle | 55.7/s, 2.5 ms | 56.1/s, 2.5 ms |
+| Arroyo slot 9, scrolling | 57.1/s, 1.8 ms | 57.8/s, 2.4 ms |
+
+A wind tick costs 0.5 ms with a few plants and about 12 ms (26 max) with
+140 trees, most of it in showing the recomposed rows (map view compose and
+present). The gunshot light alone (hd_lights=0) costs 0.5 ms per field
+update; with hd_lights=1 the frames of a shot reuse the field without shots
+(the Den at night: 33 presents in the 600 ms after a burst, field max 15 ms).
 
 Harness: `shoot <weapon pid> nearest|party <n> [secondary]`, `hdfx shot|wind
-on|off`, `hdfx dump`, `hdfx windtime <ms>|run`, `hdfx legacycheck`,
-`hdfx shotlight` (see `src/hd_dev_automation.h`). Review videos in
+on|off`, `hdfx dump`, `hdfx waitshot <n>`, `hdfx shotclock hold|run`,
+`hdfx windtime <ms>|run`, `hdfx legacycheck`, `hdfx shotlight` (see
+`src/hd_dev_automation.h`). Review videos in
 `docs/screens/phase2.15/`.
 
 ## Timings (Apple M5 Pro, 64 GB; per asset, warm)

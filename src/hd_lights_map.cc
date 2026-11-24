@@ -232,6 +232,8 @@ namespace {
         // Gunshot lights and muzzle flashes alive (Phase 2.15).
         std::vector<HdShotLight> shots;
         std::vector<HdLightFlash> flashes;
+        // The last field assembled, before the shots were added.
+        HdLightField base;
 
         HdLightsStats stats;
     };
@@ -937,9 +939,20 @@ bool hdLightsMapUpdate(const HdLightScreen& screen, HdLightField* field)
     // Animated art and critters walking in front of glowing pixels change
     // the emissive pixels without any of the above changing.
     bool stale = gState.effects != 0 && getTicksBetween(now, gState.assembledAt) >= 100;
-    if (!rebuild && !sizeChanged && !paletteChanged && critters.key == gState.critterKey && moving.key == gState.movingKey
-        && ambient == gState.ambient && !stale && !shooting && gState.hasContent) {
+    bool unchanged = !rebuild && !sizeChanged && !paletteChanged && critters.key == gState.critterKey && moving.key == gState.movingKey
+        && ambient == gState.ambient && !stale && gState.hasContent;
+    if (unchanged && !shooting) {
         return false;
+    }
+    if (unchanged && gState.base.width == field->width && gState.base.height == field->height) {
+        // Only the shots changed: the field without them plus the shots.
+        *field = gState.base;
+        for (const HdShotLight& shot : gState.shots) {
+            hdLightFieldAddShot(field, shot);
+        }
+        field->flashes = gState.flashes;
+        hdLightFieldFinish(field);
+        return true;
     }
 
     memcpy(gState.palette, cycling, sizeof(gState.palette));
@@ -1017,6 +1030,12 @@ bool hdLightsMapUpdate(const HdLightScreen& screen, HdLightField* field)
         gMovedLights.clear();
     }
 
+    // Kept for the frames where only the shots change.
+    if (shooting) {
+        gState.base = *field;
+    } else {
+        gState.base = HdLightField();
+    }
     for (const HdShotLight& shot : gState.shots) {
         hdLightFieldAddShot(field, shot);
     }
