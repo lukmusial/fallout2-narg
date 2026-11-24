@@ -26,6 +26,9 @@ Writes into the gitignored work dir (tools/hd/work by default):
   extract.py --areas --objects --inven --interface
                                 # + every other interface image and every
                                 #   skilldex card (Phase 2.14)
+  extract.py ... --all-tiles    # + every floor and roof tile of every map,
+                                #   and every other tile in tiles.lst (placed
+                                #   by scripts or unused) (Phase 2.17)
 """
 
 from __future__ import annotations
@@ -261,14 +264,15 @@ def read_map_grids(path: Path) -> dict[int, tuple[int, ...]]:
     return grids
 
 
-def area_tiles(arch: "Archives", raw: Path, tile_names: list[str]) -> tuple[list[str], set[str], set[str], dict]:
+def area_tiles(arch: "Archives", raw: Path, tile_names: list[str],
+               prefixes: tuple[str, ...] = AREA_PREFIXES) -> tuple[list[str], set[str], set[str], dict]:
     """(maps, floor tile paths, roof tile paths, per-map stats) for the maps
-    whose names start with AREA_PREFIXES."""
+    whose names start with `prefixes` ("" = every map)."""
     names = set()
     for _label, _dat, entries in arch.layers:
         names.update(p for p in entries if p.startswith("maps/") and p.endswith(".map"))
     names.update(p for p in arch.loose if p.startswith("maps/") and p.endswith(".map"))
-    maps = sorted(p for p in names if Path(p).stem.startswith(AREA_PREFIXES))
+    maps = sorted(p for p in names if Path(p).stem.startswith(prefixes))
     arch.fetch(maps, raw)
     floors: set[str] = set()
     roofs: set[str] = set()
@@ -290,6 +294,42 @@ def area_tiles(arch: "Archives", raw: Path, tile_names: list[str]) -> tuple[list
         roofs |= r
         stats[Path(m).stem] = {"elevations": sorted(grids), "floor": len(f), "roof": len(r)}
     return maps, floors, roofs, stats
+
+
+def tile_neighbours(raw: Path, maps: list[str], tile_names: list[str], share: float = 0.9) -> dict:
+    """{tile: {"dr,dc": neighbour}}: for each lattice offset up to 2 squares
+    away, the neighbour a tile has on at least `share` of its placements (on
+    its own layer, over every map and elevation), when that is another tile.
+    Such tiles are pieces of a larger picture; the enhancers pad them with
+    these neighbours instead of copies of themselves (hdlib.tile_context)."""
+    import numpy as np
+    counts: dict[int, dict[tuple[int, int], dict[int, int]]] = {}
+    placements: dict[int, int] = {}
+    offsets = [(dr, dc) for dr in range(-2, 3) for dc in range(-2, 3) if dr or dc]
+    for m in maps:
+        for grid in read_map_grids(raw / m).values():
+            words = np.array(grid, np.uint32).reshape(100, 100)
+            for layer, first in ((words & 0xFFF, 2), ((words >> 16) & 0xFFF, 2)):
+                padded = np.zeros((104, 104), np.uint32)
+                padded[2:102, 2:102] = layer
+                for r, c in zip(*np.nonzero(layer >= first)):
+                    t = int(layer[r, c])
+                    placements[t] = placements.get(t, 0) + 1
+                    per = counts.setdefault(t, {})
+                    for dr, dc in offsets:
+                        n = int(padded[r + 2 + dr, c + 2 + dc])
+                        slot = per.setdefault((dr, dc), {})
+                        slot[n] = slot.get(n, 0) + 1
+    out = {}
+    for t, per in counts.items():
+        fixed = {}
+        for (dr, dc), slot in per.items():
+            n, k = max(slot.items(), key=lambda kv: kv[1])
+            if n != t and n >= 2 and n < len(tile_names) and k >= share * placements[t]:
+                fixed[f"{dr},{dc}"] = tile_names[n].removesuffix(".frm")
+        if fixed and t < len(tile_names):
+            out[tile_names[t].removesuffix(".frm")] = fixed
+    return out
 
 
 def area_objects(arch: "Archives", raw: Path, maps: list[str]) -> tuple[set[str], dict]:
@@ -412,6 +452,8 @@ def main() -> None:
     ap.add_argument("--interface", action="store_true",
                     help="every other interface image (art/intrface, f2_res.dat, ce.dat) and every "
                          "skilldex card (art/skilldex); endgame and intro slides excepted")
+    ap.add_argument("--all-tiles", action="store_true",
+                    help="every floor and roof tile of every map, and every other tile in tiles.lst")
     args = ap.parse_args()
 
     raw = hdlib.WORK_DIR / "raw"
@@ -442,6 +484,24 @@ def main() -> None:
         for m, st in stats.items():
             print(f"{m:9} elevations {st['elevations']}  floor {st['floor']:4}  roof {st['roof']:4}")
         print(f"{len(maps)} maps: {len(area_floor | area_roof)} tiles ({len(area_floor)} floor, {len(area_roof)} roof)")
+
+    all_floor: set[str] = set()
+    all_roof: set[str] = set()
+    if args.all_tiles:
+        all_maps, all_floor, all_roof, all_stats = area_tiles(arch, raw, tile_names, ("",))
+        for m, st in all_stats.items():
+            print(f"{m:9} elevations {st['elevations']}  floor {st['floor']:4}  roof {st['roof']:4}")
+        # tiles no map places (scripts may, e.g. on map changes): drawn as floors
+        listed = {f"art/tiles/{n.removesuffix('.frm')}.frm" for n in tile_names[2:] if n}
+        unplaced = listed - all_floor - all_roof
+        print(f"{len(all_maps)} maps: {len(all_floor | all_roof)} tiles ({len(all_floor)} floor, "
+              f"{len(all_roof)} roof); {len(unplaced)} more in tiles.lst")
+        all_floor |= unplaced
+        neighbours = tile_neighbours(raw, all_maps, tile_names)
+        hdlib.NEIGHBOURS.write_text(json.dumps(neighbours, indent=0, sort_keys=True))
+        print(f"{len(neighbours)} tiles have fixed neighbours (pieces of larger pictures) -> {hdlib.NEIGHBOURS}")
+        area_floor |= all_floor
+        area_roof |= all_roof
 
     objects: set[str] = set()
     if args.objects:

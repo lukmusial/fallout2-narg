@@ -1218,6 +1218,103 @@ def test_hd_ground_variants(update):
     return f"{changed:.0%} of the frame shows variants, legacy identical ({seconds:.0f}s)"
 
 
+# --- Phase 2.17: floors and roofs of every town --------------------------------
+#
+# The saves are in Arroyo, Klamath and the Den; Stimpak's LOCATION screen
+# moves the party of slot 1 to another town (TRAVEL), then PLAY runs the game
+# there without saving. Every floor and roof tile is in the packs now: floor
+# pixels show pack art (2x2 output blocks with detail), not the legacy tile
+# doubled (flat blocks). Variants (hd_ground_variants) change the HD frame on
+# the town's ground and leave the 8-bit picture alone.
+
+HD_TOWN_MIN_FLOOR_DETAIL = 0.9    # HD floor/roof pixels whose 2x2 block is not flat
+HD_TOWN_MIN_VARIANT_CHANGE = 0.05  # of the frame, with variants on vs off
+# (town, letter keys in the LOCATION list, a tile whose variants the town shows)
+HD_TOWNS = [
+    ("newreno", "n", "road03"),
+    ("ncr", "nn", "curb01"),
+    ("vaultcity", "v", None),
+]
+
+HD_TOWN_SCRIPT = """until mainmenu 20000
+wait 300
+key s
+wait 1200
+key home
+key enter
+until stimpak 30000
+wait 500
+key l
+wait 800
+{keys}
+key +
+key +
+wait 300
+click 460 316
+wait 800
+key enter
+until stimpak 30000
+wait 1500
+key p
+until game 30000
+wait 2500
+dump state
+fbshot game
+legacyshot legacy
+hdcheck check
+quit 0
+"""
+
+
+def floor_detail(fb, out, name):
+    """Fraction of the 2x2 output blocks of HD floor/roof pixels (grey in the
+    hdcheck mask) that are not one flat colour."""
+    mask = np.all(np.asarray(Image.open(out / f"{name}.png").convert("RGB")) == (128, 128, 128), axis=2)
+    h, w = mask.shape
+    blocks = fb[:h * 2, :w * 2].reshape(h, 2, w, 2, 3)
+    detail = np.abs(blocks - blocks[:, :1, :, :1, :]).sum(axis=(1, 3, 4)) > 0
+    return float(detail[mask].mean()) if mask.any() else 0.0
+
+
+def make_hd_town_test(town, keys, variant_tile):
+    def test(update):
+        """A town outside the save games' areas: floors and roofs from the
+        pack (not doubled legacy pixels); its ground variants show in HD and
+        the 8-bit picture does not change."""
+        if not (RUN_DIR / "data/hd/ai/art/tiles/road03.png").exists():
+            raise TestSkipped("the packs lack the other towns' tiles (tools/hd: extract.py --all-tiles, "
+                              "enhance_*.py, install.py)")
+        script = run_dir() / "devout/tests" / f"hd_town_{town}.txt"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text(HD_TOWN_SCRIPT.format(keys="\n".join(f"key {k}" for k in keys)))
+        args = [*HD_ARGS, "[graphics]hd_pack=mixed"]
+        reset_saves()
+        off, seconds = run_game(f"hd_town_{town}_off", script, args + ["[graphics]hd_ground_variants=0"])
+        state = json.loads((off / "state.json").read_text())["world"]
+        if state["map_name"].lower().startswith(("ar", "kla", "den")):
+            raise TestFailure(f"{town}: the party did not travel ({state['map_name']})")
+        check, share, _ = hd_check(off, "check")
+        detail = floor_detail(load_png(off / "game.png"), off, "check")
+        if detail < HD_TOWN_MIN_FLOOR_DETAIL:
+            raise TestFailure(f"{town} ({state['map_name']}): only {detail:.0%} of HD floor blocks show "
+                              "detail: doubled legacy tiles, not pack art")
+        result = f"{state['map_name']}: floors/roofs {share:.0%} HD, {detail:.0%} with detail"
+        if variant_tile and (RUN_DIR / f"data/hd/ai/art/tiles/variants/{variant_tile}").is_dir():
+            reset_saves()
+            on, more = run_game(f"hd_town_{town}_on", script, args + ["[graphics]hd_ground_variants=1"])
+            seconds += more
+            if not np.array_equal(load_png(off / "legacy.png"), load_png(on / "legacy.png")):
+                raise TestFailure(f"{town}: the 8-bit picture changed with ground variants")
+            a, b = load_png(off / "game.png"), load_png(on / "game.png")
+            changed = float((np.abs(a - b).sum(axis=2) > 24).mean())
+            if changed < HD_TOWN_MIN_VARIANT_CHANGE:
+                raise TestFailure(f"{town}: only {changed:.1%} of the frame changed: variants not drawn")
+            result += f", variants change {changed:.0%} of the frame, legacy identical"
+        return f"{result} ({seconds:.0f}s)"
+    test.__name__ = f"test_hd_town_{town}"
+    return test
+
+
 def test_worldmap_scroll(update):
     """World map in HD (mixed pack, HD text): after scrolling, no HD pixels or
     HD text survive over unexplored (black) land; labels still show in HD;
@@ -1677,6 +1774,7 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
          + [test_hd_mixed_pack]
          + [make_hd_text_screens_test(style) for style in HD_TEXT_STYLES]
          + [test_hd_text_game, test_hd_lights, test_worldmap_scroll, test_hd_ground_variants]
+         + [make_hd_town_test(*town) for town in HD_TOWNS]
          + [make_hd_inventory_test(pack) for pack in HD_INVENTORY_PACKS]
          + [make_hd_static_test(pack) for pack in HD_STATIC_PACKS]
          + [make_hd_bar_test(pack) for pack in HD_BAR_PACKS]

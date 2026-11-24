@@ -197,6 +197,27 @@ class RealArt(unittest.TestCase):
             missing = sorted(a["key"] for a in assets if not hdlib.out_path(pack, a).exists())
             self.assertEqual(missing, [], pack)
 
+    def test_all_tiles_complete(self):
+        """Phase 2.17: every tile of tiles.lst (all maps, scripts) in both packs."""
+        tiles = [a for a in hdlib.load_manifest() if a["type"] == "tiles"]
+        if len(tiles) < 3000:
+            self.skipTest("run extract.py --all-tiles first")
+        for pack in PACKS:
+            missing = sorted(a["key"] for a in tiles if not hdlib.out_path(pack, a).exists())
+            self.assertEqual(missing, [], pack)
+
+    def test_picture_tiles_seams(self):
+        """Pieces of a larger picture are padded with their real neighbours:
+        the Gecko reactor shows no added seams (it did with self-padding)."""
+        if not hdlib.NEIGHBOURS.exists():
+            self.skipTest("run extract.py --all-tiles first")
+        context = hdlib.tile_context("geka020")
+        self.assertEqual(len(context), 24)
+        self.assertIn((-48, 12), context)        # map column +1: geka019
+        region = tilemap.map_region("geckpwpl", 0, 36, 34, 6)
+        m = tilemap.evaluate(region, "scripted", lambda i, p: enhance_scripted.enhance_indices(i, p))
+        self.assertLess(m["grad_excess"], 1.1, m)
+
     def test_tile_seams(self):
         regions = json.loads(hdlib.MANIFEST.read_text())["regions"]
         self.assertTrue(regions)

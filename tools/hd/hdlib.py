@@ -187,20 +187,53 @@ def lattice_offsets(radius: int = 1):
             yield (c * COL_STEP[0] + r * ROW_STEP[0], c * COL_STEP[1] + r * ROW_STEP[1])
 
 
-def wrap_pad_tile(indices: np.ndarray, pad: int) -> tuple[np.ndarray, np.ndarray]:
+def wrap_pad_tile(indices: np.ndarray, pad: int,
+                  context: dict[tuple[int, int], np.ndarray] | None = None) -> tuple[np.ndarray, np.ndarray]:
     """Surround a floor tile by copies of itself on the isometric lattice so
-    edge pixels see a plausible continuation.  Returns (padded indices,
-    'own' mask marking pixels that belong to the centre tile)."""
+    edge pixels see a plausible continuation; `context` gives the real
+    neighbour at some lattice offsets instead (tile_context).  Returns
+    (padded indices, 'own' mask marking pixels that belong to the centre
+    tile)."""
     h, w = indices.shape
     canvas = np.zeros((h + 2 * pad, w + 2 * pad), dtype=np.uint8)
     own = np.zeros_like(canvas, dtype=bool)
     opaque = indices != 0
     for dx, dy in lattice_offsets(2):
         x0, y0 = pad + dx, pad + dy
-        _blit(canvas, indices, opaque, x0, y0)
+        other = (context or {}).get((dx, dy))
+        if other is not None and other.shape == indices.shape:
+            _blit(canvas, other, other != 0, x0, y0)
+        else:
+            _blit(canvas, indices, opaque, x0, y0)
     _blit(canvas, indices, opaque, pad, pad)
     own[pad:pad + h, pad:pad + w] = opaque
     return canvas, own
+
+
+# Phase 2.17: tiles that are pieces of one larger picture (the Gecko reactor,
+# temple mosaics, building outlines) always have the same neighbours on the
+# maps. Padding them with copies of themselves gave thin seams across the
+# picture; extract.py --all-tiles writes, per tile, the neighbour each
+# lattice offset has on (nearly) every placement, and the enhancers pad with
+# those instead.
+NEIGHBOURS = WORK_DIR / "tile_neighbours.json"
+_neighbours: dict | None = None
+
+
+def tile_context(name: str) -> dict[tuple[int, int], np.ndarray]:
+    """{screen offset: neighbour indices} of a tile's fixed neighbours."""
+    global _neighbours
+    if _neighbours is None:
+        _neighbours = json.loads(NEIGHBOURS.read_text()) if NEIGHBOURS.exists() else {}
+    out = {}
+    for key, other in _neighbours.get(name, {}).items():
+        dr, dc = (int(v) for v in key.split(","))
+        # map column +1 is one lattice column to the left on screen
+        offset = (-dc * COL_STEP[0] + dr * ROW_STEP[0], -dc * COL_STEP[1] + dr * ROW_STEP[1])
+        path = SRC_DIR / "art" / "tiles" / f"{other}.png"
+        if path.exists():
+            out[offset] = load_indexed(path)[0]
+    return out
 
 
 def _blit(canvas, src, opaque, x0, y0):

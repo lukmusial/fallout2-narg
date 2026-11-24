@@ -554,3 +554,57 @@ hd_ground_variants=1` `src/tile.cc` draws, on each map square, the variant a
 hash of the square picks (the same one every time); tiles without variants
 are drawn as before. The 8-bit picture does not change.
 
+
+## Floors and roofs of every town (Phase 2.17)
+
+Until now only the tiles of the save games' areas were in the packs; every
+other map drew its floor and roof as the legacy tile doubled. `extract.py
+--all-tiles` adds every floor and roof tile of all 155 maps (master.dat <
+patch000.dat; 2580 tiles: 1286 floor, 1398 roof, some both) and the 501
+other tiles of `tiles.lst` that no map places (scripts may), with the same
+treatment as the approved area tiles (AI and scripted, padded on the floor
+lattice). 3081 tiles in all, 2138 new: scripted 51 s, AI 78 s (M5 Pro).
+
+```sh
+cd tools/hd
+.venv/bin/python extract.py --areas --objects --inven --interface --all-tiles
+.venv/bin/python enhance_scripted.py $(cat work/keys_2.17.txt)   # the new keys
+.venv/bin/python enhance_ai.py $(cat work/keys_2.17.txt)
+.venv/bin/python install.py
+.venv/bin/python tilemap.py --maps ncr1 vctycocl newr1 ...       # seams on a patch of each map
+python materials_sheet.py packs        # -> docs/screens/phase2.17/packs_*.png (scipy: the
+                                       #    SDXL venv, see "Ground variants")
+```
+
+`materials_sheet.py` draws real map regions (floor or roof layer) offline
+from the map grids with the `tilemap.py` layout, so any town can be checked
+without running the game.
+
+Observations (`docs/screens/phase2.17/packs_*.png`):
+
+- AI is the better pack for most of the new art too: plank roofs (Gecko,
+  Broken Hills), Vault City's concrete domes, Enclave grid plates, the
+  tanker's ship floor, metal plates of the Sierra depot, carpets.
+- Two roof families go to the scripted pack in the mixed manifest: Navarro's
+  corrugated metal (`vrof*`), where the AI turns parts into brick and the
+  tiles look patchy (the 2.7 problem with `ruf*`/`jrt*`), and New Reno's
+  fine-striped roofs (`salbr*`), where it smooths the stripes away.
+- Tiles that are pieces of one larger picture (the Gecko reactor `geka*`,
+  the military base's rock roof `mbrf*`, Navarro and Vault City buildings,
+  church roofs, ...) showed thin seams across the picture: each tile was
+  padded with copies of itself. `extract.py --all-tiles` now also writes
+  `work/tile_neighbours.json`: for each tile and lattice offset (up to two
+  squares), the neighbour it has on at least 90% of its placements on all
+  maps, if that is another tile (1957 tiles). The enhancers pad with those
+  real neighbours (`hdlib.tile_context`); the seams are gone. 1439 of the new
+  tiles have such neighbours (re-run: scripted 29 s, AI 47 s). The approved
+  area tiles were not re-run.
+- Seams (`tilemap.py`, a 6x6 patch per map with the most different tiles):
+  NCR, Vault City, New Reno, San Francisco, Broken Hills, Redding, Modoc,
+  Gecko, Navarro, military base, Sierra depot and Enclave are all within the
+  test limits: scripted seam_excess 0.0-4.4, grad_excess 1.00-1.09; AI
+  -0.2-3.0 and 0.98-1.24 (the Gecko reactor went from 1.6 to 1.0).
+
+`test_hd_town_*` (tests/run_tests.py) moves the party of slot 1 to New Reno,
+NCR and Vault City with Stimpak's TRAVEL and checks that the floor shows pack
+art there (2x2 output blocks with detail), not doubled legacy pixels.
