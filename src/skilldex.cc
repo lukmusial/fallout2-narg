@@ -11,6 +11,7 @@
 #include "game.h"
 #include "game_mouse.h"
 #include "game_sound.h"
+#include "hd_art.h"
 #include "geometry.h"
 #include "input.h"
 #include "interface.h"
@@ -264,6 +265,7 @@ static int skilldexWindowInit()
     memcpy(gSkilldexWindowBuffer,
         _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getData(),
         static_cast<size_t>(_skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth()) * _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getHeight());
+    hdArtDrawImage(gSkilldexWindow, _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND], 0, 0);
 
     fontSetCurrent(103);
 
@@ -303,6 +305,9 @@ static int skilldexWindowInit()
             336,
             gSkilldexWindowBuffer + _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth() * valueY + 110,
             _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth());
+        hdArtDrawImageOffset(gSkilldexWindow, _skilldexFrmImages[SKILLDEX_FRM_BIG_NUMBERS],
+            static_cast<int>(numbersFrmData - _skilldexFrmImages[SKILLDEX_FRM_BIG_NUMBERS].getData()) + 14 * hundreds, 14, 24,
+            _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth() * valueY + 110, _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth());
 
         int tens = (value % 100) / 10;
         blitBufferToBuffer(numbersFrmData + 14 * tens,
@@ -311,6 +316,9 @@ static int skilldexWindowInit()
             336,
             gSkilldexWindowBuffer + _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth() * valueY + 124,
             _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth());
+        hdArtDrawImageOffset(gSkilldexWindow, _skilldexFrmImages[SKILLDEX_FRM_BIG_NUMBERS],
+            static_cast<int>(numbersFrmData - _skilldexFrmImages[SKILLDEX_FRM_BIG_NUMBERS].getData()) + 14 * tens, 14, 24,
+            _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth() * valueY + 124, _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth());
 
         int ones = (value % 100) % 10;
         blitBufferToBuffer(numbersFrmData + 14 * ones,
@@ -319,6 +327,9 @@ static int skilldexWindowInit()
             336,
             gSkilldexWindowBuffer + _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth() * valueY + 138,
             _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth());
+        hdArtDrawImageOffset(gSkilldexWindow, _skilldexFrmImages[SKILLDEX_FRM_BIG_NUMBERS],
+            static_cast<int>(numbersFrmData - _skilldexFrmImages[SKILLDEX_FRM_BIG_NUMBERS].getData()) + 14 * ones, 14, 24,
+            _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth() * valueY + 138, _skilldexFrmImages[SKILLDEX_FRM_BACKGROUND].getWidth());
 
         valueY += 36;
     }
@@ -364,6 +375,8 @@ static int skilldexWindowInit()
             BUTTON_FLAG_TRANSPARENT);
         if (btn != -1) {
             buttonSetCallbacks(btn, _gsound_lrg_butt_press, _gsound_lrg_butt_release);
+            // CE: HD art of the plain button images (the labels stay legacy).
+            hdArtSetButtonArt(btn, &_skilldexFrmImages[SKILLDEX_FRM_BUTTON_OFF], &_skilldexFrmImages[SKILLDEX_FRM_BUTTON_ON]);
         }
 
         buttonY += 36;
@@ -392,6 +405,7 @@ static int skilldexWindowInit()
         BUTTON_FLAG_TRANSPARENT);
     if (cancelBtn != -1) {
         buttonSetCallbacks(cancelBtn, _gsound_red_butt_press, _gsound_red_butt_release);
+        hdArtSetButtonArt(cancelBtn, &_skilldexFrmImages[SKILLDEX_FRM_LITTLE_RED_BUTTON_UP], &_skilldexFrmImages[SKILLDEX_FRM_LITTLE_RED_BUTTON_DOWN]);
     }
 
     windowRefresh(gSkilldexWindow);

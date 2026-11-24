@@ -5250,6 +5250,7 @@ static int characterEditorDrawCardWithOptions(const SkillDexFrmId& frmId, const 
         frmImage.getWidth(),
         gCharacterEditorWindowBuffer + 640 * 309 + 484,
         640);
+    hdArtDrawImageOffset(gCharacterEditorWindow, frmImage, 0, frmImage.getWidth(), frmImage.getHeight(), 640 * 309 + 484, 640);
 
     int extraDescriptionWidth = 150;
     unsigned char* data = frmImage.getData();
@@ -6352,6 +6353,7 @@ static void perkDialogRefreshPerks()
         PERK_WINDOW_WIDTH,
         gPerkDialogWindowBuffer + 280,
         PERK_WINDOW_WIDTH);
+    hdArtDrawImageOffset(gPerkDialogWindow, _perkDialogBackgroundFrmImage, 280, 293, PERK_WINDOW_HEIGHT, 280, PERK_WINDOW_WIDTH);
 
     perkDialogDrawPerks();
 
@@ -6882,6 +6884,7 @@ static int perkDialogDrawPerks()
         PERK_WINDOW_WIDTH,
         gPerkDialogWindowBuffer + PERK_WINDOW_WIDTH * 43 + 45,
         PERK_WINDOW_WIDTH);
+    hdArtDrawImageOffset(gPerkDialogWindow, _perkDialogBackgroundFrmImage, PERK_WINDOW_WIDTH * 43 + 45, 192, 129, PERK_WINDOW_WIDTH * 43 + 45, PERK_WINDOW_WIDTH);
 
     fontSetCurrent(101);
 
@@ -6956,6 +6959,7 @@ static void perkDialogRefreshTraits()
         PERK_WINDOW_WIDTH,
         gPerkDialogWindowBuffer + 280,
         PERK_WINDOW_WIDTH);
+    hdArtDrawImageOffset(gPerkDialogWindow, _perkDialogBackgroundFrmImage, 280, 293, PERK_WINDOW_HEIGHT, 280, PERK_WINDOW_WIDTH);
 
     perkDialogDrawTraits(gPerkDialogOptionCount);
 
@@ -6998,6 +7002,7 @@ static bool perkDialogHandleMutatePerk()
             PERK_WINDOW_WIDTH,
             gPerkDialogWindowBuffer + PERK_WINDOW_WIDTH * 15 + 49,
             PERK_WINDOW_WIDTH);
+        hdArtDrawImageOffset(gPerkDialogWindow, _perkDialogBackgroundFrmImage, PERK_WINDOW_WIDTH * 14 + 49, 206, fontGetLineHeight() + 2, PERK_WINDOW_WIDTH * 15 + 49, PERK_WINDOW_WIDTH);
 
         // LOSE A TRAIT
         char* msg = getmsg(&gCharacterEditorMessageList, &gCharacterEditorMessageListItem, 154);
@@ -7044,6 +7049,7 @@ static bool perkDialogHandleMutatePerk()
             PERK_WINDOW_WIDTH,
             gPerkDialogWindowBuffer + PERK_WINDOW_WIDTH * 15 + 49,
             PERK_WINDOW_WIDTH);
+        hdArtDrawImageOffset(gPerkDialogWindow, _perkDialogBackgroundFrmImage, PERK_WINDOW_WIDTH * 14 + 49, 206, fontGetLineHeight() + 2, PERK_WINDOW_WIDTH * 15 + 49, PERK_WINDOW_WIDTH);
 
         // PICK A NEW TRAIT
         char* msg = getmsg(&gCharacterEditorMessageList, &gCharacterEditorMessageListItem, 153);
@@ -7093,6 +7099,7 @@ static void perkDialogRefreshSkills()
         PERK_WINDOW_WIDTH,
         gPerkDialogWindowBuffer + 280,
         PERK_WINDOW_WIDTH);
+    hdArtDrawImageOffset(gPerkDialogWindow, _perkDialogBackgroundFrmImage, 280, 293, PERK_WINDOW_HEIGHT, 280, PERK_WINDOW_WIDTH);
 
     perkDialogDrawSkills();
 
@@ -7116,6 +7123,7 @@ static bool perkDialogHandleTagPerk()
         573,
         gPerkDialogWindowBuffer + 573 * 15 + 49,
         573);
+    hdArtDrawImageOffset(gPerkDialogWindow, _perkDialogBackgroundFrmImage, 573 * 14 + 49, 206, fontGetLineHeight() + 2, 573 * 15 + 49, 573);
 
     // PICK A NEW TAG SKILL
     char* messageListItemText = getmsg(&gCharacterEditorMessageList, &gCharacterEditorMessageListItem, 155);
@@ -7153,6 +7161,7 @@ static void perkDialogDrawSkills()
         PERK_WINDOW_WIDTH,
         gPerkDialogWindowBuffer + PERK_WINDOW_WIDTH * 43 + 45,
         PERK_WINDOW_WIDTH);
+    hdArtDrawImageOffset(gPerkDialogWindow, _perkDialogBackgroundFrmImage, PERK_WINDOW_WIDTH * 43 + 45, 192, 129, PERK_WINDOW_WIDTH * 43 + 45, PERK_WINDOW_WIDTH);
 
     fontSetCurrent(101);
 
@@ -7193,6 +7202,7 @@ static int perkDialogDrawTraits(int a1)
         PERK_WINDOW_WIDTH,
         gPerkDialogWindowBuffer + PERK_WINDOW_WIDTH * 43 + 45,
         PERK_WINDOW_WIDTH);
+    hdArtDrawImageOffset(gPerkDialogWindow, _perkDialogBackgroundFrmImage, PERK_WINDOW_WIDTH * 43 + 45, 192, 129, PERK_WINDOW_WIDTH * 43 + 45, PERK_WINDOW_WIDTH);
 
     fontSetCurrent(101);
 
@@ -7270,6 +7280,7 @@ static int perkDialogDrawCard(const SkillDexFrmId& frmId, const char* name, cons
         frmImage.getWidth(),
         gPerkDialogWindowBuffer + PERK_WINDOW_WIDTH * 64 + 413,
         PERK_WINDOW_WIDTH);
+    hdArtDrawImageOffset(gPerkDialogWindow, frmImage, 0, frmImage.getWidth(), frmImage.getHeight(), PERK_WINDOW_WIDTH * 64 + 413, PERK_WINDOW_WIDTH);
 
     // Calculate width of transparent pixels on the left side of the image. This
     // space will be occupied by description (in addition to fixed width).
@@ -8103,6 +8114,7 @@ static void characterEditorStimpackEditPerks()
         blitBufferToBuffer(_perkDialogBackgroundFrmImage.getData() + PERK_WINDOW_WIDTH * PERK_WINDOW_LIST_Y + PERK_WINDOW_LIST_X,
             PERK_WINDOW_LIST_WIDTH, PERK_WINDOW_LIST_HEIGHT, PERK_WINDOW_WIDTH,
             gPerkDialogWindowBuffer + PERK_WINDOW_WIDTH * PERK_WINDOW_LIST_Y + PERK_WINDOW_LIST_X, PERK_WINDOW_WIDTH);
+        hdArtDrawImageOffset(gPerkDialogWindow, _perkDialogBackgroundFrmImage, PERK_WINDOW_WIDTH * PERK_WINDOW_LIST_Y + PERK_WINDOW_LIST_X, PERK_WINDOW_LIST_WIDTH, PERK_WINDOW_LIST_HEIGHT, PERK_WINDOW_WIDTH * PERK_WINDOW_LIST_Y + PERK_WINDOW_LIST_X, PERK_WINDOW_WIDTH);
 
         int y = PERK_WINDOW_LIST_Y;
         for (int index = topLine; index < std::min(count, topLine + kVisibleLines); index++) {
@@ -8127,6 +8139,7 @@ static void characterEditorStimpackEditPerks()
         // Card area (right half) comes back from the background before each card.
         blitBufferToBuffer(_perkDialogBackgroundFrmImage.getData() + 280, 293, PERK_WINDOW_HEIGHT, PERK_WINDOW_WIDTH,
             gPerkDialogWindowBuffer + 280, PERK_WINDOW_WIDTH);
+        hdArtDrawImageOffset(gPerkDialogWindow, _perkDialogBackgroundFrmImage, 280, 293, PERK_WINDOW_HEIGHT, 280, PERK_WINDOW_WIDTH);
         gPerkDialogCardDrawn = false;
 
         Perk perk = static_cast<Perk>(options[topLine + currentLine].value);
