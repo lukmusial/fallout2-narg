@@ -737,3 +737,32 @@ The wind (Phase 2.15) picks plants by name, so the new trees and bushes
 sway too. `test_hd_town_*` also check that walls, scenery and items in New
 Reno, NCR and Vault City show pack art (2x2 blocks with detail: 98-100%)
 and that the 8-bit picture equals the same view with `hd=0`.
+
+## Main menu palm (Phase 2.19)
+
+The high-resolution main menu background (`HR_MAINMENU.FRM`) has a palm
+tree whose original is a coarse 3D render: crumpled, blocky fronds that an
+upscale only sharpens. `palm_repaint.py` replaces just the palm of the AI
+pack's 2x image with a repaint by the local SDXL model (inpainting with a
+mask of the canopy and trunk; seed and strength fixed, option 2 of
+`docs/screens/phase2.19_palm/`). Run it after `install.py`:
+
+```sh
+cd tools/hd
+.venv/bin/python palm_repaint.py     # ~25 s
+```
+
+## Main menu palm (Phase 2.19)
+
+The high-resolution main menu background (`HR_MAINMENU.FRM`) has a palm
+tree whose original is a coarse 3D render: crumpled, blocky fronds that an
+upscale only sharpens. `palm_repaint.py` replaces just the palm of the AI
+pack's 2x image with a repaint by the local SDXL model (inpainting with a
+mask of the canopy and trunk; seed and strength fixed, option 2 of
+`docs/screens/phase2.19_palm/`). Run it after `install.py`:
+
+```sh
+cd tools/hd
+.venv/bin/python palm_repaint.py     # ~25 s
+```
+
