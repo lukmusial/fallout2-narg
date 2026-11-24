@@ -464,6 +464,131 @@ void hdLayerDrawLit(HdLayer* layer, const unsigned char* buffer, int bufferPitch
     }
 }
 
+void hdLayerDrawSwayed(HdLayer* layer, const unsigned char* buffer, int bufferPitch, const HdSwayDraw& draw)
+{
+    if (layer == nullptr || draw.frame == nullptr || draw.image == nullptr || draw.shifts == nullptr || draw.under == nullptr) {
+        return;
+    }
+    const HdImage& image = *draw.image;
+    if (image.width != draw.frameWidth * kHdScale || image.height != draw.frameHeight * kHdScale) {
+        return;
+    }
+
+    int left = std::max(draw.x, 0);
+    int top = std::max(draw.y, 0);
+    int right = std::min(draw.x + draw.width, layer->width);
+    int bottom = std::min(draw.y + draw.height, layer->height);
+    if (left >= right || top >= bottom) {
+        return;
+    }
+
+    const int layerPitch = layer->width * kHdScale;
+    const int underPitch = draw.width * kHdScale;
+    const int imageWidth = image.width;
+    const int imageHeight = image.height;
+    const int originX = draw.frameLeft * kHdScale;
+    const int originY = draw.frameTop * kHdScale;
+
+    for (int ly = top; ly < bottom; ly++) {
+        const unsigned char* bufferRow = buffer + static_cast<size_t>(ly) * bufferPitch;
+        uint32_t* layerRow = layer->pixels.data() + static_cast<size_t>(ly) * kHdScale * layerPitch;
+        unsigned char* validRow = layer->valid.data() + static_cast<size_t>(ly) * layer->width;
+        unsigned char* shadowRow = layer->shadow.data() + static_cast<size_t>(ly) * layer->width;
+        int fy = ly - draw.frameTop;
+        const unsigned char* frameRow = fy >= 0 && fy < draw.frameHeight ? draw.frame + static_cast<size_t>(fy) * draw.frameWidth : nullptr;
+
+        for (int lx = left; lx < right; lx++) {
+            int fx = lx - draw.frameLeft;
+            bool legacyCovers = frameRow != nullptr && fx >= 0 && fx < draw.frameWidth && frameRow[fx] != 0;
+
+            uint32_t out[kHdScale * kHdScale];
+            bool covered = false;
+            bool missing = false;
+            for (int sy = 0; sy < kHdScale; sy++) {
+                int oy = ly * kHdScale + sy;
+                int row = oy - originY;
+                const uint32_t* underRow = draw.under + static_cast<size_t>(oy - draw.y * kHdScale) * underPitch;
+                for (int sx = 0; sx < kHdScale; sx++) {
+                    int ox = lx * kHdScale + sx;
+                    uint32_t under = underRow[ox - draw.x * kHdScale];
+                    uint32_t pixel = 0;
+                    if (row >= 0 && row < imageHeight) {
+                        int column = ox - originX - draw.shifts[row];
+                        if (column >= 0 && column < imageWidth) {
+                            pixel = image.pixels[static_cast<size_t>(row) * imageWidth + column];
+                        }
+                    }
+                    uint32_t alpha = pixel >> 24;
+                    if (alpha != 0) {
+                        covered = true;
+                    }
+                    if (alpha == 255) {
+                        out[sy * kHdScale + sx] = hdLight(pixel, draw.intensity);
+                    } else {
+                        if ((under >> 24) == 0) {
+                            missing = true;
+                        }
+                        uint32_t lit = hdLight(pixel, draw.intensity) | (pixel & 0xFF000000u);
+                        out[sy * kHdScale + sx] = alpha != 0 ? blendOver(lit, under | 0xFF000000u) : (under & 0xFFFFFF);
+                    }
+                }
+            }
+
+            if (!covered && !legacyCovers) {
+                continue;
+            }
+            unsigned char index = bufferRow[lx];
+            if (hdIsCyclingIndex(index) || missing) {
+                validRow[lx] = 0;
+                continue;
+            }
+            uint32_t* dest = layerRow + lx * kHdScale;
+            dest[0] = out[0] & 0xFFFFFF;
+            dest[1] = out[1] & 0xFFFFFF;
+            dest[layerPitch] = out[2] & 0xFFFFFF;
+            dest[layerPitch + 1] = out[3] & 0xFFFFFF;
+            shadowRow[lx] = index;
+            validRow[lx] = 1;
+        }
+    }
+}
+
+void hdSwayComposite(const HdSwayDraw& draw, uint32_t* work)
+{
+    if (draw.image == nullptr || draw.shifts == nullptr || work == nullptr) {
+        return;
+    }
+    const HdImage& image = *draw.image;
+    if (image.width != draw.frameWidth * kHdScale || image.height != draw.frameHeight * kHdScale) {
+        return;
+    }
+    const int workPitch = draw.width * kHdScale;
+    const int originX = draw.frameLeft * kHdScale;
+    const int originY = draw.frameTop * kHdScale;
+    int rowStart = std::max({ originY, draw.y * kHdScale, draw.clipTop * kHdScale });
+    int rowEnd = std::min({ originY + image.height, (draw.y + draw.height) * kHdScale, draw.clipBottom * kHdScale });
+    const int clipLeft = std::max(draw.x, draw.clipLeft) * kHdScale;
+    const int clipRight = std::min(draw.x + draw.width, draw.clipRight) * kHdScale;
+    for (int oy = rowStart; oy < rowEnd; oy++) {
+        int row = oy - originY;
+        const uint32_t* imageRow = image.pixels.data() + static_cast<size_t>(row) * image.width;
+        uint32_t* workRow = work + static_cast<size_t>(oy - draw.y * kHdScale) * workPitch;
+        int shift = draw.shifts[row];
+        int columnStart = std::max(originX + shift, clipLeft);
+        int columnEnd = std::min(originX + shift + image.width, clipRight);
+        for (int ox = columnStart; ox < columnEnd; ox++) {
+            uint32_t pixel = imageRow[ox - originX - shift];
+            uint32_t alpha = pixel >> 24;
+            if (alpha == 0) {
+                continue;
+            }
+            uint32_t& dest = workRow[ox - draw.x * kHdScale];
+            uint32_t lit = hdLight(pixel, draw.intensity);
+            dest = (alpha == 255 ? lit : blendOver(lit | (pixel & 0xFF000000u), dest)) | 0xFF000000u;
+        }
+    }
+}
+
 void hdLayerCapture(const HdLayer* layer, const unsigned char* buffer, int bufferPitch,
     int x, int y, int width, int height, const unsigned char* basePalette8, std::vector<uint32_t>* under)
 {

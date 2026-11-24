@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <algorithm>
+#include <chrono>
 #include <limits>
 #include <memory>
 #include <unordered_map>
@@ -22,6 +23,7 @@
 #include "game_mouse.h"
 #include "hd_art.h"
 #include "hd_layer.h"
+#include "hd_wind.h"
 #include "item.h"
 #include "light.h"
 #include "map.h"
@@ -35,6 +37,7 @@
 #include "svga.h"
 #include "text_object.h"
 #include "tile.h"
+#include "window_manager.h"
 #include "worldmap.h"
 
 namespace fallout {
@@ -3872,6 +3875,9 @@ static void objectDeallocate(Object** objectPtr)
         return;
     }
 
+    // CE: the HD wind keeps plant pointers (hd_wind.h).
+    objectHdWindForget(*objectPtr);
+    hdWindForget(*objectPtr);
     internal_free(*objectPtr);
 
     *objectPtr = nullptr;
@@ -4904,6 +4910,27 @@ struct ObjectHdDraw {
             rect.right - rect.left + 1, rect.bottom - rect.top + 1, basePalette8, &gObjectHd.under);
     }
 
+    // A swaying plant (hd_wind.h): the frame's HD image with every output
+    // row shifted, over `rect` (captured before, see ObjectHdSway).
+    void drawSwayed(const Rect& rect, const std::vector<int>& shifts, int frameHeight, int light) const
+    {
+        HdSwayDraw draw;
+        draw.frame = frame;
+        draw.frameWidth = framePitch;
+        draw.frameHeight = frameHeight;
+        draw.image = image;
+        draw.frameLeft = sx;
+        draw.frameTop = sy;
+        draw.shifts = shifts.data();
+        draw.intensity = light;
+        draw.x = rect.left;
+        draw.y = rect.top;
+        draw.width = rect.right - rect.left + 1;
+        draw.height = rect.bottom - rect.top + 1;
+        draw.under = gObjectHd.under.data();
+        hdLayerDrawSwayed(layer, gObjectsWindowBuffer, gObjectsWindowPitch, draw);
+    }
+
     // Blended draw over `rect` (captured before).
     void drawBlended(const Rect& rect, HdBlendDraw& draw) const
     {
@@ -4920,6 +4947,478 @@ struct ObjectHdDraw {
         hdLayerDrawBlended(layer, gObjectsWindowBuffer, gObjectsWindowPitch, draw);
     }
 };
+
+// CE: wind (Phase 2.15, hd_wind.h). A swaying plant recomposes, in HD, the
+// part of the redrawn rectangle its frame covers widened by the sway margin.
+struct ObjectHdSway {
+    bool active = false;
+    // The frame widened by the margin (window coordinates), and its part
+    // being redrawn.
+    Rect plantRect;
+    Rect rect;
+    std::vector<int> shifts;
+};
+
+static void objectHdSwayBegin(Object* object, const Rect& frameRect, const Rect* rect, int frameHeight, ObjectHdSway* sway)
+{
+    int margin = 0;
+    if (!hdWindSway(object, frameHeight, &sway->shifts, &margin)) {
+        return;
+    }
+    Rect widened = frameRect;
+    widened.left -= margin;
+    widened.right += margin;
+    sway->plantRect = widened;
+    if (rectIntersection(&widened, rect, &widened) != 0 || rectIntersection(&widened, &gObjectsWindowRect, &widened) != 0) {
+        return;
+    }
+    sway->rect = widened;
+    sway->active = true;
+}
+
+// CE: the wind scene (Phase 2.15). Between whole redraws, the ticker moves
+// the plants by recomposing only the HD layer (no legacy redraw, so the
+// 8-bit buffer cannot change), painting the plants over what was under them
+// in the engine's order (tile order). What each pixel needs is kept from the
+// plants' last draws:
+// - `base`: the colours under the first plant (in drawing order) that covers
+//   the pixel, i.e. the ground and everything drawn before any plant there;
+// - `frozen`: something that is not a plant was drawn between two plants at
+//   the pixel (a critter between two trees); the pixel then waits for the
+//   next real redraw;
+// - `final`: a hash of the block the last plant covering the pixel left in
+//   the layer. A recomposed pixel is written only where the layer still
+//   shows exactly that (with the buffer's index as shadow), so anything drawn
+//   over the plants since (critters in front, roofs, text, the cut-out)
+//   stays.
+namespace {
+
+    struct WindPlant {
+        int fid = 0;
+        int frame = 0;
+        int rotation = 0;
+        int tile = -1;
+        int light = 0x10000;
+        // Widened frame rectangle (window coordinates at originX/Y).
+        Rect rect = {};
+        int frameLeft = 0;
+        int frameTop = 0;
+        int frameWidth = 0;
+        int frameHeight = 0;
+        int originX = 0;
+        int originY = 0;
+        unsigned int pass = 0;
+        std::vector<uint32_t> base;
+        std::vector<uint32_t> final;
+        std::vector<unsigned char> frozen;
+    };
+
+    struct WindScene {
+        HdLayer* layer = nullptr;
+        int elevation = -1;
+        unsigned int pass = 1;
+        std::unordered_map<Object*, WindPlant> plants;
+        // Plants drawn in the current pass, in drawing order.
+        std::vector<Object*> passOrder;
+        std::vector<uint32_t> work;
+        std::vector<int> shifts;
+        std::vector<uint32_t> prevFinal;
+        std::vector<unsigned char> hasPrev;
+    };
+
+    WindScene gWindScene;
+
+    int rectWidth(const Rect& rect) { return rect.right - rect.left + 1; }
+    int rectHeight(const Rect& rect) { return rect.bottom - rect.top + 1; }
+
+    void windOrigin(int* x, int* y)
+    {
+        tileToScreenXY(0, x, y);
+    }
+
+    // Hash of a 2x2 block of colours (never 0).
+    inline uint32_t blockHash(const uint32_t* block, int pitch)
+    {
+        uint32_t hash = 2166136261u;
+        const uint32_t values[4] = { block[0] & 0xFFFFFF, block[1] & 0xFFFFFF, block[pitch] & 0xFFFFFF, block[pitch + 1] & 0xFFFFFF };
+        for (uint32_t value : values) {
+            hash = (hash ^ value) * 16777619u;
+        }
+        return hash | 1u;
+    }
+
+    // The hash of the layer's block at (x, y) if the layer shows it there
+    // (0 otherwise).
+    inline uint32_t layerBlockHash(const HdLayer* layer, const unsigned char* buffer, int bufferPitch, int x, int y)
+    {
+        size_t offset = static_cast<size_t>(y) * layer->width + x;
+        if (layer->valid[offset] == 0 || layer->shadow[offset] != buffer[static_cast<size_t>(y) * bufferPitch + x]) {
+            return 0;
+        }
+        const int pitch = layer->width * kHdScale;
+        return blockHash(layer->pixels.data() + static_cast<size_t>(y) * kHdScale * pitch + x * kHdScale, pitch);
+    }
+
+    // A plant's rectangle as it is now (the map may have scrolled since).
+    bool windPlantRectNow(const WindPlant& plant, Rect* rect, int* dx, int* dy)
+    {
+        int ox;
+        int oy;
+        windOrigin(&ox, &oy);
+        *dx = ox - plant.originX;
+        *dy = oy - plant.originY;
+        rect->left = plant.rect.left + *dx;
+        rect->right = plant.rect.right + *dx;
+        rect->top = plant.rect.top + *dy;
+        rect->bottom = plant.rect.bottom + *dy;
+        return true;
+    }
+
+} // namespace
+
+static double gWindShowMs = 0.0;
+double objectHdWindShowMs()
+{
+    return gWindShowMs;
+}
+
+void objectHdWindPassBegin()
+{
+    gWindScene.pass++;
+    gWindScene.passOrder.clear();
+}
+
+void objectHdWindClear()
+{
+    gWindScene.plants.clear();
+    gWindScene.passOrder.clear();
+    gWindScene.layer = nullptr;
+}
+
+void objectHdWindForget(Object* object)
+{
+    gWindScene.plants.erase(object);
+    gWindScene.passOrder.erase(std::remove(gWindScene.passOrder.begin(), gWindScene.passOrder.end(), object), gWindScene.passOrder.end());
+}
+
+// After a swaying plant's draw of `drawn` (part of `plantRect`): records what
+// the scene needs; `under` is the capture of `drawn` before the draw.
+static void objectHdWindRecord(Object* object, HdLayer* layer, const Rect& plantRect, const Rect& drawn, const uint32_t* under,
+    int frameLeft, int frameTop, int frameWidth, int frameHeight, int light)
+{
+    if (gWindScene.layer != layer || gWindScene.elevation != gElevation) {
+        objectHdWindClear();
+        gWindScene.layer = layer;
+        gWindScene.elevation = gElevation;
+    }
+
+    int ox;
+    int oy;
+    windOrigin(&ox, &oy);
+    WindPlant& plant = gWindScene.plants[object];
+    if (!plant.base.empty() && (plant.originX != ox || plant.originY != oy)) {
+        // The map scrolled: what was recorded moved with the layer.
+        Rect moved = plant.rect;
+        moved.left += ox - plant.originX;
+        moved.right += ox - plant.originX;
+        moved.top += oy - plant.originY;
+        moved.bottom += oy - plant.originY;
+        if (moved.left == plantRect.left && moved.top == plantRect.top && moved.right == plantRect.right && moved.bottom == plantRect.bottom) {
+            plant.rect = moved;
+            plant.originX = ox;
+            plant.originY = oy;
+        }
+    }
+    if (plant.fid != object->fid || plant.frame != object->frame || plant.rotation != object->rotation
+        || plant.originX != ox || plant.originY != oy || plant.rect.left != plantRect.left || plant.rect.top != plantRect.top
+        || plant.rect.right != plantRect.right || plant.rect.bottom != plantRect.bottom || plant.base.empty()) {
+        // New, moved or scrolled: start over (pixels not drawn now stay
+        // unknown and frozen until a redraw covers them).
+        plant.fid = object->fid;
+        plant.frame = object->frame;
+        plant.rotation = object->rotation;
+        plant.rect = plantRect;
+        plant.originX = ox;
+        plant.originY = oy;
+        size_t pixels = static_cast<size_t>(rectWidth(plantRect)) * rectHeight(plantRect);
+        plant.base.assign(pixels * kHdScale * kHdScale, 0);
+        plant.final.assign(pixels, 0);
+        plant.frozen.assign(pixels, 1);
+    }
+    plant.tile = object->tile;
+    plant.light = light;
+    plant.frameLeft = frameLeft;
+    plant.frameTop = frameTop;
+    plant.frameWidth = frameWidth;
+    plant.frameHeight = frameHeight;
+
+    // What the plants drawn before it in this pass left at its pixels.
+    const int width = rectWidth(drawn);
+    const int height = rectHeight(drawn);
+    gWindScene.prevFinal.assign(static_cast<size_t>(width) * height, 0);
+    gWindScene.hasPrev.assign(static_cast<size_t>(width) * height, 0);
+    if (plant.pass == gWindScene.pass) {
+        // Drawn twice in one pass (an outline): what it drew before counts
+        // as the plant itself.
+        gWindScene.passOrder.erase(std::remove(gWindScene.passOrder.begin(), gWindScene.passOrder.end(), object), gWindScene.passOrder.end());
+    }
+    for (Object* other : gWindScene.passOrder) {
+        auto found = gWindScene.plants.find(other);
+        if (found == gWindScene.plants.end()) {
+            continue;
+        }
+        const WindPlant& earlier = found->second;
+        Rect overlap;
+        if (rectIntersection(&earlier.rect, &drawn, &overlap) != 0) {
+            continue;
+        }
+        for (int y = overlap.top; y <= overlap.bottom; y++) {
+            for (int x = overlap.left; x <= overlap.right; x++) {
+                size_t index = static_cast<size_t>(y - drawn.top) * width + (x - drawn.left);
+                gWindScene.hasPrev[index] = 1;
+                gWindScene.prevFinal[index] = earlier.final[static_cast<size_t>(y - earlier.rect.top) * rectWidth(earlier.rect) + (x - earlier.rect.left)];
+            }
+        }
+    }
+    plant.pass = gWindScene.pass;
+    gWindScene.passOrder.push_back(object);
+
+    const int plantWidth = rectWidth(plant.rect);
+    const int underPitch = width * kHdScale;
+    const unsigned char* buffer = gObjectsWindowBuffer;
+    for (int y = drawn.top; y <= drawn.bottom; y++) {
+        for (int x = drawn.left; x <= drawn.right; x++) {
+            size_t local = static_cast<size_t>(y - drawn.top) * width + (x - drawn.left);
+            size_t index = static_cast<size_t>(y - plant.rect.top) * plantWidth + (x - plant.rect.left);
+            const uint32_t* block = under + static_cast<size_t>(y - drawn.top) * kHdScale * underPitch + (x - drawn.left) * kHdScale;
+            bool known = (block[0] >> 24) != 0 && (block[1] >> 24) != 0 && (block[underPitch] >> 24) != 0 && (block[underPitch + 1] >> 24) != 0;
+            if (gWindScene.hasPrev[local] == 0) {
+                // The first plant here: what is under it is the base.
+                uint32_t* base = plant.base.data() + (static_cast<size_t>(y - plant.rect.top) * kHdScale) * plantWidth * kHdScale + (x - plant.rect.left) * kHdScale;
+                base[0] = block[0];
+                base[1] = block[1];
+                base[plantWidth * kHdScale] = block[underPitch];
+                base[plantWidth * kHdScale + 1] = block[underPitch + 1];
+                plant.frozen[index] = known ? 0 : 1;
+            } else {
+                // Under a later plant: only what the earlier plant left.
+                plant.frozen[index] = known && gWindScene.prevFinal[local] != 0 && blockHash(block, underPitch) == gWindScene.prevFinal[local] ? 0 : 1;
+            }
+            plant.final[index] = layerBlockHash(layer, buffer, gObjectsWindowPitch, x, y);
+        }
+    }
+}
+
+int objectHdWindRecompose(Object* const* objects, const Rect* rects, int count, unsigned char* done)
+{
+    const unsigned char* basePalette8 = nullptr;
+    HdLayer* layer = tileHdCurrentLayer(&basePalette8);
+    std::fill(done, done + count, 0);
+    if (layer == nullptr || layer != gWindScene.layer || gWindScene.elevation != gElevation) {
+        return 0;
+    }
+    const unsigned char* buffer = gObjectsWindowBuffer;
+    const int bufferPitch = gObjectsWindowPitch;
+    int recomposed = 0;
+
+    // Plants of the scene on screen, in drawing order (tile order).
+    struct Entry {
+        Object* object;
+        WindPlant* plant;
+        Rect rect;
+        int dx;
+        int dy;
+    };
+    std::vector<Entry> entries;
+    entries.reserve(gWindScene.plants.size());
+    for (auto& item : gWindScene.plants) {
+        Entry entry = { item.first, &item.second, {}, 0, 0 };
+        windPlantRectNow(item.second, &entry.rect, &entry.dx, &entry.dy);
+        Rect visible;
+        if (rectIntersection(&entry.rect, &gObjectsWindowRect, &visible) != 0) {
+            continue;
+        }
+        entries.push_back(entry);
+    }
+    std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+        return a.plant->tile != b.plant->tile ? a.plant->tile < b.plant->tile : a.object < b.object;
+    });
+
+    // The rectangles to recompose: the moved plants', merged where they
+    // overlap (a forest is recomposed once, not once per tree).
+    std::vector<Rect> regions;
+    std::vector<std::vector<int>> members;
+    std::vector<Rect> clipped(count);
+    for (int index = 0; index < count; index++) {
+        auto self = std::find_if(entries.begin(), entries.end(), [&](const Entry& entry) { return entry.object == objects[index]; });
+        Rect rect;
+        if (self == entries.end() || rectIntersection(&rects[index], &gObjectsWindowRect, &rect) != 0) {
+            continue;
+        }
+        clipped[index] = rect;
+        std::vector<int> group = { index };
+        bool merged = true;
+        while (merged) {
+            merged = false;
+            for (size_t other = 0; other < regions.size(); other++) {
+                Rect overlap;
+                if (rectIntersection(&regions[other], &rect, &overlap) == 0) {
+                    rectUnion(&rect, &regions[other], &rect);
+                    group.insert(group.end(), members[other].begin(), members[other].end());
+                    regions.erase(regions.begin() + other);
+                    members.erase(members.begin() + other);
+                    merged = true;
+                    break;
+                }
+            }
+        }
+        regions.push_back(rect);
+        members.push_back(std::move(group));
+    }
+
+    for (size_t regionIndex = 0; regionIndex < regions.size(); regionIndex++) {
+        Rect region = regions[regionIndex];
+        const int width = rectWidth(region);
+        const int height = rectHeight(region);
+        const int workPitch = width * kHdScale;
+        gWindScene.work.assign(static_cast<size_t>(workPitch) * height * kHdScale, 0);
+        // Per pixel: 4 = to recompose (in a moved plant's rows), 1 =
+        // initialised from a base, 2 = frozen; and the last plant.
+        std::vector<unsigned char> state(static_cast<size_t>(width) * height, 0);
+        std::vector<const Entry*> last(static_cast<size_t>(width) * height, nullptr);
+        const std::vector<int>& group = members[regionIndex];
+        for (int index : group) {
+            const Rect& rect = clipped[index];
+            for (int y = rect.top; y <= rect.bottom; y++) {
+                std::fill(state.begin() + static_cast<size_t>(y - region.top) * width + (rect.left - region.left),
+                    state.begin() + static_cast<size_t>(y - region.top) * width + (rect.right - region.left) + 1, 4);
+            }
+        }
+
+        for (const Entry& entry : entries) {
+            // Its part in the rectangles to recompose.
+            Rect overlap = {};
+            bool hit = false;
+            for (int index : group) {
+                Rect part;
+                if (rectIntersection(&entry.rect, &clipped[index], &part) == 0) {
+                    if (!hit) {
+                        overlap = part;
+                        hit = true;
+                    } else {
+                        rectUnion(&overlap, &part, &overlap);
+                    }
+                }
+            }
+            if (!hit) {
+                continue;
+            }
+            WindPlant& plant = *entry.plant;
+            const int plantWidth = rectWidth(plant.rect);
+            for (int y = overlap.top; y <= overlap.bottom; y++) {
+                for (int x = overlap.left; x <= overlap.right; x++) {
+                    size_t local = static_cast<size_t>(y - region.top) * width + (x - region.left);
+                    if ((state[local] & 4) == 0) {
+                        continue;
+                    }
+                    size_t own = static_cast<size_t>(y - entry.rect.top) * plantWidth + (x - entry.rect.left);
+                    if (plant.frozen[own] != 0) {
+                        state[local] |= 2;
+                    }
+                    if ((state[local] & 1) == 0) {
+                        state[local] |= 1;
+                        const uint32_t* base = plant.base.data() + static_cast<size_t>(y - entry.rect.top) * kHdScale * plantWidth * kHdScale + (x - entry.rect.left) * kHdScale;
+                        uint32_t* work = gWindScene.work.data() + static_cast<size_t>(y - region.top) * kHdScale * workPitch + (x - region.left) * kHdScale;
+                        work[0] = base[0];
+                        work[1] = base[1];
+                        work[workPitch] = base[plantWidth * kHdScale];
+                        work[workPitch + 1] = base[plantWidth * kHdScale + 1];
+                    }
+                    last[local] = &entry;
+                }
+            }
+
+            // The plant at its current sway over what is under it.
+            CacheEntry* handle;
+            Art* art = artLock(FrmId(plant.fid), &handle);
+            if (art == nullptr) {
+                continue;
+            }
+            const HdImage* image = objectHdImage(FrmId(plant.fid), art, plant.frame, static_cast<Rotation>(plant.rotation));
+            int margin = 0;
+            if (image != nullptr && hdWindSway(entry.object, plant.frameHeight, &gWindScene.shifts, &margin)) {
+                HdSwayDraw draw;
+                draw.frame = artGetFrameData(art, plant.frame, static_cast<Rotation>(plant.rotation));
+                draw.frameWidth = plant.frameWidth;
+                draw.frameHeight = plant.frameHeight;
+                draw.image = image;
+                draw.frameLeft = plant.frameLeft + entry.dx;
+                draw.frameTop = plant.frameTop + entry.dy;
+                draw.shifts = gWindScene.shifts.data();
+                draw.intensity = plant.light;
+                draw.x = region.left;
+                draw.y = region.top;
+                draw.width = width;
+                draw.height = height;
+                draw.clipLeft = overlap.left;
+                draw.clipTop = overlap.top;
+                draw.clipRight = overlap.right + 1;
+                draw.clipBottom = overlap.bottom + 1;
+                hdSwayComposite(draw, gWindScene.work.data());
+            }
+            artUnlock(handle);
+        }
+
+        // Write back where the layer still shows what the last plant left.
+        const int layerPitch = layer->width * kHdScale;
+        for (int y = region.top; y <= region.bottom; y++) {
+            for (int x = region.left; x <= region.right; x++) {
+                size_t local = static_cast<size_t>(y - region.top) * width + (x - region.left);
+                const Entry* top = last[local];
+                if (top == nullptr || (state[local] & 2) != 0) {
+                    continue;
+                }
+                WindPlant& plant = *top->plant;
+                size_t own = static_cast<size_t>(y - top->rect.top) * rectWidth(plant.rect) + (x - top->rect.left);
+                uint32_t current = layerBlockHash(layer, buffer, bufferPitch, x, y);
+                if (current == 0 || current != plant.final[own]) {
+                    continue;
+                }
+                const uint32_t* work = gWindScene.work.data() + static_cast<size_t>(y - region.top) * kHdScale * workPitch + (x - region.left) * kHdScale;
+                if ((work[0] >> 24) == 0 || (work[1] >> 24) == 0 || (work[workPitch] >> 24) == 0 || (work[workPitch + 1] >> 24) == 0) {
+                    continue;
+                }
+                uint32_t* dest = layer->pixels.data() + static_cast<size_t>(y) * kHdScale * layerPitch + x * kHdScale;
+                dest[0] = work[0] & 0xFFFFFF;
+                dest[1] = work[1] & 0xFFFFFF;
+                dest[layerPitch] = work[workPitch] & 0xFFFFFF;
+                dest[layerPitch + 1] = work[workPitch + 1] & 0xFFFFFF;
+                plant.final[own] = blockHash(dest, layerPitch);
+            }
+        }
+
+        // Show the recomposed rectangles (not their whole bounding box).
+        auto showStart = std::chrono::steady_clock::now();
+        std::vector<Rect> shown;
+        for (int index : group) {
+            Rect rect = clipped[index];
+            bool inside = false;
+            for (const Rect& other : shown) {
+                inside = inside || (rect.left >= other.left && rect.right <= other.right && rect.top >= other.top && rect.bottom <= other.bottom);
+            }
+            if (!inside) {
+                shown.push_back(rect);
+                tileWindowShowRect(&rect);
+            }
+        }
+        gWindShowMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - showStart).count();
+        for (int index : members[regionIndex]) {
+            done[index] = 1;
+            recomposed++;
+        }
+    }
+    return recomposed;
+}
 
 static ObjectHdDraw objectHdBegin(ObjectType type, const FrmId& frmId, Art* art, Object* object)
 {
@@ -5303,7 +5802,22 @@ static void _obj_render_object(Object* object, Rect* rect, int light)
         object->sy = objectRect.top;
     }
 
+    ObjectHdSway sway;
+    if (type == OBJ_TYPE_SCENERY && object->tile != -1 && windowHdIsActive()) {
+        objectHdSwayBegin(object, objectRect, rect, frameHeight, &sway);
+    }
+
     if (rectIntersection(&objectRect, rect, &objectRect) != 0) {
+        // CE: only the sway margin beside a swaying plant is being redrawn.
+        if (sway.active && (object->flags & OBJECT_FLAG_0xFC000) == OBJECT_NONE) {
+            ObjectHdDraw hd = objectHdBegin(type, frmId, art, object);
+            if (hd) {
+                hd.capture(sway.rect);
+                hd.drawSwayed(sway.rect, sway.shifts, frameHeight, light);
+                objectHdWindRecord(object, hd.layer, sway.plantRect, sway.rect, gObjectHd.under.data(), object->sx, object->sy,
+                    frameWidth, frameHeight, light);
+            }
+        }
         artUnlock(cacheEntry);
         return;
     }
@@ -5429,6 +5943,7 @@ static void _obj_render_object(Object* object, Rect* rect, int light)
                     if (hd) {
                         hd.capture(updatedEggRect);
                     }
+
                     hdInvalidate();
 
                     for (int i = 0; i < 4; i++) {
@@ -5482,6 +5997,10 @@ static void _obj_render_object(Object* object, Rect* rect, int light)
     if (hd && translucent) {
         hd.capture(objectRect);
     }
+    bool swaying = hd && sway.active && !translucent;
+    if (swaying) {
+        hd.capture(sway.rect);
+    }
     hdInvalidate();
 
     switch (translucency) {
@@ -5507,7 +6026,11 @@ static void _obj_render_object(Object* object, Rect* rect, int light)
 
     if (hd) {
         double start = tileRenderClockMs();
-        if (!translucent) {
+        if (swaying) {
+            hd.drawSwayed(sway.rect, sway.shifts, frameHeight, light);
+            objectHdWindRecord(object, hd.layer, sway.plantRect, sway.rect, gObjectHd.under.data(), object->sx, object->sy,
+                frameWidth, frameHeight, light);
+        } else if (!translucent) {
             hd.drawLit(objectRect, light);
         } else {
             // The legacy blend tables: the object's grey level sets how much

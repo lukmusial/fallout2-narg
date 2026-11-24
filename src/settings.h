@@ -128,6 +128,12 @@ struct GraphicsSettings {
     // With hd=1: floor tiles that have variants in the HD pack (Phase 2.14,
     // tools/hd/ground_variants.py) show a different variant per map square.
     bool hd_ground_variants = true;
+    // With hd=1: a short light from the muzzle of every ranged attack and a
+    // flash at explosions (Phase 2.15, see hd_shot_light.h).
+    bool hd_shot_light = false;
+    // With hd=1: trees, bushes, grass and cacti sway in the wind; their base
+    // stays put (Phase 2.15, see hd_wind.h).
+    bool hd_wind = false;
     // Map view (Phase 2.13, see map_view.h): smooth, per-frame map panning
     // (scroll_speed in percent of the original speed) and zooming the map
     // (mouse wheel, Ctrl+= / Ctrl+- / Ctrl+0).

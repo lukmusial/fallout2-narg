@@ -60,8 +60,9 @@ def frm_indices(entry, workdir):
         # Named art: already an indexed PNG with the game's indices. Stimpack's
         # menu images are made at run time; stimpack_menu_art.py writes them.
         png = workdir / "in.png"
-        if Path(entry).name in stimpack_menu_art.NAMES:
-            png.write_bytes((stimpack_menu_art.art_dir() / entry).read_bytes())
+        name = entry.replace("\\", "/")
+        if Path(name).name in stimpack_menu_art.NAMES:
+            png.write_bytes((stimpack_menu_art.art_dir() / name).read_bytes())
         else:
             png.write_bytes(dat_cat(entry))
         image = Image.open(png)

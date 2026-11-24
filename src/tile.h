@@ -84,6 +84,7 @@ void tileRenderEdgeBlackSquares(Rect* rect, MapElevation elevation, bool drawOnT
 //
 // The rectangle (iso window coordinates, inclusive) is about to be redrawn.
 void tileHdInvalidateRect(const Rect* rect);
+void tileWindowShowRect(Rect* rect);
 // Legacy art (objects) is drawn at (x, y): its non-zero pixels are reset
 // (they stay legacy unless an HD draw follows). `objectType` is recorded for
 // tileHdCheck.

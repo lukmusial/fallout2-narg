@@ -19,6 +19,7 @@
 #include "display_monitor.h"
 #include "game.h"
 #include "game_sound.h"
+#include "hd_shot_light.h"
 #include "geometry.h"
 #include "interface.h"
 #include "inventory.h"
@@ -783,6 +784,10 @@ int _action_ranged(Attack* attack, AnimationType anim)
 
     animationRegisterAnimate(attack->attacker, anim, 0);
 
+    // CE: HD gunshot light (hd_shot_light.h) follows the fire animation.
+    hdShotLightAttack(attack->attacker, (attack->attackerFlags & DAM_HIT) != DAM_NONE ? attack->defender->tile : attack->tile,
+        weapon, damageType, anim);
+
     if (anim != ANIM_FIRE_CONTINUOUS) {
         if ((attack->attackerFlags & DAM_HIT) != DAM_NONE || (attack->attackerFlags & DAM_CRITICAL) == DAM_NONE) {
             bool l56 = false;
@@ -889,6 +894,7 @@ int _action_ranged(Attack* attack, AnimationType anim)
                         }
 
                         animationRegisterSetFrmId(projectile, explosionFrmId, -1);
+                        hdShotLightExplosion(projectile, explosionFrmId.fid(), isGrenade ? damageType : DAMAGE_TYPE_EXPLOSION);
 
                         const char* sfx = sfxBuildWeaponName(WeaponSoundEffect::Hit, weapon, attack->hitMode, attack->defender);
                         animationRegisterPlaySoundEffect(projectile, sfx, 0);
@@ -1725,6 +1731,7 @@ int actionExplode(int tile, MapElevation elevation, int minDamage, int maxDamage
         reg_anim_begin(ANIMATION_REQUEST_RESERVED);
         _register_priority(1);
         animationRegisterPlaySoundEffect(explosion, "whn1xxx1", 0);
+        hdShotLightExplosion(explosion, -1, DAMAGE_TYPE_EXPLOSION);
         animationRegisterUnsetFlag(explosion, OBJECT_HIDDEN, 0);
         animationRegisterAnimateAndHide(explosion, ANIM_STAND, 0);
         showDamage(attack, ANIM_STAND, 1);

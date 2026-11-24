@@ -269,6 +269,54 @@ struct HdLitDraw {
 // blended over what the layer shows there (or the base palette colour).
 void hdLayerDrawLit(HdLayer* layer, const unsigned char* buffer, int bufferPitch, const HdLitDraw& draw, const unsigned char* basePalette8);
 
+// A swaying plant (Phase 2.15, hd_wind.h): the legacy frame was drawn in
+// place; its HD image is drawn with every output row shifted sideways.
+struct HdSwayDraw {
+    // The whole legacy frame (index 0 transparent) and its HD image (exactly
+    // kHdScale times the frame's size), with the frame's top-left at logical
+    // (frameLeft, frameTop) of the layer.
+    const unsigned char* frame = nullptr;
+    int frameWidth = 0;
+    int frameHeight = 0;
+    const HdImage* image = nullptr;
+    int frameLeft = 0;
+    int frameTop = 0;
+
+    // Shift of each output row of the frame (kHdScale * frameHeight values,
+    // output pixels, positive to the right).
+    const int* shifts = nullptr;
+    int intensity = 0x10000;
+
+    // The logical rectangle recomposed (may reach beyond the frame by the
+    // sway) and its hdLayerCapture, taken before the legacy draw.
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+    const uint32_t* under = nullptr;
+
+    // hdSwayComposite only: logical pixels outside this rectangle (right and
+    // bottom exclusive) are left alone.
+    int clipLeft = -(1 << 30);
+    int clipTop = -(1 << 30);
+    int clipRight = 1 << 30;
+    int clipBottom = 1 << 30;
+};
+
+// Every logical pixel of the rectangle that the shifted HD image covers, or
+// that the legacy frame covers (pixels the plant has moved away from), gets
+// the lit, shifted image blended over `under`, with the buffer's current
+// index as shadow. Pixels on colour-cycling indices, and pixels where `under`
+// has no colour and the image does not cover them fully, become invalid
+// (legacy shows). Other pixels are left alone.
+void hdLayerDrawSwayed(HdLayer* layer, const unsigned char* buffer, int bufferPitch, const HdSwayDraw& draw);
+
+// The same plant composited over `work` instead of the layer: `work` holds
+// (2 * draw.width) x (2 * draw.height) colours of the rectangle (draw.x,
+// draw.y, ...), alpha 0xFF where known; the shifted, lit image is blended
+// over it where it covers (draw.under is not used).
+void hdSwayComposite(const HdSwayDraw& draw, uint32_t* work);
+
 // Blended draws (Phase 2.8): translucent objects, the cut-out ("egg") in
 // walls and roofs around the player, paletted outlines. The legacy code
 // blends into the window buffer, which loses what was under it, so the

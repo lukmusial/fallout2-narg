@@ -128,6 +128,7 @@ void hdLightFieldClear(HdLightField* field)
     }
     field->lightBox = HdLightBox();
     field->shadeBox = HdLightBox();
+    field->flashes.clear();
 }
 
 void hdLightFieldFinish(HdLightField* field)
@@ -213,6 +214,48 @@ namespace {
     {
         int result = ((static_cast<int>(value) * factor256 + 128) >> 8) + add;
         return result <= 0 ? 0 : (result >= 255 ? 255 : static_cast<uint32_t>(result));
+    }
+
+    // A muzzle flash over logical pixels [left, left + width) of row y (only
+    // map pixels, kHdMaskLit), per output pixel.
+    void applyFlash(const HdLightFlash& flash, int y, int left, int width, const unsigned char* maskRow, uint32_t* dest, int pitch)
+    {
+        if (flash.intensity <= 0.0f) {
+            return;
+        }
+        HdLightBox box = hdLightFlashBounds(flash);
+        if (y < box.y0 || y >= box.y1) {
+            return;
+        }
+        int x0 = std::max(box.x0, left);
+        int x1 = std::min(box.x1, left + width);
+        float scale = flash.intensity * 255.0f;
+        for (int x = x0; x < x1; x++) {
+            if ((maskRow[x - left] & kHdMaskLit) == 0) {
+                continue;
+            }
+            uint32_t* block = dest + (x - left) * 2;
+            for (int row = 0; row < 2; row++) {
+                float dy = (y + (row + 0.5f) * 0.5f - flash.y) * 2.0f;
+                for (int column = 0; column < 2; column++) {
+                    float dx = x + (column + 0.5f) * 0.5f - flash.x;
+                    float along = dx * flash.dirX + dy * flash.dirY;
+                    float across = fabsf(dx * flash.dirY - dy * flash.dirX) / flash.width;
+                    float streak = along > 0.0f && along < flash.length ? (1.0f - along / flash.length) * expf(-across * across) : 0.0f;
+                    float r = (dx * dx + dy * dy) / (flash.core * flash.core);
+                    float amount = (1.6f * streak + 1.2f * expf(-r)) * scale;
+                    if (amount < 0.5f) {
+                        continue;
+                    }
+                    uint32_t& pixel = block[row * pitch + column];
+                    int channels[3] = { static_cast<int>((pixel >> 16) & 0xFF), static_cast<int>((pixel >> 8) & 0xFF), static_cast<int>(pixel & 0xFF) };
+                    for (int c = 0; c < 3; c++) {
+                        channels[c] = std::min(255, channels[c] + static_cast<int>(amount * flash.colour[c] + 0.5f));
+                    }
+                    pixel = (static_cast<uint32_t>(channels[0]) << 16) | (static_cast<uint32_t>(channels[1]) << 8) | static_cast<uint32_t>(channels[2]);
+                }
+            }
+        }
     }
 
 } // namespace
@@ -315,6 +358,10 @@ void hdLightApplyRow(const HdLightField& field, int y, int left, int width, cons
             }
         }
     }
+
+    for (const HdLightFlash& flash : field.flashes) {
+        applyFlash(flash, y, left, width, maskRow, dest, pitch);
+    }
 }
 
 void hdLightFieldDiff(const HdLightField& a, const HdLightField& b, std::vector<HdLightRect>* rects)
@@ -357,6 +404,21 @@ void hdLightFieldDiff(const HdLightField& a, const HdLightField& b, std::vector<
                 int bx = std::min(x / kShadeRatio / kBlock, blocksX - 1);
                 int by = std::min(y / kShadeRatio / kBlock, blocksY - 1);
                 changed[static_cast<size_t>(by) * blocksX + bx] = 1;
+            }
+        }
+    }
+
+    // Muzzle flashes (few and small): their pixels are redrawn whenever
+    // either field has one.
+    for (const HdLightField* field : { &a, &b }) {
+        for (const HdLightFlash& flash : field->flashes) {
+            HdLightBox box = hdLightFlashBounds(flash);
+            box.x0 = std::max(box.x0, 0);
+            box.y0 = std::max(box.y0, 0);
+            box.x1 = std::min(box.x1, a.width);
+            box.y1 = std::min(box.y1, a.height);
+            if (!box.empty()) {
+                rects->push_back({ box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0 });
             }
         }
     }
@@ -567,6 +629,95 @@ void hdLightFieldAddFootprint(HdLightField* field, const HdLightFootprint& footp
             }
         }
     }
+}
+
+namespace {
+
+    // A shot's mul (per unit colour) and add (per unit colour, 8-bit levels)
+    // at ground offset (dx, dy) from the muzzle.
+    inline void shotTerms(const HdShotLight& shot, float dx, float dy, float* mul, float* add)
+    {
+        float distance = sqrtf(dx * dx + dy * dy);
+        float spill = expf(-distance / shot.spill);
+        if (shot.omni) {
+            float ratio = distance / shot.reach;
+            *mul = shot.strength * 2.5f / (1.0f + ratio * ratio);
+            *add = shot.strength * 0.2f * 255.0f * spill;
+            return;
+        }
+        float cosine = distance > 1e-3f ? (dx * shot.dirX + dy * shot.dirY) / distance : 1.0f;
+        float cone = 0.0f;
+        if (cosine > shot.coneCos) {
+            cone = powf(std::min((cosine - shot.coneCos) / (1.0f - shot.coneCos), 1.0f), 1.2f);
+        }
+        float ratio = distance / shot.reach;
+        float forward = 1.0f / (1.0f + ratio * ratio);
+        float spillShape = spill * (0.35f + 0.65f * std::max(cosine, 0.0f));
+        *mul = shot.strength * (3.0f * cone * forward + 2.2f * spillShape);
+        *add = shot.strength * 0.05f * 255.0f * spillShape;
+    }
+
+    // Ground distance beyond which a shot adds nothing visible.
+    inline float shotExtent(const HdShotLight& shot)
+    {
+        return std::max(shot.reach * (shot.omni ? 5.0f : 4.0f), shot.spill * 6.0f);
+    }
+
+} // namespace
+
+void hdLightFieldAddShot(HdLightField* field, const HdShotLight& shot)
+{
+    if (shot.strength <= 0.0f || shot.reach <= 0.0f || shot.spill <= 0.0f) {
+        return;
+    }
+
+    float extent = shotExtent(shot);
+    // Screen y is the ground's y halved.
+    int x0 = std::max(static_cast<int>(floorf((shot.mx - extent) / kHdLightCell)), 0);
+    int x1 = std::min(static_cast<int>(ceilf((shot.mx + extent) / kHdLightCell)), field->cellsX - 1);
+    int y0 = std::max(static_cast<int>(floorf((shot.my - extent * 0.5f) / kHdLightCell)), 0);
+    int y1 = std::min(static_cast<int>(ceilf((shot.my + extent * 0.5f) / kHdLightCell)), field->cellsY - 1);
+    if (x0 > x1 || y0 > y1) {
+        return;
+    }
+    field->lightBox.add({ x0, y0, x1 + 1, y1 + 1 });
+
+    for (int y = y0; y <= y1; y++) {
+        float dy = ((y + 0.5f) * kHdLightCell - shot.my) * 2.0f;
+        float* mulRow = &field->mul[static_cast<size_t>(y) * field->cellsX * 3];
+        float* addRow = &field->add[static_cast<size_t>(y) * field->cellsX * 3];
+        for (int x = x0; x <= x1; x++) {
+            float dx = (x + 0.5f) * kHdLightCell - shot.mx;
+            float mul;
+            float add;
+            shotTerms(shot, dx, dy, &mul, &add);
+            for (int c = 0; c < 3; c++) {
+                mulRow[x * 3 + c] += mul * shot.colour[c];
+                addRow[x * 3 + c] += add * shot.colour[c];
+            }
+        }
+    }
+}
+
+float hdShotLightAt(const HdShotLight& shot, float x, float y)
+{
+    float mul;
+    float add;
+    shotTerms(shot, x - shot.mx, (y - shot.my) * 2.0f, &mul, &add);
+    return mul;
+}
+
+HdLightBox hdLightFlashBounds(const HdLightFlash& flash)
+{
+    // The streak runs along the ground aim; on screen its y is halved.
+    float ex = fabsf(flash.dirX) * flash.length + flash.width + flash.core * 2.0f + 1.0f;
+    float ey = fabsf(flash.dirY) * flash.length * 0.5f + flash.width + flash.core * 2.0f + 1.0f;
+    HdLightBox box;
+    box.x0 = static_cast<int>(floorf(flash.x - ex));
+    box.y0 = static_cast<int>(floorf(flash.y - ey));
+    box.x1 = static_cast<int>(ceilf(flash.x + ex)) + 1;
+    box.y1 = static_cast<int>(ceilf(flash.y + ey)) + 1;
+    return box;
 }
 
 void hdLightFieldAddShadow(HdLightField* field, float cx, float cy, float axisX, float axisY, float minor, float darkness)

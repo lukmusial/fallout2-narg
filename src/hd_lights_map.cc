@@ -13,6 +13,7 @@
 #include "art.h"
 #include "critter.h"
 #include "game_mouse.h"
+#include "hd_shot_light.h"
 #include "input.h"
 #include "light.h"
 #include "map.h"
@@ -227,6 +228,12 @@ namespace {
         std::vector<float> neon;
         HdLightBox neonBox;
         std::vector<float> blurred;
+
+        // Gunshot lights and muzzle flashes alive (Phase 2.15).
+        std::vector<HdShotLight> shots;
+        std::vector<HdLightFlash> flashes;
+        // The last field assembled, before the shots were added.
+        HdLightField base;
 
         HdLightsStats stats;
     };
@@ -833,7 +840,7 @@ namespace {
 bool hdLightsMapEnabled()
 {
     initialize();
-    return gState.effects != 0;
+    return gState.effects != 0 || hdShotLightEnabled();
 }
 
 void hdLightsMapSetEffects(unsigned effects)
@@ -845,7 +852,7 @@ void hdLightsMapSetEffects(unsigned effects)
     }
     gState.effects = effects;
     gState.built = false;
-    windowHdSetLitWindow(effects != 0 ? gIsoWindow : -1);
+    windowHdSetLitWindow(hdLightsMapEnabled() ? gIsoWindow : -1);
     if (mapShown()) {
         // Recompose the map window so its pixels carry (or lose) the lit flag.
         tileWindowRefresh();
@@ -869,8 +876,9 @@ bool hdLightsMapUpdate(const HdLightScreen& screen, HdLightField* field)
         gState.hasContent = false;
     }
 
-    if (gState.effects == 0 || !mapShown()) {
-        windowHdSetLitWindow(gState.effects != 0 ? gIsoWindow : -1);
+    bool enabled = hdLightsMapEnabled();
+    if (!enabled || !mapShown()) {
+        windowHdSetLitWindow(enabled ? gIsoWindow : -1);
         if (gState.hasContent) {
             hdLightFieldClear(field);
             hdLightFieldFinish(field);
@@ -891,8 +899,9 @@ bool hdLightsMapUpdate(const HdLightScreen& screen, HdLightField* field)
     tileCentre(0, &originX, &originY);
     originX += viewZoom() * 4096.0f;
     unsigned int generation = lightGetGeneration();
-    bool rebuild = !gState.built || gState.elevation != gElevation || gState.originX != originX || gState.originY != originY
-        || gState.lightGeneration != generation || gState.screenWidth != screen.width || gState.screenHeight != screen.height;
+    // Only the gunshot light (Phase 2.15) on: no emitters to build.
+    bool rebuild = gState.effects != 0 && (!gState.built || gState.elevation != gElevation || gState.originX != originX || gState.originY != originY
+        || gState.lightGeneration != generation || gState.screenWidth != screen.width || gState.screenHeight != screen.height);
     if (rebuild) {
         rebuildLights(screen.width, screen.height);
         gState.built = true;
@@ -922,12 +931,28 @@ bool hdLightsMapUpdate(const HdLightScreen& screen, HdLightField* field)
     bool paletteChanged = memcmp(gState.palette, cycling, sizeof(gState.palette)) != 0;
     unsigned int now = getTicks();
     int ambient = lightGetAmbientIntensity();
+    // Gunshots (Phase 2.15): while one is alive the field changes every
+    // frame (and once more when the last one ends).
+    gState.shots.clear();
+    gState.flashes.clear();
+    bool shooting = hdShotLightCollect(darkness(), &gState.shots, &gState.flashes);
     // Animated art and critters walking in front of glowing pixels change
     // the emissive pixels without any of the above changing.
-    bool stale = getTicksBetween(now, gState.assembledAt) >= 100;
-    if (!rebuild && !sizeChanged && !paletteChanged && critters.key == gState.critterKey && moving.key == gState.movingKey
-        && ambient == gState.ambient && !stale && gState.hasContent) {
+    bool stale = gState.effects != 0 && getTicksBetween(now, gState.assembledAt) >= 100;
+    bool unchanged = !rebuild && !sizeChanged && !paletteChanged && critters.key == gState.critterKey && moving.key == gState.movingKey
+        && ambient == gState.ambient && !stale && gState.hasContent;
+    if (unchanged && !shooting) {
         return false;
+    }
+    if (unchanged && gState.base.width == field->width && gState.base.height == field->height) {
+        // Only the shots changed: the field without them plus the shots.
+        *field = gState.base;
+        for (const HdShotLight& shot : gState.shots) {
+            hdLightFieldAddShot(field, shot);
+        }
+        field->flashes = gState.flashes;
+        hdLightFieldFinish(field);
+        return true;
     }
 
     memcpy(gState.palette, cycling, sizeof(gState.palette));
@@ -1005,6 +1030,17 @@ bool hdLightsMapUpdate(const HdLightScreen& screen, HdLightField* field)
         gMovedLights.clear();
     }
 
+    // Kept for the frames where only the shots change.
+    if (shooting) {
+        gState.base = *field;
+    } else {
+        gState.base = HdLightField();
+    }
+    for (const HdShotLight& shot : gState.shots) {
+        hdLightFieldAddShot(field, shot);
+    }
+    field->flashes = gState.flashes;
+
     hdLightFieldFinish(field);
     gState.hasContent = true;
 
@@ -1060,7 +1096,7 @@ std::string hdLightsMapDescribe()
             << ", \"from_neighbour\": " << (light.fromNeighbour ? "true" : "false")
             << ", \"sync_index\": " << light.syncIndex << ", \"footprint_cells\": " << light.footprint.weight.size() << "}";
     }
-    out << "], \"moving\": " << hdLightsMapDescribeMoving();
+    out << "], \"moving\": " << hdLightsMapDescribeMoving() << ", \"shots\": " << hdShotLightDescribe();
     out << ", \"stats\": {\"updates\": " << gState.stats.updates << ", \"rebuilds\": " << gState.stats.rebuilds
         << ", \"update_ms_avg\": " << (gState.stats.updates > 0 ? gState.stats.updateMs / gState.stats.updates : 0.0)
         << ", \"update_ms_max\": " << gState.stats.updateMaxMs

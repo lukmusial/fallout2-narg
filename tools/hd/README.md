@@ -400,6 +400,88 @@ and breaks their letters. TURN/CMBT look the same in both and stay AI.
 bar and combat mode at 640x480 logical and at 3440x1440 (800-px bar, side
 panels): HD detail, monitor text kept, the bar's 8-bit composition identical
 to an hd=0 run. `bar_sheet.py` writes `docs/screens/phase2.16_bar/`.
+## Gunshot light and wind (Phase 2.15)
+
+Two effects of the HD renderer, each with its own switch in
+`files/fallout2.cfg` `[graphics]` (on in the example config, off in the test
+run directory, nothing with `hd=0`). Neither changes the 8-bit buffers, so
+hit-testing, saves and the legacy goldens are unaffected.
+
+`hd_shot_light=1` (`src/hd_shot_light.{h,cc}`): every ranged attack lights
+its surroundings for 150 ms (1 / 0.6 / 0.3 / 0.1 / 0 over ~33 ms steps)
+through the HD light field (`hd_lights.h`), so floors, walls, scenery and
+critters are lit alike, also with `hd_lights=0`. The ranged attack registers
+itself (`actions.cc`), and the light follows the fire animation as drawn:
+
+- When: the fire animations have their muzzle flashes painted in. Per frame
+  of a direction, the "flash" pixels are bright warm pixels (luminance > 170,
+  red > 200) that the quietest frame of that direction does not have at the
+  same place (frames aligned by their offsets). Frames whose bright count
+  peaks well above the quietest frame are shots: one per round of a burst
+  (SMG frames 1, 3, 5; minigun every other frame), the action frame for
+  single shots.
+- Where: of the flash pixels within 36 px sideways of the critter's feet (a
+  flamer's stream and a rocket's trail reach further), the cluster around
+  the frontmost one along the facing; its near end is the muzzle. Without
+  flash pixels: the frontmost sprite pixel at weapon height (45-75%). The
+  feet are found through the art's per-direction offset, which wide frames
+  (flamer) use to keep the feet on the hex.
+- Light: the approved mock's cone, `(cos - 0.80) / 0.20` clipped `^1.2`,
+  times `1 / (1 + (d / 140)^2)`, plus `exp(-d / 28)` spill at the muzzle and
+  almost nothing behind (output pixels; vertical distance counts double), a
+  flash streak and core at the muzzle drawn per output pixel
+  (`HdLightField::flashes`). Colour by damage type: bullets warm yellow,
+  laser red, plasma green, fire orange, electrical/EMP blue. Explosions
+  (rockets, grenades, dynamite) give an omni flash for 450 ms at the impact.
+  Strength scales with darkness (0.45 by day, 1 at night).
+
+`hd_wind=1` (`src/hd_wind.{h,cc}`, the wind scene in `src/object.cc`):
+trees (`tree*`, `tre1000`), bushes, corn, the plant-like weeds (`weed01-04`,
+`10`, `14`, `24-26`; the junk and dirt-mound weeds and the cave weeds are
+left out), `maryj*` and, stiffer, cacti sway. Per output row a horizontal
+shift: 0 for the bottom 35% of the sprite, growing squared to the top, at
+most 1.5-5.5 output pixels by the plant's height, a ~1.1 s sway out of step
+per tile under slow gusts. The baked shadow moves with its rows.
+
+- Compositing: the plant's own draw recomposes its rectangle widened by the
+  sway margin: the layer under it is captured before the legacy draw, the
+  shifted HD plant is drawn over it and pixels the legacy plant covers but
+  the shifted one has left get what was under it, all with the buffer's
+  current index as shadow (`hdLayerDrawSwayed`).
+- Moving: a ticker (18 Hz) does not redraw the map. From each plant's last
+  draw the scene keeps the colours under the first plant at every pixel,
+  which pixels something else was drawn between plants, and a hash of what
+  the plants left in the layer. Plants whose shifted rows changed are
+  repainted in tile order over that base, only in the rows that moved,
+  and a pixel is written only where the layer still shows what the plants
+  left (critters in front, roofs, text stay). Unknown plants (new on screen)
+  get one ordinary redraw. The test checks that this equals a whole redraw
+  pixel for pixel. If a tick costs much (a forest at 3440x1440 on a busy
+  machine) the ticks are spaced to keep it under about a fifth of the time;
+  while the map view pans or zooms the plants wait.
+
+Performance (Release, 3440x1440 at scale 2, hd_lights=1, smooth_scroll and
+zoom on; presents per second and work per frame from `perf`; the machine
+was running another agent's test suite meanwhile, so the numbers are noisy):
+
+| | wind off | wind on |
+|---|---|---|
+| Arroyo slot 3 (140 trees on screen), idle | 56.4/s, 5.3 ms | 55.5/s, 4.4 ms |
+| Arroyo slot 3, scrolling | 53.6/s, 5.3 ms | 40.8/s, 10.2 ms |
+| Arroyo slot 9 (5 plants), idle | 55.7/s, 2.5 ms | 56.1/s, 2.5 ms |
+| Arroyo slot 9, scrolling | 57.1/s, 1.8 ms | 57.8/s, 2.4 ms |
+
+A wind tick costs 0.5 ms with a few plants and about 12 ms (26 max) with
+140 trees, most of it in showing the recomposed rows (map view compose and
+present). The gunshot light alone (hd_lights=0) costs 0.5 ms per field
+update; with hd_lights=1 the frames of a shot reuse the field without shots
+(the Den at night: 33 presents in the 600 ms after a burst, field max 15 ms).
+
+Harness: `shoot <weapon pid> nearest|party <n> [secondary]`, `hdfx shot|wind
+on|off`, `hdfx dump`, `hdfx waitshot <n>`, `hdfx shotclock hold|run`,
+`hdfx windtime <ms>|run`, `hdfx legacycheck`, `hdfx shotlight` (see
+`src/hd_dev_automation.h`). Review videos in
+`docs/screens/phase2.15/`.
 
 ## Timings (Apple M5 Pro, 64 GB; per asset, warm)
 

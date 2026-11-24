@@ -1,0 +1,26 @@
+# Phase 2.15 wind (run with --dev-load-game=N, [graphics]hd=1, an hd_pack and
+# [graphics]hd_wind=1): the map's 8-bit buffer after whole redraws with the
+# wind held at several times and off equals the buffer before; the view with
+# the wind held at two times (plants on screen and their sway dumped); the
+# plants moved by the ticker (HD layer recomposed) against a whole redraw.
+until game 30000
+wait 1500
+hdfx legacycheck legacy
+hdfx windtime 0
+wait 400
+hdfx dump t0
+fbshot t0
+legacyshot l0
+hdfx windtime 550
+wait 400
+hdfx dump t1
+fbshot t1
+legacyshot l1
+hdfx windtime 825
+wait 400
+fbshot recomposed
+refresh
+fbshot redrawn
+hdfx dump t2
+hdfx windtime run
+quit 0

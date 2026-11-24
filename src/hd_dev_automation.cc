@@ -12,6 +12,11 @@
 #include <vector>
 
 #include "animation.h"
+#include "combat.h"
+#include "critter.h"
+#include "interface.h"
+#include "inventory.h"
+#include "item.h"
 #include "art.h"
 #include "color.h"
 #include "debug.h"
@@ -22,6 +27,8 @@
 #include "hd_art.h"
 #include "hd_lights.h"
 #include "hd_lights_map.h"
+#include "hd_shot_light.h"
+#include "hd_wind.h"
 #include "hd_text.h"
 #include "input.h"
 #include "map.h"
@@ -527,6 +534,202 @@ namespace {
             effects = static_cast<unsigned>(atoi(args[0].c_str()));
         }
         hdLightsMapSetEffects(effects);
+        return true;
+    }
+
+    struct NearestCritter {
+        std::vector<std::pair<int, Object*>> found;
+        std::vector<Object*> party;
+    };
+
+    void visitNearestCritter(Object* object, void* context)
+    {
+        NearestCritter* nearest = static_cast<NearestCritter*>(context);
+        if (object == gDude || FrmId(object).objectType() != OBJ_TYPE_CRITTER || (object->flags & OBJECT_HIDDEN) != 0
+            || critterIsDead(object)
+            || std::find(nearest->party.begin(), nearest->party.end(), object) != nearest->party.end()) {
+            return;
+        }
+        nearest->found.push_back({ objectGetDistanceBetween(gDude, object), object });
+    }
+
+    bool commandShoot(const DevAutomationCommand& command, bool first)
+    {
+        const std::string& name = command.name;
+        const std::vector<std::string>& args = command.args;
+        unsigned int now = getTicks();
+        (void)name;
+        (void)args;
+        (void)now;
+        (void)first;
+
+        // `shoot <weapon pid> nearest|party <n> [secondary]`: the player gets
+        // the weapon (loaded) in the right hand and attacks the nearest
+        // critter outside the party (or a party member) as a click would in
+        // combat (primary or secondary mode, e.g. a burst).
+        if (args.size() < 2 || strcmp(devAutomationGetState(), "game") != 0 || gDude == nullptr) {
+            devAutomationFail(command, "usage: shoot <weapon pid> nearest|party <n> [secondary] (in a game)");
+        }
+        // Targets in order of preference (a critter in the middle of an
+        // uninterruptible animation, e.g. using a door, cannot be attacked).
+        std::vector<Object*> targets;
+        size_t next = 2;
+        if (args[1] == "party") {
+            std::vector<Object*> party = get_all_party_members_objects(false);
+            int index = args.size() > 2 ? atoi(args[2].c_str()) : 1;
+            next = 3;
+            if (index >= 0 && index < static_cast<int>(party.size())) {
+                targets.push_back(party[index]);
+            }
+        } else {
+            NearestCritter nearest;
+            nearest.party = get_all_party_members_objects(false);
+            objectVisitAtElevation(gElevation, visitNearestCritter, &nearest);
+            std::sort(nearest.found.begin(), nearest.found.end(),
+                [](const std::pair<int, Object*>& a, const std::pair<int, Object*>& b) { return a.first < b.first; });
+            for (const auto& entry : nearest.found) {
+                targets.push_back(entry.second);
+            }
+        }
+        if (targets.empty()) {
+            devAutomationFail(command, "no target");
+        }
+        int pid = atoi(args[0].c_str());
+        // The hand the interface uses (the sprite shows its weapon).
+        Hand hand = interfaceGetCurrentHand();
+        Object* weapon = hand == HAND_RIGHT ? critterGetItem2(gDude) : critterGetItem1(gDude);
+        if (weapon == nullptr || weapon->pid != pid) {
+            if (objectCreateWithProtoId(&weapon, ProtoId(pid)) == -1) {
+                devAutomationFail(command, "cannot create the weapon");
+            }
+            itemAdd(gDude, weapon, 1);
+            inventoryEquipFunc(gDude, weapon, hand, false);
+            interfaceUpdateItems(false, INTERFACE_ITEM_ACTION_DEFAULT, INTERFACE_ITEM_ACTION_DEFAULT);
+        }
+        ammoSetQuantity(weapon, std::max(ammoGetCapacity(weapon), 1));
+        // As in combat, neither side is in the middle of another animation
+        // (an NPC walking about would make the attack sequence fail).
+        bool secondary = args.size() > next && args[next] == "secondary";
+        HitMode hitMode = hand == HAND_RIGHT ? (secondary ? HIT_MODE_RIGHT_WEAPON_SECONDARY : HIT_MODE_RIGHT_WEAPON_PRIMARY)
+                                             : (secondary ? HIT_MODE_LEFT_WEAPON_SECONDARY : HIT_MODE_LEFT_WEAPON_PRIMARY);
+        for (size_t index = 0; index < targets.size() && index < 5; index++) {
+            Object* target = targets[index];
+            // The target survives (a kill ends the scripted scene); neither
+            // side is in the middle of another animation, as in combat.
+            target->data.critter.hp = std::max(target->data.critter.hp, 999);
+            reg_anim_clear(target);
+            reg_anim_clear(gDude);
+            if (_combat_attack(gDude, target, hitMode, HIT_LOCATION_UNCALLED) == 0) {
+                break;
+            }
+        }
+        return true;
+    }
+
+    bool commandHdfx(const DevAutomationCommand& command, bool first)
+    {
+        const std::string& name = command.name;
+        const std::vector<std::string>& args = command.args;
+        unsigned int now = getTicks();
+        (void)name;
+        (void)args;
+        (void)now;
+        (void)first;
+
+        // Phase 2.15 effects: `hdfx shot on|off`, `hdfx wind on|off`,
+        // `hdfx dump <name>` (shots and wind state to <name>.json),
+        // `hdfx shotlight <mx> <my> <tx> <ty> [<damage type> [explosion]]`
+        // (a shot at once, map window coordinates).
+        if (args.empty()) {
+            devAutomationFail(command, "usage: hdfx shot|wind on|off | dump <name> | shotlight <mx> <my> <tx> <ty> [<type> [explosion]]");
+        }
+        if ((args[0] == "shot" || args[0] == "wind") && args.size() > 1) {
+            bool on = args[1] == "on";
+            if (args[0] == "shot") {
+                hdShotLightSetEnabled(on);
+                // Map pixels carry the lit flag from their next composition.
+                windowHdSetLitWindow(hdLightsMapEnabled() ? gIsoWindow : -1);
+                tileWindowRefresh();
+            } else {
+                hdWindSetEnabled(on);
+            }
+            return true;
+        }
+        if (args[0] == "dump" && args.size() > 1) {
+            std::ofstream out(devAutomationOutputPath(args[1], ".json"));
+            out << "{\"shots\": " << hdShotLightDescribe() << ", \"wind\": " << hdWindDescribe() << "}\n";
+            return true;
+        }
+        if (args[0] == "shotlight" && args.size() > 4) {
+            int type = args.size() > 5 ? atoi(args[5].c_str()) : 0;
+            hdShotLightFire(static_cast<float>(atof(args[1].c_str())), static_cast<float>(atof(args[2].c_str())),
+                static_cast<float>(atof(args[3].c_str())), static_cast<float>(atof(args[4].c_str())), type,
+                args.size() > 6 && args[6] == "explosion");
+            return true;
+        }
+        if (args[0] == "waitshot" && args.size() > 1) {
+            // `hdfx waitshot <n>`: wait until n more shots have been fired,
+            // then hold the shots' clock (the light stays as it is);
+            // `hdfx shotclock run` lets it run again.
+            static int target = 0;
+            static unsigned int started = 0;
+            if (first) {
+                target = hdShotLightFiredCount() + atoi(args[1].c_str());
+                started = now;
+                hdShotLightHold(false);
+            }
+            if (hdShotLightFiredCount() >= target) {
+                hdShotLightHold(true);
+                return true;
+            }
+            if (getTicksBetween(now, started) > 15000) {
+                devAutomationFail(command, "no shot fired");
+            }
+            return false;
+        }
+        if (args[0] == "shotclock" && args.size() > 1) {
+            hdShotLightHold(args[1] == "hold");
+            return true;
+        }
+        if (args[0] == "windtime" && args.size() > 1) {
+            hdWindSetTime(args[1] == "run" ? -1 : atoi(args[1].c_str()));
+            return true;
+        }
+        if (args[0] == "legacycheck" && args.size() > 1) {
+            // The map's 8-bit buffer is the same after whole redraws with the
+            // wind held at other times and with the wind off (all within
+            // this command, so nothing else animates meanwhile).
+            unsigned char* buffer = mapViewIsActive() ? mapViewSurfaceBuffer() : windowGetBuffer(gIsoWindow);
+            int width = mapViewIsActive() ? mapViewSurfaceWidth() : windowGetWidth(gIsoWindow);
+            int height = mapViewIsActive() ? mapViewSurfaceHeight() : windowGetHeight(gIsoWindow);
+            // The reference: a whole redraw now (the buffer may hold
+            // something not redrawn since its state changed).
+            tileWindowRefresh();
+            std::vector<unsigned char> before(buffer, buffer + static_cast<size_t>(width) * height);
+            auto differing = [&]() {
+                size_t count = 0;
+                for (size_t index = 0; index < before.size(); index++) {
+                    count += before[index] != buffer[index];
+                }
+                return count;
+            };
+            bool wasOn = hdWindEnabled();
+            std::ofstream out(devAutomationOutputPath(args[1], ".json"));
+            out << "{\"pixels\": " << before.size() << ", \"wind_was_on\": " << (wasOn ? "true" : "false") << ", \"differing\": [";
+            const int times[] = { 0, 275, 550, 825 };
+            for (int index = 0; index < 4; index++) {
+                hdWindSetTime(times[index]);
+                tileWindowRefresh();
+                out << differing() << ", ";
+            }
+            hdWindSetEnabled(false);
+            tileWindowRefresh();
+            out << differing() << "]}\n";
+            hdWindSetEnabled(wasOn);
+            hdWindSetTime(-1);
+            return true;
+        }
+        devAutomationFail(command, "bad hdfx arguments");
         return true;
     }
 
@@ -1103,6 +1306,8 @@ void hdDevAutomationInit()
     devAutomationRegisterCommand("hdprobe", commandHdprobe);
     devAutomationRegisterCommand("hdlights", commandHdlights);
     devAutomationRegisterCommand("walk", commandWalk);
+    devAutomationRegisterCommand("shoot", commandShoot);
+    devAutomationRegisterCommand("hdfx", commandHdfx);
     devAutomationRegisterCommand("scrollhold", commandScrollhold);
     devAutomationRegisterCommand("frames", commandFrames);
     devAutomationRegisterCommand("framesdone", commandFramesdone);

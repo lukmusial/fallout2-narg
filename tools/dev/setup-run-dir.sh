@@ -50,6 +50,8 @@ if [[ ! -f "$CFG" || $FORCE_CONFIG -eq 1 ]]; then
         -e 's/^hd_pack=.*/hd_pack=/' \
         -e 's/^hd_lights=.*/hd_lights=0/' \
         -e 's/^hd_ground_variants=.*/hd_ground_variants=0/' \
+        -e 's/^hd_shot_light=.*/hd_shot_light=0/' \
+        -e 's/^hd_wind=.*/hd_wind=0/' \
         -e 's/^smooth_scroll=.*/smooth_scroll=0/' \
         -e 's/^zoom=.*/zoom=0/' \
         "$REPO_DIR/files/fallout2.cfg" >"$CFG"

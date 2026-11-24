@@ -282,6 +282,8 @@ void initSettingsRegistry(bool isMapper)
     SETTING_P(hd_lights_effects, clamp(0, 15));
     SETTING(hd_lights_follow);
     SETTING(hd_ground_variants);
+    SETTING(hd_shot_light);
+    SETTING(hd_wind);
     SETTING(smooth_scroll);
     SETTING_P(scroll_speed, clamp(25, 400));
     SETTING(zoom);

@@ -57,6 +57,21 @@ namespace fallout {
 //   pick <name>               the object and hex under the cursor to <name>.json
 //   worldmap                  open the world map (in a game)
 //   die                       the player dies (in a game): the death scene
+//   shoot <pid> nearest|party <n> [secondary]
+//                             the player gets weapon <pid> (loaded) in the
+//                             active hand and attacks the nearest critter
+//                             outside the party (or party member n), which
+//                             is given 999 HP so the scene goes on
+//   hdfx shot|wind on|off     switch the gunshot light / wind live
+//   hdfx dump <name>          shots fired and plants swaying to <name>.json
+//   hdfx shotlight <mx> <my> <tx> <ty> [<damage type> [explosion]]
+//                             a shot light at once (map window coordinates)
+//   hdfx waitshot <n>         wait until n more shots were fired, then hold
+//                             the shots' clock (their light stays)
+//   hdfx shotclock hold|run   hold the shots' clock or let it run
+//   hdfx windtime <ms>|run    hold the wind at a time, or let it run again
+//   hdfx legacycheck <name>   whole map redraws with the wind at four times
+//                             and off: changed 8-bit pixels to <name>.json
 //
 // In HD mode `shot` writes the presented framebuffer (see screenshotSavePng).
 
