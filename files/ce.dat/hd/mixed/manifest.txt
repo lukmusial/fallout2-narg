@@ -75,3 +75,9 @@ art/intrface/di_dnds.png = scripted
 
 # Super Tool Kit: AI turns its speckled red paint into wood grain.
 art/inven/suprtool.frm = scripted
+
+# Digit and month strips (Pip-Boy and world map date, skilldex values): the
+# AI smears the thin red and yellow digits; scripted keeps them crisp.
+art/intrface/numbers.frm = scripted
+art/intrface/months.frm = scripted
+art/intrface/bignum.frm = scripted

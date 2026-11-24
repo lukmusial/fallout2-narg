@@ -23,6 +23,9 @@ Writes into the gitignored work dir (tools/hd/work by default):
                                 #   366) and the inventory, loot, use-on,
                                 #   barter/trade and move-items windows,
                                 #   their buttons and the bar's item button
+  extract.py --areas --objects --inven --interface
+                                # + every other interface image and every
+                                #   skilldex card (Phase 2.14)
 """
 
 from __future__ import annotations
@@ -106,6 +109,27 @@ CE_DAT_PNG_INVEN = [
 CE_DAT_FRM_INVEN = [
     "art/intrface/barter_e.frm",
     "art/intrface/trade_e.frm",
+]
+
+# Phase 2.14: every other interface image (world map, town maps, Pip-Boy,
+# automap, options, help, character selector, dialogue, skilldex, elevators,
+# interface bar, death screen) and every skilldex card illustration. Endgame
+# slides (eg_*) and the intro/ending sequences (seq*, arroyo01, dp) are out of
+# scope. Art with its own palette is extracted through that palette.
+INTERFACE_SKIP_PREFIXES = ("eg_", "seq")
+INTERFACE_SKIP = {"art/intrface/arroyo01.frm", "art/intrface/dp.frm"}
+OWN_PALETTE = {
+    "art/intrface/death.frm": "art/intrface/death.pal",
+    "art/intrface/helpscrn.frm": "art/intrface/helpscrn.pal",
+}
+# FRMs and indexed PNGs in ce.dat that the engine draws on those screens.
+CE_DAT_FRM_ALL = [
+    "art/intrface/actmenu.frm",
+    "art/intrface/hr_iface_800.frm",
+    "art/intrface/iface_apbar_e.frm",
+]
+CE_DAT_PNG_ALL = [
+    "art/intrface/opbase_help.png",
 ]
 
 # Floor tiles seen in Arroyo / Klamath / Den maps (counted from the map grids)
@@ -300,6 +324,38 @@ def area_objects(arch: "Archives", raw: Path, maps: list[str]) -> tuple[set[str]
     return paths, stats
 
 
+def ce_dat_file(path: str) -> Path | None:
+    """A file of the repository's ce.dat folder, matched without case."""
+    folder = hdlib.REPO_ROOT / "files" / "ce.dat" / Path(path).parent
+    if not folder.is_dir():
+        return None
+    for p in folder.iterdir():
+        if p.name.lower() == Path(path).name.lower():
+            return p
+    return None
+
+
+def interface_art(arch: "Archives") -> set[str]:
+    """Phase 2.14: every interface FRM of the archives (master.dat,
+    patch000.dat, f2_res.dat, data/) and every skilldex card, without the
+    endgame and intro slides."""
+    names: set[str] = set()
+    for _label, _dat, entries in arch.layers:
+        names.update(entries)
+    names.update(arch.loose)
+    art = set()
+    for p in names:
+        if not p.endswith(".frm"):
+            continue
+        if p.startswith("art/skilldex/"):
+            art.add(p)
+        elif p.startswith("art/intrface/"):
+            if Path(p).stem.startswith(INTERFACE_SKIP_PREFIXES) or p in INTERFACE_SKIP:
+                continue
+            art.add(p)
+    return art | set(CE_DAT_FRM_ALL)
+
+
 def read_map_floor(path: Path, elevation: int) -> list[list[int]] | None:
     """Return the 100x100 floor/roof fid grid (32-bit words) of one elevation."""
     b = path.read_bytes()
@@ -353,6 +409,9 @@ def main() -> None:
                     help="with --areas: also the walls, scenery and items on those maps")
     ap.add_argument("--inven", action="store_true",
                     help="every inventory item image (art/inven) and the inventory/loot/barter windows")
+    ap.add_argument("--interface", action="store_true",
+                    help="every other interface image (art/intrface, f2_res.dat, ce.dat) and every "
+                         "skilldex card (art/skilldex); endgame and intro slides excepted")
     args = ap.parse_args()
 
     raw = hdlib.WORK_DIR / "raw"
@@ -403,12 +462,35 @@ def main() -> None:
         inven = INVENTORY_SCREENS + sorted(dict.fromkeys(inven))
         print(f"inventory: {len(inven) - len(INVENTORY_SCREENS)} item images, {len(INVENTORY_SCREENS)} window images")
 
+    interface: list[str] = []
+    if args.interface:
+        interface = sorted(interface_art(arch))
+        kinds = {}
+        for path in interface:
+            kinds[path.split("/")[1]] = kinds.get(path.split("/")[1], 0) + 1
+        print(f"interface: {len(interface)} images {kinds}")
+        arch.fetch(sorted(set(OWN_PALETTE.values())), raw)
+
     art = list(dict.fromkeys(INTERFACE + SCREENS + TILES + OBJECTS + sorted(region_tiles)
-                             + sorted(area_floor | area_roof) + sorted(objects) + inven
+                             + sorted(area_floor | area_roof) + sorted(objects) + inven + interface
                              + [e.lower() for e in args.extra]))
     sources = arch.fetch(art, raw)
 
     pal = raw / "color.pal"
+    # Phase 2.14 art from ce.dat replaces the archives' copies (ce.dat is
+    # above f2_res.dat and master.dat in the engine's file layering).
+    if args.interface:
+        for path in CE_DAT_FRM_ALL:
+            src = ce_dat_file(path)
+            if src is None:
+                print(f"warning: ce.dat {path} missing", file=sys.stderr)
+                continue
+            dst = raw / path
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+            if path not in art:
+                art.append(path)
+            sources[path] = "ce.dat"
     assets = []
     for path in art:
         if path not in sources:
@@ -417,15 +499,16 @@ def main() -> None:
         typ = path.split("/")[1]
         name = Path(path).stem
         key = f"art/{typ}/{name}.png"
-        if typ in ("walls", "scenery", "items", "misc"):
+        art_pal = raw / OWN_PALETTE[path] if path in OWN_PALETTE else pal
+        if typ in ("walls", "scenery", "items", "misc") or path in interface:
             directions, frames, _ = mapobjects.frm_frames(frm)
             if directions * frames > 1:
-                assets.extend(extract_frames(frm, path, typ, name, directions, frames, sources[path], pal,
+                assets.extend(extract_frames(frm, path, typ, name, directions, frames, sources[path], art_pal,
                                              path in objects))
                 continue
         dst = hdlib.SRC_DIR / key
         dst.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run([str(tool("ce-frm2png")), str(frm), str(dst), "--palette", str(pal)],
+        subprocess.run([str(tool("ce-frm2png")), str(frm), str(dst), "--palette", str(art_pal)],
                        check=True, capture_output=True)
         idx, _ = hdlib.load_indexed(dst)
         if path in TILES or path in region_tiles or path in area_floor or path in area_roof:
@@ -469,7 +552,7 @@ def main() -> None:
     sys.path.insert(0, str(hdlib.REPO_ROOT / "tools" / "dev"))
     import stimpack_menu_art
     stimpack_art = stimpack_menu_art.art_dir()
-    for path in CE_DAT_PNG + (CE_DAT_PNG_INVEN if args.inven else []):
+    for path in CE_DAT_PNG + (CE_DAT_PNG_INVEN if args.inven else []) + (CE_DAT_PNG_ALL if args.interface else []):
         src = (stimpack_art if path in CE_DAT_PNG else hdlib.REPO_ROOT / "files" / "ce.dat") / path
         if not src.exists() or palette_ref is None:
             print(f"warning: {src} missing", file=sys.stderr)

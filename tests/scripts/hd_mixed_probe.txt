@@ -4,4 +4,6 @@ hdprobe art/intrface/uparwoff.frm arrow
 hdprobe art/intrface/mainmenu.frm menu
 hdprobe art/tiles/ruf1000.frm roof
 hdprobe art/walls/jds1000.frm wall
+hdprobe art/intrface/numbers.frm numbers
+hdprobe art/intrface/wrldmp00.frm terrain
 quit 0
