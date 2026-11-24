@@ -61,6 +61,7 @@ NO_VARIANTS = {
     **dict.fromkeys(("plt", "shipflr", "stlflr", "grt", "encl", "enfl"), "regular: metal plates/grids"),
     **dict.fromkeys(("rst", "mstrflr", "tepflr"), "regular: floor tiles/slabs"),
     "carpet": "regular: carpet",
+    "cav": "cave floor (no variants: little effect)",
     "towr": "regular: New Reno building floors",
     **dict.fromkeys(("geka", "gekb", "tpla", "tplb", "head", "brn"), "picture / plates"),
     **dict.fromkeys(("slime", "shore"), "colour cycling"),
@@ -320,7 +321,7 @@ def main() -> None:
     if args.what == "packs":
         packs_sheet()
     elif args.what == "families":
-        materials = {f: name for name, m in ground_variants.MATERIALS.items() if "_" not in name
+        materials = {f: name for name, m in ground_variants.MATERIALS.items() if m.approved
                      for f in m.families}
         families_sheet(materials)
     elif args.what == "exemplars":

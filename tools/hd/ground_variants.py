@@ -61,31 +61,32 @@ MATERIALS = {
                        "seamless top-down orthographic photo of dry cracked mud ground in a desert, irregular crack "
                        "network, dusty, small stones, even light, high detail texture", 21, "edg5000",
                        approved=True),
-    # Phase 2.17 (proposal, not approved yet): streets and other natural
-    # ground; laid onto the isometric floor plane. "<material>_<option>" are
-    # the alternatives shown next to them.
-    "asphalt": Material(("road",), "exemplar_asphalt.png",
-                        "old weathered asphalt road surface, dark grey, visible coarse gravel aggregate, a few long "
-                        "thin cracks, oil stains, worn and dusty" + STYLE, 3, "road02", amount=0.7, project=True,
-                        seamless=True),
-    "asphalt_cracked": Material(("road",), "exemplar_asphalt_cracked.png",
-                                "old weathered asphalt road surface, coarse aggregate, network of hairline cracks and "
-                                "a few patched cracks, worn and dusty" + STYLE, 31, "road02", amount=0.8,
-                                project=True, seamless=True),
+    # Phase 2.17: streets and lawns, laid onto the isometric floor plane.
+    # Approved from the proposal (docs/screens/phase2.17/proposal_*.png):
+    # asphalt option 2 (crack network), pavement option 2 (light cracks),
+    # grass; caves get no variants. The other options are kept for the sheets.
+    "asphalt": Material(("road",), "exemplar_asphalt_cracked.png",
+                        "old weathered asphalt road surface, coarse aggregate, network of hairline cracks and a few "
+                        "patched cracks, worn and dusty" + STYLE, 31, "road02", amount=0.8, project=True,
+                        seamless=True, approved=True),
+    "asphalt_aggregate": Material(("road",), "exemplar_asphalt.png",
+                                  "old weathered asphalt road surface, dark grey, visible coarse gravel aggregate, a "
+                                  "few long thin cracks, oil stains, worn and dusty" + STYLE, 3, "road02", amount=0.7,
+                                  project=True, seamless=True),
     # Pavement slabs: the tiles' own joints run along the diamond edges, so
     # the detail fades out there (as desert ground) instead of a seamless field.
     "concrete": Material(("curb", "cmt"), "exemplar_concrete.png",
                          "cracked weathered concrete slab surface, irregular branching cracks, no seams, pitted and "
-                         "stained" + STYLE, 3, "curb16", project=True),
-    "concrete_light": Material(("curb", "cmt"), "exemplar_concrete.png",
-                               "cracked weathered concrete slab surface, irregular branching cracks, no seams, pitted "
-                               "and stained" + STYLE, 3, "curb16", amount=0.55, project=True),
+                         "stained" + STYLE, 3, "curb16", amount=0.55, project=True, approved=True),
+    "concrete_strong": Material(("curb", "cmt"), "exemplar_concrete.png",
+                                "cracked weathered concrete slab surface, irregular branching cracks, no seams, "
+                                "pitted and stained" + STYLE, 3, "curb16", project=True),
     "cave": Material(("cav",), "exemplar_cave.png",
                      "dark packed earth cave floor, fine grit and dust, a few small scattered rocks, shallow "
                      "cracks" + STYLE, 3, "cav1000", amount=0.5, project=True, seamless=True),
     "grass": Material(("grass",), "exemplar_grass.png",
                       "short dry lawn grass, dense blades, a few bare patches" + STYLE, 71, "grass01",
-                      scale=0.35, amount=0.8, project=True, seamless=True),
+                      scale=0.35, amount=0.8, project=True, seamless=True, approved=True),
 }
 
 EDGE_KEEP = 3    # px of the diamond edge kept exactly

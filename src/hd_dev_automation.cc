@@ -41,6 +41,7 @@
 #include "text_object.h"
 #include "tile.h"
 #include "window_manager.h"
+#include "worldmap.h"
 
 namespace fallout {
 
@@ -1258,6 +1259,31 @@ namespace {
 
     // `die`: the player dies (the game loop then shows the death scene; the
     // next commands run inside it).
+    // gotomap <map> [<elevation> <tile>]: the party moves to another map (a
+    // map transition, as through an exit grid), e.g. into a town's other
+    // maps for review sheets; without a tile the player keeps its hex.
+    bool commandGotomap(const DevAutomationCommand& command, bool first)
+    {
+        (void)first;
+        const std::vector<std::string>& args = command.args;
+        if (strcmp(devAutomationGetState(), "game") != 0 || (args.size() != 1 && args.size() != 3)) {
+            devAutomationFail(command, "usage: gotomap <map> [<elevation> <tile>] (in a game)");
+        }
+        std::vector<char> name(args[0].begin(), args[0].end());
+        name.push_back('\0');
+        Map map = wmMapMatchNameToIdx(name.data());
+        if (map == MAP_INVALID) {
+            devAutomationFail(command, "unknown map");
+        }
+        MapTransition transition = {};
+        transition.map = map;
+        transition.elevation = args.size() == 3 ? static_cast<MapElevation>(atoi(args[1].c_str())) : gElevation;
+        transition.tile = args.size() == 3 ? atoi(args[2].c_str()) : -1;
+        transition.rotation = ROTATION_NE;
+        mapSetTransition(&transition);
+        return true;
+    }
+
     bool commandDie(const DevAutomationCommand& command, bool first)
     {
         (void)first;
@@ -1325,6 +1351,7 @@ void hdDevAutomationInit()
     devAutomationRegisterCommand("perf", commandPerf);
     devAutomationRegisterCommand("worldmap", commandWorldmap);
     devAutomationRegisterCommand("die", commandDie);
+    devAutomationRegisterCommand("gotomap", commandGotomap);
 }
 
 void hdDevAutomationOnFadeStep(int step, int steps, bool toBlack)

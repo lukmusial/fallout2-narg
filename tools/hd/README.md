@@ -609,14 +609,26 @@ Observations (`docs/screens/phase2.17/packs_*.png`):
 NCR and Vault City with Stimpak's TRAVEL and checks that the floor shows pack
 art there (2x2 output blocks with detail), not doubled legacy pixels.
 
-### More ground materials (Phase 2.17, proposal)
+### More ground materials (Phase 2.17)
 
 `docs/screens/phase2.17/families_*.png` sorts every floor family (most map
-squares first) into the desert ground (done), materials proposed for variants
-and floors that stay regular (wood, brick, metal plates and grids, floor
-tiles, carpet, New Reno's building floors `towr`, pictures such as the Gecko
-reactor, colour cycling). `ground_variants.py` has a material table:
-families, exemplar, prompt and seed, scale, strength. New in this phase:
+squares first) into the materials with variants and the floors that stay
+regular (wood, brick, metal plates and grids, floor tiles, carpet, New
+Reno's building floors `towr`, pictures such as the Gecko reactor, colour
+cycling, caves). `ground_variants.py` has a material table: families,
+exemplar, prompt and seed, scale, strength. Approved from the proposal
+(`proposal_*.png`) and installed by default:
+
+| Material | Families | Exemplar | Strength | Tiles |
+|---|---|---|---|---|
+| desert (2.14) | `edg`, `edgs` | cracked dry mud | 1.0 | 49 |
+| asphalt (option 2) | `road` | asphalt with a crack network | 0.8, seamless | 39 |
+| pavement (option 2) | `curb`, `cmt` | cracked concrete slab | 0.55 | 63 |
+| grass | `grass` | short dry lawn | 0.8, seamless | 2 |
+
+Caves were proposed and declined (almost no visible effect on the dark cave
+floor); the other options (`asphalt_aggregate`, `concrete_strong`, `cave`)
+stay in the table for the sheets. New in this phase:
 
 - `project`: the exemplar is laid onto the isometric floor plane (an affine
   map with the floor lattice), so cracks and grain are foreshortened like
@@ -626,19 +638,40 @@ families, exemplar, prompt and seed, scale, strength. New in this phase:
   even asphalt. It crossfades to a field that is periodic on the floor
   lattice (`lattice_field`, built from the same exemplar), so every tile
   of the material has the same detail along its edges and neighbouring
-  squares join whatever variants they show. Pavement slabs (`curb`, `cmt`)
-  keep the fade: their joints run along the tile edges anyway.
+  squares join whatever variants they show. Pavement slabs keep the fade:
+  their joints run along the tile edges anyway.
 
 ```sh
 cd tools/hd
+python ground_variants.py              # all approved materials into both packs: ~3 s
 python materials_sheet.py families
-python materials_sheet.py proposal asphalt asphalt_cracked --maps newr2 depolv1
-python materials_sheet.py proposal concrete concrete_light --maps newr3 ncr1
-python materials_sheet.py proposal grass --maps vctycocl ncr1
-python materials_sheet.py proposal cave --maps arcaves cave0 klaratcv --exclude cav4009 cav4010
-python materials_sheet.py exemplars desert asphalt asphalt_cracked concrete cave grass
+python materials_sheet.py proposal asphalt asphalt_aggregate --maps newr2 depolv1
+python materials_sheet.py exemplars desert asphalt concrete grass
+.venv/bin/python towns_sheet.py        # runs the game hidden -> docs/screens/phase2.17/town_*.png
 ```
 
 (`python` = a venv with scipy, torch and diffusers; the exemplars come from
-the local SDXL base model, offline, about 23 s each.) The proposal variants
-go to `work/ground/proposal/<material>/`, not into the packs.
+the local SDXL base model, offline, about 23 s each; they are kept in
+`work/ground/`.) Proposal variants go to `work/ground/proposal/<material>/`,
+not into the packs.
+
+`towns_sheet.py` loads save slot 1 and moves the party with the new harness
+command `gotomap <map> [<elevation> <tile>]` (a map transition, as through an
+exit grid) to New Reno, NCR, Vault City, Broken Hills, Redding, Modoc, Gecko,
+San Francisco, Navarro, the military base and the Enclave, and shows legacy
+and HD side by side (`town_<map>.png`). Walls, scenery and critters of those
+towns have no pack art yet.
+
+`test_hd_town_*` also checks each material's variants in the game: in New
+Reno (asphalt, pavement) and Vault City's council area (grass, reached with
+`gotomap`) the frame with all variants is compared with the same view after
+`hdpack town_no_<material>`, a pack whose manifest sends that material's
+variants to a pack that does not exist. Asphalt changes 33% of the New Reno
+frame, pavement 4%, grass 30% of the Vault City one; the 8-bit picture is
+identical with and without variants.
+
+The `test_hd_map_*` goldens show the packs' own tiles, so those tests now run
+with `hd_ground_variants=0` (with the desert variants installed, slots 3, 5
+and 9 differed from them by 7-11%). Comparisons of the 8-bit picture in the
+town tests ignore pixels whose colour is a colour-cycling one in both frames
+(New Reno's trash-can fires animate between runs).

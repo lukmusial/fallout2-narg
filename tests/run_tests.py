@@ -487,8 +487,11 @@ def make_hd_map_test(pack, slot):
             raise TestSkipped(f"pack '{pack}' lacks the area art (tools/hd: extract.py --areas --objects, "
                               "enhance_*.py, install.py)")
         reset_saves()
+        # Ground variants off: the goldens show the packs' own tiles
+        # (test_hd_ground_variants and test_hd_town_* cover the variants).
         out, seconds = run_game(f"hd_map_{pack}_slot{slot:02d}", "hd_map.txt",
-                                [f"--dev-load-game={slot}", *HD_ARGS, f"[graphics]hd_pack={pack}"])
+                                [f"--dev-load-game={slot}", *HD_ARGS, f"[graphics]hd_pack={pack}",
+                                 "[graphics]hd_ground_variants=0"])
         compare_state(out / "state.json", f"slot{slot:02d}_state.json", False)
         check, share, scenery = hd_check(out, "check")
         hd_check(out, "scrolled")
@@ -1228,12 +1231,16 @@ def test_hd_ground_variants(update):
 # the town's ground and leave the 8-bit picture alone.
 
 HD_TOWN_MIN_FLOOR_DETAIL = 0.9    # HD floor/roof pixels whose 2x2 block is not flat
-HD_TOWN_MIN_VARIANT_CHANGE = 0.05  # of the frame, with variants on vs off
-# (town, letter keys in the LOCATION list, a tile whose variants the town shows)
+HD_TOWN_MIN_VARIANT_CHANGE = 0.01  # of the frame, per material: all variants vs that material's off
+HD_TOWN_VARIANT_LEVELS = 8         # summed RGB difference that counts as changed (pavement variants are light)
+# Ground variant materials (tools/hd/ground_variants.py): their tile families.
+HD_TOWN_MATERIALS = {"asphalt": ("road",), "concrete": ("curb", "cmt"), "grass": ("grass",)}
+# (town, letter keys in the LOCATION list, then `gotomap` arguments or None,
+# materials the view shows)
 HD_TOWNS = [
-    ("newreno", "n", "road03"),
-    ("ncr", "nn", "curb01"),
-    ("vaultcity", "v", None),
+    ("newreno", "n", None, ("asphalt", "concrete")),
+    ("ncr", "nn", None, ()),
+    ("vaultcity", "v", "vctycocl 0 16072", ("grass",)),   # the council area's lawns
 ]
 
 HD_TOWN_SCRIPT = """until mainmenu 20000
@@ -1258,12 +1265,43 @@ wait 1500
 key p
 until game 30000
 wait 2500
-dump state
+{goto}dump state
 fbshot game
 legacyshot legacy
 hdcheck check
-quit 0
+{without}quit 0
 """
+
+# With variants on: the same view with one material's variants switched off
+# (a pack whose manifest sends them to a pack that does not exist).
+HD_TOWN_WITHOUT = """hdpack town_no_{material}
+refresh
+wait 500
+fbshot no_{material}
+"""
+
+
+# Colours of the engine's colour-cycling tables (src/cycle.cc; slime,
+# monitors, fire, shoreline, alarm): they change between any two frames.
+CYCLE_COLOURS = np.array([(0, 108, 0), (11, 115, 7), (27, 123, 15), (43, 131, 27),
+                          (107, 107, 111), (99, 103, 127), (87, 107, 143), (0, 147, 163), (107, 187, 255),
+                          (255, 0, 0), (215, 0, 0), (147, 43, 11), (255, 119, 0), (255, 59, 0),
+                          (71, 0, 0), (123, 0, 0), (179, 0, 0),
+                          (83, 63, 43), (75, 59, 43), (67, 55, 39), (63, 51, 39), (55, 47, 35), (51, 43, 35),
+                          (252, 0, 0)], np.int16)
+
+
+def legacy_differs(a, b):
+    """Pixels of two 8-bit compositions that differ, colour cycling aside
+    (both colours near a cycling-table colour)."""
+    diff = np.abs(a - b).sum(axis=2) > 0
+    if not diff.any():
+        return 0
+    ys, xs = np.nonzero(diff)
+    def cycling(img):
+        c = img[ys, xs][:, None, :]
+        return (np.abs(c - CYCLE_COLOURS[None]).sum(axis=2) <= 16).any(axis=1)
+    return int((~(cycling(a) & cycling(b))).sum())
 
 
 def floor_detail(fb, out, name):
@@ -1276,17 +1314,38 @@ def floor_detail(fb, out, name):
     return float(detail[mask].mean()) if mask.any() else 0.0
 
 
-def make_hd_town_test(town, keys, variant_tile):
+def write_town_packs(materials):
+    """data/hd/town_no_<material>/manifest.txt: the mixed pack with that
+    material's variants looked up in a pack that does not exist."""
+    mixed = (ROOT / "files/ce.dat/hd/mixed/manifest.txt").read_text()
+    variants = RUN_DIR / "data/hd/ai/art/tiles/variants"
+    for material in materials:
+        lines = [mixed]
+        for tile in sorted(variants.iterdir()):
+            if tile.name.rstrip("0123456789") in HD_TOWN_MATERIALS[material]:
+                lines += [f"art/tiles/variants/{tile.name}/{k}.frm = none" for k in range(16)]
+        pack = run_dir() / f"data/hd/town_no_{material}"
+        pack.mkdir(parents=True, exist_ok=True)
+        (pack / "manifest.txt").write_text("\n".join(lines) + "\n")
+
+
+def make_hd_town_test(town, keys, goto, materials):
     def test(update):
         """A town outside the save games' areas: floors and roofs from the
-        pack (not doubled legacy pixels); its ground variants show in HD and
-        the 8-bit picture does not change."""
+        pack (not doubled legacy pixels); each of its ground variant
+        materials shows in HD; the 8-bit picture does not change."""
         if not (RUN_DIR / "data/hd/ai/art/tiles/road03.png").exists():
             raise TestSkipped("the packs lack the other towns' tiles (tools/hd: extract.py --all-tiles, "
                               "enhance_*.py, install.py)")
+        shown = [m for m in materials if (RUN_DIR / "data/hd/ai/art/tiles/variants").is_dir()
+                 and any(t.name.rstrip("0123456789") in HD_TOWN_MATERIALS[m]
+                         for t in (RUN_DIR / "data/hd/ai/art/tiles/variants").iterdir())]
+        write_town_packs(shown)
+        keys_text = "\n".join(f"key {k}" for k in keys)
+        goto_text = f"gotomap {goto}\nwait 3000\n" if goto else ""
         script = run_dir() / "devout/tests" / f"hd_town_{town}.txt"
         script.parent.mkdir(parents=True, exist_ok=True)
-        script.write_text(HD_TOWN_SCRIPT.format(keys="\n".join(f"key {k}" for k in keys)))
+        script.write_text(HD_TOWN_SCRIPT.format(keys=keys_text, goto=goto_text, without=""))
         args = [*HD_ARGS, "[graphics]hd_pack=mixed"]
         reset_saves()
         off, seconds = run_game(f"hd_town_{town}_off", script, args + ["[graphics]hd_ground_variants=0"])
@@ -1299,17 +1358,25 @@ def make_hd_town_test(town, keys, variant_tile):
             raise TestFailure(f"{town} ({state['map_name']}): only {detail:.0%} of HD floor blocks show "
                               "detail: doubled legacy tiles, not pack art")
         result = f"{state['map_name']}: floors/roofs {share:.0%} HD, {detail:.0%} with detail"
-        if variant_tile and (RUN_DIR / f"data/hd/ai/art/tiles/variants/{variant_tile}").is_dir():
+        if shown:
+            script_on = run_dir() / "devout/tests" / f"hd_town_{town}_on.txt"
+            script_on.write_text(HD_TOWN_SCRIPT.format(
+                keys=keys_text, goto=goto_text, without="".join(HD_TOWN_WITHOUT.format(material=m) for m in shown)))
             reset_saves()
-            on, more = run_game(f"hd_town_{town}_on", script, args + ["[graphics]hd_ground_variants=1"])
+            on, more = run_game(f"hd_town_{town}_on", script_on, args + ["[graphics]hd_ground_variants=1"])
             seconds += more
-            if not np.array_equal(load_png(off / "legacy.png"), load_png(on / "legacy.png")):
-                raise TestFailure(f"{town}: the 8-bit picture changed with ground variants")
-            a, b = load_png(off / "game.png"), load_png(on / "game.png")
-            changed = float((np.abs(a - b).sum(axis=2) > 24).mean())
-            if changed < HD_TOWN_MIN_VARIANT_CHANGE:
-                raise TestFailure(f"{town}: only {changed:.1%} of the frame changed: variants not drawn")
-            result += f", variants change {changed:.0%} of the frame, legacy identical"
+            differ = legacy_differs(load_png(off / "legacy.png"), load_png(on / "legacy.png"))
+            if differ:
+                raise TestFailure(f"{town}: the 8-bit picture changed with ground variants ({differ} pixels "
+                                  "outside colour cycling)")
+            game = load_png(on / "game.png")
+            changes = []
+            for m in shown:
+                changed = float((np.abs(game - load_png(on / f"no_{m}.png")).sum(axis=2) > HD_TOWN_VARIANT_LEVELS).mean())
+                if changed < HD_TOWN_MIN_VARIANT_CHANGE:
+                    raise TestFailure(f"{town}: {m} variants change only {changed:.1%} of the frame")
+                changes.append(f"{m} {changed:.0%}")
+            result += f", variants: {', '.join(changes)} of the frame, legacy identical"
         return f"{result} ({seconds:.0f}s)"
     test.__name__ = f"test_hd_town_{town}"
     return test
