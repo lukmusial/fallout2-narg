@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Phase 2.17 review sheets: the other towns' floors and roofs in the engine.
+"""Phase 2.17/2.18 review sheets: the other towns in the engine.
 
 Runs the game unattended (hidden window, no audio) on save slot 1 and moves
 the party to a map of each town with the `gotomap` harness command. In one
 tick the script captures the frame with no HD pack (legacy, pixel-doubled)
 and with the mixed pack and ground variants, so critters and lights are the
-same in both. Writes to docs/screens/phase2.17/:
+same in both. Writes to docs/screens/phase2.18/ (2.17: --out docs/screens/phase2.17):
 
   town_<map>.png      1:1 output-pixel crops (1280x960 game, 2x):
                       legacy | HD (mixed pack, ground variants)
 
   towns_sheet.py [--out DIR] [--reuse] [MAP ...]
 
-Walls, scenery and critters of these towns have no pack art yet: they show
-as doubled legacy pixels in both columns.
+Since Phase 2.18 walls, scenery and items are HD too; critters are pack
+art where Phase 2.9 made it (the saves' areas), else doubled pixels.
 """
 
 from __future__ import annotations
@@ -87,7 +87,7 @@ def run(name: str, where: str, reuse: bool) -> Path:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("maps", nargs="*", default=list(TOWNS))
-    ap.add_argument("--out", type=Path, default=hdlib.REPO_ROOT / "docs/screens/phase2.17")
+    ap.add_argument("--out", type=Path, default=hdlib.REPO_ROOT / "docs/screens/phase2.18")
     ap.add_argument("--reuse", action="store_true", help="reuse game runs from an earlier invocation")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -97,7 +97,7 @@ def main() -> None:
         out = run(name, where, args.reuse)
         frames = [load(out / f"{kind}.png", double=False) for kind in ("legacy", "hd")]
         rows = [[f[y * 2:(y + h) * 2, x * 2:(x + w) * 2] for f in frames] for x, y, w, h in crops]
-        save(sheet(f"{label} ({name}), floors and roofs, 1280x960", rows, labels), args.out / f"town_{name}.png")
+        save(sheet(f"{label} ({name}), 1280x960", rows, labels), args.out / f"town_{name}.png")
     subprocess.run([str(hdlib.REPO_ROOT / "tools/dev/reset-saves.sh")], check=True, stdout=subprocess.DEVNULL)
 
 

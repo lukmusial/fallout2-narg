@@ -172,9 +172,12 @@ def colour_correct(ai2x: np.ndarray, src: np.ndarray, sigma: float = 1.5, detail
 
 
 def enhance_indices(net, scale, indices: np.ndarray, palette: np.ndarray, tile: bool = False,
-                    correct: bool = True, detail: float = 0.3, context: dict | None = None) -> np.ndarray:
+                    correct: bool = True, detail: float = 0.3, context: dict | None = None,
+                    wall_context: list | None = None) -> np.ndarray:
     if tile:
         work, _ = hdlib.wrap_pad_tile(indices, TILE_PAD, context)
+    elif wall_context:
+        work = hdlib.pad_with_context(indices, TILE_PAD, wall_context)
     else:
         work = indices
     transparent, cycling = hdlib.masks(work)
@@ -184,7 +187,7 @@ def enhance_indices(net, scale, indices: np.ndarray, palette: np.ndarray, tile: 
         big = box_down(big, scale // 2)
     if correct:
         big = colour_correct(big, rgb, detail=detail)
-    if tile:
+    if tile or wall_context:
         p = 2 * TILE_PAD
         big = big[p:p + 2 * indices.shape[0], p:p + 2 * indices.shape[1]]
     return np.clip(big, 0, 255)
@@ -212,6 +215,8 @@ def main() -> None:
         idx, pal = hdlib.load_indexed(hdlib.source_path(asset))
         big = enhance_indices(net, scale, idx, pal, tile=hdlib.is_tile(asset),
                               context=hdlib.tile_context(asset["name"]) if hdlib.is_tile(asset) else None,
+                              wall_context=(hdlib.object_context(asset["key"]) if asset["type"] == "walls"
+                                            else None),
                               correct=not args.no_colour_correct,
                               detail=args.tile_detail if hdlib.is_tile(asset) else args.detail)
         rgba = hdlib.compose_rgba(big, idx)

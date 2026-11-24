@@ -26,6 +26,10 @@ Writes into the gitignored work dir (tools/hd/work by default):
   extract.py --areas --objects --inven --interface
                                 # + every other interface image and every
                                 #   skilldex card (Phase 2.14)
+  extract.py ... --all-tiles --all-objects
+                                # + every wall, scenery and item placed on
+                                #   any map, and every item's ground art
+                                #   (items move between maps) (Phase 2.18)
   extract.py ... --all-tiles    # + every floor and roof tile of every map,
                                 #   and every other tile in tiles.lst (placed
                                 #   by scripts or unused) (Phase 2.17)
@@ -452,6 +456,8 @@ def main() -> None:
     ap.add_argument("--interface", action="store_true",
                     help="every other interface image (art/intrface, f2_res.dat, ce.dat) and every "
                          "skilldex card (art/skilldex); endgame and intro slides excepted")
+    ap.add_argument("--all-objects", action="store_true",
+                    help="with --all-tiles: every wall, scenery and item on every map, and all item ground art")
     ap.add_argument("--all-tiles", action="store_true",
                     help="every floor and roof tile of every map, and every other tile in tiles.lst")
     args = ap.parse_args()
@@ -514,6 +520,23 @@ def main() -> None:
         for path in objects:
             kinds[path.split("/")[1]] = kinds.get(path.split("/")[1], 0) + 1
         print(f"objects: {len(objects)} art files {kinds}")
+
+    if args.all_objects:
+        if not (args.all_tiles and args.objects):
+            raise SystemExit("--all-objects needs --objects and --all-tiles")
+        every, ostats = area_objects(arch, raw, all_maps)
+        before = len(objects)
+        objects |= every
+        # every item's ground art: items are carried and dropped anywhere
+        objects |= {f"art/items/{n}" for n in mapobjects.read_art_list(raw / "art/items/items.lst") if n}
+        kinds = {}
+        for path in objects:
+            kinds[path.split("/")[1]] = kinds.get(path.split("/")[1], 0) + 1
+        print(f"all objects: {len(objects)} art files ({len(objects) - before} new) {kinds}")
+        import wallmap
+        walls = wallmap.wall_neighbours([Path(m).stem for m in all_maps])
+        hdlib.WALL_NEIGHBOURS.write_text(json.dumps(walls, indent=0, sort_keys=True))
+        print(f"{len(walls)} wall pieces with neighbours -> {hdlib.WALL_NEIGHBOURS}")
 
     inven: list[str] = []
     if args.inven:

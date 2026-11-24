@@ -236,6 +236,37 @@ def tile_context(name: str) -> dict[tuple[int, int], np.ndarray]:
     return out
 
 
+# Phase 2.18: wall pieces join their neighbours in a run; extract.py
+# --all-objects writes each wall's most common surroundings and the
+# enhancers draw them around the piece (instead of transparency).
+WALL_NEIGHBOURS = WORK_DIR / "wall_neighbours.json"
+_wall_neighbours: dict | None = None
+
+
+def object_context(key: str) -> list[tuple[np.ndarray, int, int]]:
+    """[(neighbour indices, dx, dy)] around a wall piece, in draw order."""
+    global _wall_neighbours
+    if _wall_neighbours is None:
+        _wall_neighbours = json.loads(WALL_NEIGHBOURS.read_text()) if WALL_NEIGHBOURS.exists() else {}
+    out = []
+    for other, dx, dy in _wall_neighbours.get(key, []):
+        path = SRC_DIR / other
+        if path.exists():
+            out.append((load_indexed(path)[0], dx, dy))
+    return out
+
+
+def pad_with_context(indices: np.ndarray, pad: int, context: list) -> np.ndarray:
+    """The piece in the middle of a canvas `pad` px larger on every side,
+    its neighbours drawn first, the piece itself on top."""
+    h, w = indices.shape
+    canvas = np.zeros((h + 2 * pad, w + 2 * pad), dtype=np.uint8)
+    for other, dx, dy in context:
+        _blit(canvas, other, other != 0, pad + dx, pad + dy)
+    _blit(canvas, indices, indices != 0, pad, pad)
+    return canvas
+
+
 def _blit(canvas, src, opaque, x0, y0):
     h, w = src.shape
     H, W = canvas.shape

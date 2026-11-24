@@ -162,3 +162,16 @@ art/tiles/vrof040.frm = scripted
 art/tiles/vrof041.frm = scripted
 art/tiles/vrof042.frm = scripted
 art/tiles/vrof043.frm = scripted
+
+# Phase 2.18, objects of the other towns. Round grilles (Enclave vents,
+# tanker hatch): the AI wipes out the grille pattern.
+art/scenery/encl37.frm = scripted
+art/scenery/encl38.frm = scripted
+art/scenery/shipsc09.frm = scripted
+# Opening containers (ammo boxes, wall lockers, safe): the AI renders the
+# frames differently, so the still parts shimmer while they open.
+art/items/ammobox1.frm = scripted
+art/items/ammobox4.frm = scripted
+art/items/walllkr1.frm = scripted
+art/items/walllkr3.frm = scripted
+art/items/safe.frm = scripted

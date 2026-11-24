@@ -1250,6 +1250,7 @@ def test_hd_lights_text(update):
 
 HD_TOWN_MIN_FLOOR_DETAIL = 0.9    # HD floor/roof pixels whose 2x2 block is not flat
 HD_TOWN_MIN_VARIANT_CHANGE = 0.01  # of the frame, per material: all variants vs that material's off
+HD_TOWN_MIN_SCENERY_DETAIL = 0.5  # Phase 2.18: HD wall/scenery/item blocks with detail (pack art)
 HD_TOWN_VARIANT_LEVELS = 8         # summed RGB difference that counts as changed (pavement variants are light)
 # Ground variant materials (tools/hd/ground_variants.py): their tile families.
 HD_TOWN_MATERIALS = {"asphalt": ("road",), "concrete": ("curb", "cmt"), "grass": ("grass",)}
@@ -1376,6 +1377,22 @@ def make_hd_town_test(town, keys, goto, materials):
             raise TestFailure(f"{town} ({state['map_name']}): only {detail:.0%} of HD floor blocks show "
                               "detail: doubled legacy tiles, not pack art")
         result = f"{state['map_name']}: floors/roofs {share:.0%} HD, {detail:.0%} with detail"
+        if (RUN_DIR / "data/hd/ai/art/walls/adb0989.png").exists():
+            objects = scenery_detail(load_png(off / "game.png"), off, "check")
+            scenery = check["scenery_pixels_hd"] / max(check["scenery_pixels"], 1)
+            if check["scenery_pixels"] > 1000 and (scenery < HD_MIN_SCENERY_HD or objects < HD_TOWN_MIN_SCENERY_DETAIL):
+                raise TestFailure(f"{town} ({state['map_name']}): walls/scenery/items {scenery:.0%} HD, only "
+                                  f"{objects:.0%} with detail: doubled legacy art, not pack art")
+            result += f"; walls/scenery/items {scenery:.0%} HD, {objects:.0%} with detail"
+            # the same view without HD: the 8-bit picture must be the same
+            reset_saves()
+            plain, more = run_game(f"hd_town_{town}_hd0", script, ["[graphics]hd=0"])
+            seconds += more
+            differ = legacy_differs(load_png(plain / "legacy.png"), load_png(off / "legacy.png"))
+            if differ:
+                raise TestFailure(f"{town}: the 8-bit picture differs from hd=0 ({differ} pixels outside colour "
+                                  "cycling)")
+            result += ", 8-bit picture = hd=0"
         if shown:
             script_on = run_dir() / "devout/tests" / f"hd_town_{town}_on.txt"
             script_on.write_text(HD_TOWN_SCRIPT.format(
