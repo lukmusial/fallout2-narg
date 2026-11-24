@@ -9,6 +9,7 @@
 #include "game_mouse.h"
 #include "game_sound.h"
 #include "graph_lib.h"
+#include "hd_art.h"
 #include "input.h"
 #include "kb.h"
 #include "loadsave.h"
@@ -303,6 +304,7 @@ static int optionsWindowInit()
 
     optionsWindowBuffer = windowGetBuffer(optionsWindow);
     memcpy(optionsWindowBuffer, _optionsFrmImages[OPTIONS_WINDOW_FRM_BACKGROUND].getData(), static_cast<size_t>(_optionsFrmImages[OPTIONS_WINDOW_FRM_BACKGROUND].getWidth()) * _optionsFrmImages[OPTIONS_WINDOW_FRM_BACKGROUND].getHeight());
+    hdArtDrawImage(optionsWindow, _optionsFrmImages[OPTIONS_WINDOW_FRM_BACKGROUND], 0, 0);
 
     fontSetCurrent(103);
 
@@ -345,6 +347,8 @@ static int optionsWindowInit()
             BUTTON_FLAG_TRANSPARENT);
         if (btn != -1) {
             buttonSetCallbacks(btn, _gsound_lrg_butt_press, _gsound_lrg_butt_release);
+            // CE: HD art of the plain button images (the labels stay legacy).
+            hdArtSetButtonArt(btn, &_optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_OFF], &_optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON]);
         }
 
         buttonY += _optionsFrmImages[OPTIONS_WINDOW_FRM_BUTTON_ON].getHeight() + 3;
@@ -480,6 +484,7 @@ int showPause(bool preserveWorldState)
     memcpy(windowBuffer,
         frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getData(),
         static_cast<size_t>(frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getWidth()) * frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getHeight());
+    hdArtDrawImage(window, frmImages[PAUSE_WINDOW_FRM_BACKGROUND], 0, 0);
 
     blitBufferToBufferTrans(frmImages[PAUSE_WINDOW_FRM_DONE_BOX].getData(),
         frmImages[PAUSE_WINDOW_FRM_DONE_BOX].getWidth(),
@@ -487,6 +492,7 @@ int showPause(bool preserveWorldState)
         frmImages[PAUSE_WINDOW_FRM_DONE_BOX].getWidth(),
         windowBuffer + static_cast<size_t>(frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getWidth()) * 42 + 13,
         frmImages[PAUSE_WINDOW_FRM_BACKGROUND].getWidth());
+    hdArtDrawImage(window, frmImages[PAUSE_WINDOW_FRM_DONE_BOX], 13, 42);
 
     optionsWindowOldFont = fontGetCurrent();
     fontSetCurrent(103);
@@ -527,6 +533,7 @@ int showPause(bool preserveWorldState)
         BUTTON_FLAG_TRANSPARENT);
     if (doneBtn != -1) {
         buttonSetCallbacks(doneBtn, _gsound_red_butt_press, _gsound_red_butt_release);
+        hdArtSetButtonArt(doneBtn, &frmImages[PAUSE_WINDOW_FRM_LITTLE_RED_BUTTON_UP], &frmImages[PAUSE_WINDOW_FRM_LITTLE_RED_BUTTON_DOWN]);
     }
 
     windowRefresh(window);

@@ -14,6 +14,7 @@
 #include "game_mouse.h"
 #include "game_sound.h"
 #include "graph_lib.h"
+#include "hd_art.h"
 #include "input.h"
 #include "kb.h"
 #include "mainmenu.h"
@@ -666,6 +667,7 @@ static void _UpdateThing(Preference index)
         memcpy(offsets, dword_48FC1C, sizeof(dword_48FC1C));
 
         blitBufferToBuffer(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getData() + 640 * offsets[primaryOptionIndex] + 23, 160, 54, 640, gPreferencesWindowBuffer + 640 * offsets[primaryOptionIndex] + 23, 640);
+        hdArtDrawImageOffset(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND], 640 * offsets[primaryOptionIndex] + 23, 160, 54, 640 * offsets[primaryOptionIndex] + 23, 640);
 
         for (int valueIndex = 0; valueIndex < meta->valuesCount; valueIndex++) {
             const char* text = getmsg(&gPreferencesMessageList, &gPreferencesMessageListItem, meta->labelIds[valueIndex]);
@@ -711,6 +713,7 @@ static void _UpdateThing(Preference index)
 
         int value = _GetPrefrencesValue(index, *meta);
         blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_PRIMARY_SWITCH].getData() + (46 * 47) * value, 46, 47, 46, gPreferencesWindowBuffer + 640 * meta->knobY + meta->knobX, 640);
+        hdArtDrawImageOffset(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_PRIMARY_SWITCH], (46 * 47) * value, 46, 47, 640 * meta->knobY + meta->knobX, 640);
     } else if (index >= FIRST_SECONDARY_PREF && index <= LAST_SECONDARY_PREF) {
         int secondaryOptionIndex = index - FIRST_SECONDARY_PREF;
 
@@ -718,6 +721,7 @@ static void _UpdateThing(Preference index)
         memcpy(offsets, dword_48FC30, sizeof(dword_48FC30));
 
         blitBufferToBuffer(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getData() + 640 * offsets[secondaryOptionIndex] + 251, 113, 34, 640, gPreferencesWindowBuffer + 640 * offsets[secondaryOptionIndex] + 251, 640);
+        hdArtDrawImageOffset(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND], 640 * offsets[secondaryOptionIndex] + 251, 113, 34, 640 * offsets[secondaryOptionIndex] + 251, 640);
 
         // Secondary options are booleans, so it's index is also it's value.
         for (int value = 0; value < 2; value++) {
@@ -739,8 +743,10 @@ static void _UpdateThing(Preference index)
             value ^= 1;
         }
         blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_SECONDARY_SWITCH].getData() + (22 * 25) * value, 22, 25, 22, gPreferencesWindowBuffer + 640 * meta->knobY + meta->knobX, 640);
+        hdArtDrawImageOffset(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_SECONDARY_SWITCH], (22 * 25) * value, 22, 25, 640 * meta->knobY + meta->knobX, 640);
     } else if (index >= FIRST_RANGE_PREF && index <= LAST_RANGE_PREF) {
         blitBufferToBuffer(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getData() + 640 * (meta->knobY - 12) + 384, 240, 24, 640, gPreferencesWindowBuffer + 640 * (meta->knobY - 12) + 384, 640);
+        hdArtDrawImageOffset(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND], 640 * (meta->knobY - 12) + 384, 240, 24, 640 * (meta->knobY - 12) + 384, 640);
         switch (index) {
         case PREF_COMBAT_SPEED:
             if (1) {
@@ -749,6 +755,7 @@ static void _UpdateThing(Preference index)
 
                 int x = (int)((value - meta->minValue) * 219.0 / (meta->maxValue - meta->minValue) + 384.0);
                 blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_OFF].getData(), 21, 12, 21, gPreferencesWindowBuffer + 640 * meta->knobY + x, 640);
+                hdArtDrawImageOffset(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_OFF], 0, 21, 12, 640 * meta->knobY + x, 640);
             }
             break;
         case PREF_TEXT_BASE_DELAY:
@@ -757,6 +764,7 @@ static void _UpdateThing(Preference index)
 
                 int x = (int)((6.0 - gPreferencesTextBaseDelay1) * 43.8 + 384.0);
                 blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_OFF].getData(), 21, 12, 21, gPreferencesWindowBuffer + 640 * meta->knobY + x, 640);
+                hdArtDrawImageOffset(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_OFF], 0, 21, 12, 640 * meta->knobY + x, 640);
 
                 double value = (gPreferencesTextBaseDelay1 - 1.0) * 0.2 * 2.0;
                 value = std::clamp(value, 0.0, 2.0);
@@ -775,6 +783,7 @@ static void _UpdateThing(Preference index)
 
                 int x = (int)((value - meta->minValue) * 219.0 / (meta->maxValue - meta->minValue) + 384.0);
                 blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_OFF].getData(), 21, 12, 21, gPreferencesWindowBuffer + 640 * meta->knobY + x, 640);
+                hdArtDrawImageOffset(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_OFF], 0, 21, 12, 640 * meta->knobY + x, 640);
 
                 switch (index) {
                 case PREF_MASTER_VOLUME:
@@ -800,6 +809,7 @@ static void _UpdateThing(Preference index)
 
                 int x = (int)((gPreferencesBrightness1 - meta->minValue) * (219.0 / (meta->maxValue - meta->minValue)) + 384.0);
                 blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_OFF].getData(), 21, 12, 21, gPreferencesWindowBuffer + 640 * meta->knobY + x, 640);
+                hdArtDrawImageOffset(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_OFF], 0, 21, 12, 640 * meta->knobY + x, 640);
 
                 colorSetBrightness(gPreferencesBrightness1);
             }
@@ -810,6 +820,7 @@ static void _UpdateThing(Preference index)
 
                 int x = (int)((gPreferencesMouseSensitivity1 - meta->minValue) * (219.0 / (meta->maxValue - meta->minValue)) + 384.0);
                 blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_OFF].getData(), 21, 12, 21, gPreferencesWindowBuffer + 640 * meta->knobY + x, 640);
+                hdArtDrawImageOffset(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_OFF], 0, 21, 12, 640 * meta->knobY + x, 640);
 
                 mouseSetSensitivity(gPreferencesMouseSensitivity1);
             }
@@ -1083,6 +1094,7 @@ static int preferencesWindowInit()
     memcpy(gPreferencesWindowBuffer,
         _preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getData(),
         static_cast<size_t>(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getWidth()) * _preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getHeight());
+    hdArtDrawImage(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND], 0, 0);
 
     fontSetCurrent(104);
 
@@ -1240,6 +1252,9 @@ static int preferencesWindowInit()
     if (btn != -1) {
         buttonSetCallbacks(btn, _gsound_red_butt_press, _gsound_red_butt_release);
     }
+
+    // CE: HD art for the buttons made from the screen's images.
+    hdArtAttachButtonArt(gPreferencesWindow, _preferencesFrmImages, PREFERENCES_WINDOW_FRM_COUNT);
 
     fontSetCurrent(101);
 
@@ -1529,7 +1544,9 @@ static void _DoThing(int eventCode)
 
         int knobTrackX = (int)((value - meta->minValue) * (219.0 / (meta->maxValue - meta->minValue)) + 384.0);
         blitBufferToBuffer(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getData() + PREFERENCES_WINDOW_WIDTH * meta->knobY + 384, 240, 12, PREFERENCES_WINDOW_WIDTH, gPreferencesWindowBuffer + PREFERENCES_WINDOW_WIDTH * meta->knobY + 384, PREFERENCES_WINDOW_WIDTH);
+        hdArtDrawImageOffset(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND], PREFERENCES_WINDOW_WIDTH * meta->knobY + 384, 240, 12, PREFERENCES_WINDOW_WIDTH * meta->knobY + 384, PREFERENCES_WINDOW_WIDTH);
         blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_ON].getData(), 21, 12, 21, gPreferencesWindowBuffer + PREFERENCES_WINDOW_WIDTH * meta->knobY + knobTrackX, PREFERENCES_WINDOW_WIDTH);
+        hdArtDrawImageOffset(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_ON], 0, 21, 12, PREFERENCES_WINDOW_WIDTH * meta->knobY + knobTrackX, PREFERENCES_WINDOW_WIDTH);
 
         windowRefresh(gPreferencesWindow);
 
@@ -1624,6 +1641,7 @@ static void _DoThing(int eventCode)
             if (redrawLabels) {
                 int off = PREFERENCES_WINDOW_WIDTH * (meta->knobY - 12) + 384;
                 blitBufferToBuffer(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getData() + off, 240, 24, PREFERENCES_WINDOW_WIDTH, gPreferencesWindowBuffer + off, PREFERENCES_WINDOW_WIDTH);
+                hdArtDrawImageOffset(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND], off, 240, 24, off, PREFERENCES_WINDOW_WIDTH);
 
                 for (int optionIndex = 0; optionIndex < meta->valuesCount; optionIndex++) {
                     const char* str = getmsg(&gPreferencesMessageList, &gPreferencesMessageListItem, meta->labelIds[optionIndex]);
@@ -1634,9 +1652,11 @@ static void _DoThing(int eventCode)
             } else {
                 int off = PREFERENCES_WINDOW_WIDTH * meta->knobY + 384;
                 blitBufferToBuffer(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND].getData() + off, 240, 12, PREFERENCES_WINDOW_WIDTH, gPreferencesWindowBuffer + off, PREFERENCES_WINDOW_WIDTH);
+                hdArtDrawImageOffset(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_BACKGROUND], off, 240, 12, off, PREFERENCES_WINDOW_WIDTH);
             }
 
             blitBufferToBufferTrans(_preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_ON].getData(), 21, 12, 21, gPreferencesWindowBuffer + PREFERENCES_WINDOW_WIDTH * meta->knobY + knobTrackX, PREFERENCES_WINDOW_WIDTH);
+            hdArtDrawImageOffset(gPreferencesWindow, _preferencesFrmImages[PREFERENCES_WINDOW_FRM_KNOB_ON], 0, 21, 12, PREFERENCES_WINDOW_WIDTH * meta->knobY + knobTrackX, PREFERENCES_WINDOW_WIDTH);
             windowRefresh(gPreferencesWindow);
 
             delay_ms(35 - (getTicks() - tick));

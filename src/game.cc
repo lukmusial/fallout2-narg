@@ -29,6 +29,7 @@
 #include "game_mouse.h"
 #include "game_movie.h"
 #include "game_sound.h"
+#include "hd_art.h"
 #include "game_speed.h"
 #include "input.h"
 #include "interface.h"
@@ -1285,6 +1286,7 @@ void showHelp()
             if (backgroundFrmImage.lock(InterfaceFrameId::HelpBackground)) {
                 paletteSetEntries(gPaletteBlack);
                 blitBufferToBuffer(backgroundFrmImage.getData(), HELP_SCREEN_WIDTH, HELP_SCREEN_HEIGHT, HELP_SCREEN_WIDTH, windowBuffer, HELP_SCREEN_WIDTH);
+                hdArtDrawImage(win, backgroundFrmImage, 0, 0);
 
                 colorPaletteLoad("art\\intrface\\helpscrn.pal");
                 paletteSetEntries(_cmap);
