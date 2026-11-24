@@ -125,6 +125,9 @@ struct GraphicsSettings {
     // With hd_lights=1: the light a walking critter carries follows the
     // drawn sprite instead of jumping hex by hex (Phase 2.13).
     bool hd_lights_follow = true;
+    // With hd=1: floor tiles that have variants in the HD pack (Phase 2.14,
+    // tools/hd/ground_variants.py) show a different variant per map square.
+    bool hd_ground_variants = true;
     // Map view (Phase 2.13, see map_view.h): smooth, per-frame map panning
     // (scroll_speed in percent of the original speed) and zooming the map
     // (mouse wheel, Ctrl+= / Ctrl+- / Ctrl+0).

@@ -1,0 +1,6 @@
+# One HD frame and the legacy composition of the loaded map (ground variants test).
+until game 30000
+wait 2000
+fbshot fb
+legacyshot legacy
+quit 0

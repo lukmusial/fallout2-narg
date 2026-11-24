@@ -416,3 +416,26 @@ whole 1x patch at once, where every tile has its true neighbours.
   engine change or alpha-aware handling for shadows.
 - **AI is not bit-reproducible** (MPS float32). The scripted pack is
   bit-exact, which the tests check.
+
+## Ground variants (Phase 2.14)
+
+The desert ground (`edg*` tiles: most of the floor of Arroyo, Klamath and the
+Den) repeated visibly: one tile, `edg5000`, alone is a quarter of all floor
+squares. `ground_variants.py` gives every `edg*` tile 8 variants with real
+ground detail: an exemplar texture of cracked dry earth, generated once from a
+text prompt with the local SDXL model (`work/ground/exemplar_cracked.png`, no
+game art goes in), lends each variant the fine detail of a different crop,
+laid over the tile's own colours (rough, rocky tiles get less). The detail
+fades out over the outer ~13 px of the diamond, so every variant joins every
+neighbour exactly like the original tile.
+
+```sh
+cd tools/hd
+.venv/bin/python ground_variants.py            # ~10 s; --exemplar regenerates the texture
+```
+
+Variants live in `<pack>/art/tiles/variants/<name>/<k>.png`. With `[graphics]
+hd_ground_variants=1` `src/tile.cc` draws, on each map square, the variant a
+hash of the square picks (the same one every time); tiles without variants
+are drawn as before. The 8-bit picture does not change.
+
