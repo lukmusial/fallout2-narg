@@ -1232,7 +1232,9 @@ def test_hd_lights_text(update):
         a = np.asarray(Image.open(plain / f"with_text_{kind}.png"), dtype=np.int16)
         b = np.asarray(Image.open(text / f"with_text_{kind}.png"), dtype=np.int16)
         worst = max(worst, int(np.abs(a - b).max()))
-    if worst > 2:
+    # Two runs of the same scene differ by up to ~26 levels (flicker timing);
+    # the text taken for a sign added up to 221.
+    if worst > 60:
         raise TestFailure(f"the floating text changed the light field by up to {worst} levels")
     return f"light field unchanged by the text ({seconds:.0f}s)"
 
