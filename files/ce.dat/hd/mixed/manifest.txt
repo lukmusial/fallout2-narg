@@ -81,3 +81,14 @@ art/inven/suprtool.frm = scripted
 art/intrface/numbers.frm = scripted
 art/intrface/months.frm = scripted
 art/intrface/bignum.frm = scripted
+
+# Interface bar buttons with lettering (MAP, CHA, PIP, INV): the AI outlines
+# and breaks the letters; scripted keeps them clean.
+art/intrface/mapup.frm = scripted
+art/intrface/mapdn.frm = scripted
+art/intrface/chaup.frm = scripted
+art/intrface/chadn.frm = scripted
+art/intrface/pipup.frm = scripted
+art/intrface/pipdn.frm = scripted
+art/intrface/invbutup.frm = scripted
+art/intrface/invbutdn.frm = scripted

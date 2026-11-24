@@ -859,6 +859,89 @@ def make_hd_static_test(pack):
     return test
 
 
+# --- Phase 2.16: the interface bar ---------------------------------------------
+#
+# tests/scripts/hd_bar.txt (slot 1) captures the bar, then combat mode (end
+# buttons out, AP bar lit). At 640x480 logical the bar is iface.frm; at
+# 3440x1440 (scale 2, 1720x720 logical) it is HR_IFACE_800 with the side
+# panels. The bar's 8-bit composition must equal an hd=0 run's.
+
+HD_BAR_PACKS = ("ai", "mixed")
+HD_BAR_WIDE = ["[screen]resolution_x=3440", "[screen]resolution_y=1440", "[screen]scale=2"]
+# (screen, wide): logical rectangles of the bar window and of art with HD detail.
+HD_BAR_WINDOW = {False: (0, 380, 640, 480), True: (0, 620, 1720, 720)}
+HD_BAR_ART = {
+    False: [(0, 380, 640, 480), (580, 418, 637, 476)],  # bar, end buttons
+    True: [(460, 620, 1260, 720), (0, 620, 400, 720), (1320, 620, 1720, 720)],  # bar, side panels
+}
+HD_BAR_TEXT = [(20, 384, 200, 470)]  # message monitor (legacy text with hd_text=0)
+
+_hd_bar_legacy_out = None
+
+
+def bar_pack_installed(pack):
+    packs = ("scripted", "ai") if pack == "mixed" else (pack,)
+    return all((RUN_DIR / f"data/hd/{p}/art/intrface/{art}").exists() for p in packs
+               for art in ("iface.png", "hr_iface_800.png", "hr_ifacelft2.png", "endanim.fhd"))
+
+
+def hd_bar_legacy_reference():
+    global _hd_bar_legacy_out
+    if _hd_bar_legacy_out is None:
+        reset_saves()
+        normal, _ = run_game("hd_bar_legacy", "hd_bar.txt", ["--dev-load-game=1"])
+        reset_saves()
+        wide, _ = run_game("hd_bar_wide_legacy", "hd_bar.txt", ["--dev-load-game=1", *HD_BAR_WIDE])
+        _hd_bar_legacy_out = {False: normal, True: wide}
+    return _hd_bar_legacy_out
+
+
+def make_hd_bar_test(pack):
+    def test(update):
+        """Interface bar (iface, HR_IFACE_800 with side panels), its
+        buttons, AP bar and end buttons in combat with a real HD pack: HD
+        detail, legacy monitor text intact, the bar's 8-bit frames exactly as
+        with hd=0, goldens with tolerance."""
+        if not bar_pack_installed(pack):
+            raise TestSkipped(f"pack '{pack}' lacks the bar art (tools/hd: extract.py ... --interface, enhance_*.py, install.py)")
+        legacy_outs = hd_bar_legacy_reference()
+        notes = []
+        seconds = 0
+        for wide in (False, True):
+            reset_saves()
+            out, took = run_game(f"hd_bar_{'wide_' if wide else ''}{pack}", "hd_bar.txt",
+                                 ["--dev-load-game=1", *HD_ARGS, f"[graphics]hd_pack={pack}", *(HD_BAR_WIDE if wide else [])])
+            seconds += took
+            for screen in ("game", "combat"):
+                fb = load_png(out / f"{screen}.png")
+                eight = load_png(out / f"{screen}_legacy.png")
+                legacy = load_png(legacy_outs[wide] / f"{screen}.png")
+                if eight.shape != legacy.shape or fb.shape[:2] != (eight.shape[0] * 2, eight.shape[1] * 2):
+                    raise TestFailure(f"{screen}: unexpected sizes {fb.shape} / {eight.shape} / {legacy.shape}")
+                left, top, right, bottom = HD_BAR_WINDOW[wide]
+                changed = float(np.any(eight[top:bottom, left:right] != legacy[top:bottom, left:right], axis=2).mean())
+                if changed > HD_INVENTORY_MAX_CHANGED:
+                    raise TestFailure(f"{screen}{' wide' if wide else ''}: 8-bit bar differs from hd=0 ({changed:.2%} of pixels)")
+                regions = HD_BAR_ART[wide] if screen == "combat" or wide else HD_BAR_ART[wide][:1]
+                details = []
+                for region in regions:
+                    detail = blocks_detail(fb, region)
+                    if detail < 0.5:
+                        raise TestFailure(f"{screen}{' wide' if wide else ''}: no HD detail in {region} ({detail:.0%})")
+                    details.append(f"{detail:.0%}")
+                if not wide:
+                    for region in HD_BAR_TEXT:
+                        kept, count = legacy_text_kept(fb, eight, region)
+                        if count < 50 or kept < 0.98:
+                            raise TestFailure(f"{screen}: monitor text in {region}: {kept:.1%} of {count} pixels kept")
+                golden = compare_hd_golden_live(out / f"{screen}.png",
+                                                f"hd_bar_{pack}_{'wide_' if wide else ''}{screen}.png", update)
+                notes.append(f"{'wide ' if wide else ''}{screen} {'/'.join(details)} golden {golden}")
+        return ", ".join(notes) + f" ({seconds:.0f}s)"
+    test.__name__ = f"test_hd_bar_{pack}"
+    return test
+
+
 def make_slot_test(slot, hd=False):
     def test(update):
         reset_saves()
@@ -1442,6 +1525,7 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
          + [test_hd_text_game, test_hd_lights, test_worldmap_scroll]
          + [make_hd_inventory_test(pack) for pack in HD_INVENTORY_PACKS]
          + [make_hd_static_test(pack) for pack in HD_STATIC_PACKS]
+         + [make_hd_bar_test(pack) for pack in HD_BAR_PACKS]
          + [test_view_identity, test_view_pan, test_view_zoom, test_view_zoom_hd0, test_view_light_follow])
 
 
@@ -1533,7 +1617,7 @@ def main():
         results[test.__name__] = outcome[0]
 
     # Longest tests first so the pool finishes together.
-    order = sorted(selected, key=lambda t: 0 if any(k in t.__name__ for k in ("hd_screens", "hd_text", "hd_inventory", "hd_static", "stimpack", "lists")) else 1)
+    order = sorted(selected, key=lambda t: 0 if any(k in t.__name__ for k in ("hd_screens", "hd_text", "hd_inventory", "hd_static", "hd_bar", "stimpack", "lists")) else 1)
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         list(pool.map(run_one, order))
 

@@ -368,6 +368,39 @@ checks the terrain's HD detail and colour against the legacy frame after
 every scroll step (fog included), the frame and the town map. Harness: `die`
 kills the player (death scene).
 
+## Interface bar (Phase 2.16)
+
+The art was already in the packs (Phase 2.14 `--interface`). In the engine
+(`src/interface.cc`):
+
+- The bar's static background is the bar art (`iface`, or `HR_IFACE_800`
+  when `iface_bar_width=800` fits the screen) with the extended AP bar art
+  (`iface_apbar_e`) blitted over it. Its HD version is composed the same way
+  once, with the legacy composite it stands for, and redrawn wherever legacy
+  code restores part of the background (AP bar, alternate ammo meter).
+- Buttons (INV, options, skilldex, MAP/CHA/PIP, change hands, end turn and
+  end combat), the AP bulbs, the HP/AC digits, the end-turn panel's slide
+  animation (`endanim`, per frame) and its green/red lights, and the hi-res
+  side panels (`HR_IFACELFT*`/`HR_IFACERHT*`, the same part stretched the
+  same way) are HD. The item slot was already HD (Phase 2.10); the message
+  monitor's background is part of the bar art, its text stays legacy or HD
+  text.
+- The called-shot screen (`called`) background and its cancel button. The
+  critter picture stays legacy (critter art is not in the packs).
+- Not HD: the action menu (`actmenu`, `actpick` and the action icons; it is
+  drawn as a map object through the mouse's 3D cursor, so it would need
+  object-rendering changes), the indicator boxes (sneak, level, addiction;
+  cached copies with labels drawn in) and the called-shot hit chances.
+
+Mixed pack: the lettered bar buttons (`mapup`/`mapdn`, `chaup`/`chadn`,
+`pipup`/`pipdn`, `invbutup`/`invbutdn`) come from scripted: the AI outlines
+and breaks their letters. TURN/CMBT look the same in both and stay AI.
+
+`test_hd_bar_ai` / `_mixed` (`tests/scripts/hd_bar.txt`, slot 1) check the
+bar and combat mode at 640x480 logical and at 3440x1440 (800-px bar, side
+panels): HD detail, monitor text kept, the bar's 8-bit composition identical
+to an hd=0 run. `bar_sheet.py` writes `docs/screens/phase2.16_bar/`.
+
 ## Timings (Apple M5 Pro, 64 GB; per asset, warm)
 
 | Asset | Scripted | AI (x2plus, MPS) |
