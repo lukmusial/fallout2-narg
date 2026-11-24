@@ -1218,6 +1218,22 @@ def test_hd_ground_variants(update):
     return f"{changed:.0%} of the frame shows variants, legacy identical ({seconds:.0f}s)"
 
 
+def test_hd_lights_text(update):
+    """HD lights at night (Den): floating text over the player is not taken for
+    a glowing sign; the light field is the same as without the text."""
+    args = ["--dev-load-game=8", "[graphics]hd=1", "[graphics]hd_pack=mixed", "[graphics]hd_lights=1"]
+    plain, _ = run_game("hd_lights_notext", "hd_lights_notext.txt", args)
+    text, seconds = run_game("hd_lights_text", "hd_lights_text.txt", args)
+    worst = 0
+    for kind in ("mul", "add", "shade"):
+        a = np.asarray(Image.open(plain / f"with_text_{kind}.png"), dtype=np.int16)
+        b = np.asarray(Image.open(text / f"with_text_{kind}.png"), dtype=np.int16)
+        worst = max(worst, int(np.abs(a - b).max()))
+    if worst > 2:
+        raise TestFailure(f"the floating text changed the light field by up to {worst} levels")
+    return f"light field unchanged by the text ({seconds:.0f}s)"
+
+
 def test_worldmap_scroll(update):
     """World map in HD (mixed pack, HD text): after scrolling, no HD pixels or
     HD text survive over unexplored (black) land; labels still show in HD;
@@ -1676,7 +1692,7 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
          + [make_hd_map_test(pack, slot) for pack in HD_MAP_PACKS for slot in range(1, SLOT_COUNT + 1)]
          + [test_hd_mixed_pack]
          + [make_hd_text_screens_test(style) for style in HD_TEXT_STYLES]
-         + [test_hd_text_game, test_hd_lights, test_worldmap_scroll, test_hd_ground_variants]
+         + [test_hd_text_game, test_hd_lights, test_hd_lights_text, test_worldmap_scroll, test_hd_ground_variants]
          + [make_hd_inventory_test(pack) for pack in HD_INVENTORY_PACKS]
          + [make_hd_static_test(pack) for pack in HD_STATIC_PACKS]
          + [make_hd_bar_test(pack) for pack in HD_BAR_PACKS]

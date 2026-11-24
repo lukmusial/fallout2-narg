@@ -1,0 +1,13 @@
+# HD lights: floating text over the player must not count as a light source.
+until game 30000
+wait 1500
+hdlights all
+refresh
+wait 600
+hdlights field before
+floattext THIS LINE OF DIALOGUE MUST NOT GLOW LIKE A NEON SIGN
+refresh
+wait 600
+hdlights field with_text
+fbshot with_text
+quit 0

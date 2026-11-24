@@ -20,6 +20,7 @@
 #include "map_view.h"
 #include "object.h"
 #include "settings.h"
+#include "text_object.h"
 #include "tile.h"
 #include "window_manager.h"
 
@@ -639,14 +640,28 @@ namespace {
 
     // The hex cursor is drawn into the map window; its red outline is not a
     // light.
-    void excludeHexCursor(std::vector<float>* grid, int cellsX, int cellsY)
+    void excludeRect(std::vector<float>* grid, int cellsX, int cellsY, const Rect& rect);
+
+    // Bright pixels that are not light sources: the hex cursor and floating
+    // text (yellow dialogue lines would otherwise glow like neon signs).
+    void excludeNonLights(std::vector<float>* grid, int cellsX, int cellsY)
     {
-        if (gGameMouseHexCursor == nullptr || (gGameMouseHexCursor->flags & OBJECT_HIDDEN) != 0
-            || gGameMouseHexCursor->elevation != gElevation) {
-            return;
+        if (gGameMouseHexCursor != nullptr && (gGameMouseHexCursor->flags & OBJECT_HIDDEN) == 0
+            && gGameMouseHexCursor->elevation == gElevation) {
+            Rect rect;
+            objectGetRect(gGameMouseHexCursor, &rect);
+            excludeRect(grid, cellsX, cellsY, rect);
         }
-        Rect rect;
-        objectGetRect(gGameMouseHexCursor, &rect);
+
+        static std::vector<Rect> textRects;
+        textObjectsGetRects(&textRects);
+        for (const Rect& rect : textRects) {
+            excludeRect(grid, cellsX, cellsY, rect);
+        }
+    }
+
+    void excludeRect(std::vector<float>* grid, int cellsX, int cellsY, const Rect& rect)
+    {
         float left = static_cast<float>(rect.left);
         float top = static_cast<float>(rect.top);
         float right = static_cast<float>(rect.right + 1);
@@ -971,12 +986,12 @@ bool hdLightsMapUpdate(const HdLightScreen& screen, HdLightField* field)
         emissiveWeights(screen.palette8, night, weights, neonWeights);
         hdLightEmissive(screen.index, screen.mask, screen.width, screen.width, screen.height, screen.palette8, weights, &gState.emissive,
             &gState.emissiveBox);
-        excludeHexCursor(&gState.emissive, field->cellsX, field->cellsY);
+        excludeNonLights(&gState.emissive, field->cellsX, field->cellsY);
         gState.neonBox = HdLightBox();
         if ((effects & kHdLightColour) != 0 && night > 0.0f) {
             hdLightEmissive(screen.index, screen.mask, screen.width, screen.width, screen.height, screen.palette8, neonWeights, &gState.neon,
                 &gState.neonBox);
-            excludeHexCursor(&gState.neon, field->cellsX, field->cellsY);
+            excludeNonLights(&gState.neon, field->cellsX, field->cellsY);
         }
     }
 

@@ -1,0 +1,13 @@
+# HD lights: the same as hd_lights_text.txt without the floating text.
+until game 30000
+wait 1500
+hdlights all
+refresh
+wait 600
+hdlights field before
+log no text here
+refresh
+wait 600
+hdlights field with_text
+fbshot with_text
+quit 0

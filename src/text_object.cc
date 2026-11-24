@@ -330,6 +330,24 @@ void textObjectsRenderInRect(Rect* rect)
     }
 }
 
+void textObjectsGetRects(std::vector<Rect>* rects)
+{
+    rects->clear();
+    if (!gTextObjectsInitialized) {
+        return;
+    }
+
+    for (int index = 0; index < gTextObjectsCount; index++) {
+        TextObject* textObject = gTextObjects[index];
+        int x;
+        int y;
+        tileToScreenXY(textObject->tile, &x, &y);
+        x += textObject->sx;
+        y += textObject->sy;
+        rects->push_back({ x, y, x + textObject->width - 1, y + textObject->height - 1 });
+    }
+}
+
 // 0x4B07F0 text_object_count
 int textObjectsGetCount()
 {
