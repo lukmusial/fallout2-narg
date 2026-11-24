@@ -4,7 +4,6 @@
 #include <vector>
 
 #include "db.h"
-#include "obj_types.h"
 
 namespace fallout {
 
@@ -21,12 +20,6 @@ enum PerkCarryOverMode {
 };
 
 int characterEditorShow(bool isCreationMode);
-// Stimpack: free editing of the loaded player character. Returns 0 (done) or
-// 1 (cancelled, all changes reverted).
-int characterEditorShowStimpack();
-// Stimpack: the same editor for a companion (stats, skills, hit points, perks,
-// level-up). Returns 0 (done) or 1 (cancelled, changes reverted).
-int characterEditorShowStimpackCompanion(Object* companion);
 void characterEditorInit();
 bool _isdoschar(int ch);
 char* _strmfe(char* dest, const char* name, const char* ext);

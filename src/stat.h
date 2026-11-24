@@ -46,8 +46,6 @@ int pcSetStat(PcStat pcStat, int value);
 void pcStatsReset();
 int pcGetExperienceForNextLevel();
 int pcGetExperienceForLevel(int level);
-// Highest player level (PC_LEVEL_MAX unless changed by configuration).
-int pcGetMaxLevel();
 char* pcStatGetName(PcStat pcStat);
 char* pcStatGetDescription(PcStat pcStat);
 SkillDexFrmId statGetFrmId(Stat stat);

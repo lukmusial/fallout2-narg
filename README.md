@@ -19,6 +19,19 @@ This local copy adds two mods on top of Fallout 2 CE. Nothing here is published.
 
 ### Stimpack: savegame editor
 
+Stimpack lives in its own repository and is included here as the git submodule
+`external/stimpack` (clone with `--recurse-submodules`, or run
+`git submodule update --init external/stimpack`). CMakeLists.txt attaches it with
+`stimpack_attach()`: its patches are applied to a copy of `src/` at build time, so
+this tree keeps only the HD changes. `src/character_editor.cc` carries Stimpack's
+patch merged in, because the HD screen code is interwoven with its editor mode
+(`stimpack-merged.txt` pins the patch it merged; a newer Stimpack that changes it
+stops the build until it is merged again). HD hooks into Stimpack's screens
+through `stimpackSetRenderHooks` (`hdArtAttachStimpack` in `src/hd_art.cc`) and
+adds its test commands through the harness's extension API
+(`src/hd_dev_automation.cc`). See `external/stimpack/README.md` and
+`docs/INTEGRATING.md` there.
+
 A **STIMPACK** button on the main menu (hotkey **S**, above EXIT) opens a save without starting the game and shows a hub:
 
 - **CHARACTER**: the character screen in an edit mode: SPECIAL 1–10 with no point pool, any skill 0–300% at no cost, tag skills, traits, name/age/sex, a **PERKS** editor (every perk, add/remove ranks), and click-to-type Level, Exp, Hit Points (`cur` or `cur/max`) and Skill Points. Cancel reverts everything.

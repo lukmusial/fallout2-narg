@@ -31,6 +31,9 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import stimpack_menu_art  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[2]
 RUN_DIR = Path(os.environ.get("RUN_DIR", ROOT / "out/build/macos"))
 DEFAULT_ART = ["art/intrface/mainmenu.frm", "art/intrface/hr_mainmenu.frm", "art/intrface/mainmenu_sp.png"]
@@ -54,9 +57,13 @@ def palette8():
 
 def frm_indices(entry, workdir):
     if entry.lower().endswith(".png"):
-        # Named art (ce.dat): already an indexed PNG with the game's indices.
+        # Named art: already an indexed PNG with the game's indices. Stimpack's
+        # menu images are made at run time; stimpack_menu_art.py writes them.
         png = workdir / "in.png"
-        png.write_bytes(dat_cat(entry))
+        if Path(entry).name in stimpack_menu_art.NAMES:
+            png.write_bytes((stimpack_menu_art.art_dir() / entry).read_bytes())
+        else:
+            png.write_bytes(dat_cat(entry))
         image = Image.open(png)
         if image.mode != "P":
             sys.exit(f"{entry}: expected an indexed PNG, got {image.mode}")

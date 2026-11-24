@@ -1,0 +1,3 @@
+[submodule "external/stimpack"]
+	path = external/stimpack
+	url = /Users/you/dev/stimpack

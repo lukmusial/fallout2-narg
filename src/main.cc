@@ -14,7 +14,6 @@
 #include "cycle.h"
 #include "db.h"
 #include "debug.h"
-#include "dev_automation.h"
 #include "draw.h"
 #include "endgame.h"
 #include "game.h"
@@ -38,7 +37,6 @@
 #include "settings.h"
 #include "sfall_callbacks.h"
 #include "sfall_global_scripts.h"
-#include "stimpack.h"
 #include "svga.h"
 #include "text_font.h"
 #include "window.h"
@@ -194,27 +192,6 @@ int falloutMain(int argc, char** argv)
                 }
                 break;
             }
-            case MainMenuOption::Stimpack: {
-                // Same load as LoadGame, but the editor runs instead of the game loop.
-                mainMenuBeginSubscreen();
-                main_loadgame_new();
-                int loadGameRc = lsgLoadGame(LoadSaveMode::FromMainMenu);
-                if (loadGameRc > 0) {
-                    mainMenuFinishSubscreen();
-                    stimpackRun();
-                    paletteFadeTo(gPaletteBlack);
-                    main_unload_new();
-                    main_reset_system();
-                    mainMenuWindowInit();
-                } else {
-                    main_unload_new();
-                    mainMenuCancelSubscreen();
-                    if (loadGameRc < 0) {
-                        main_reset_system();
-                    }
-                }
-                break;
-            }
             case MainMenuOption::Timeout:
                 debugPrint("Main menu timed-out\n");
                 // FALLTHROUGH
@@ -275,8 +252,6 @@ static void mainParseCommandLineArguments(int argc, char** argv)
 {
     const char* devLoadGamePrefix = "--dev-load-game=";
     size_t devLoadGamePrefixLength = strlen(devLoadGamePrefix);
-
-    devAutomationParseArgs(argc, argv);
 
     for (int arg = 1; arg < argc; arg += 1) {
         if (strncmp(argv[arg], devLoadGamePrefix, devLoadGamePrefixLength) == 0) {
@@ -443,7 +418,6 @@ static void mainLoop()
     _main_game_paused = 0;
 
     scriptsEnable();
-    devAutomationSetState("game");
 
     while (_game_user_wants_to_quit == GAME_QUIT_REQUEST_NONE) {
         sharedFpsLimiter.mark();
@@ -475,7 +449,6 @@ static void mainLoop()
     }
 
     scriptsDisable();
-    devAutomationSetState("");
 
     if (cursorWasHidden) {
         mouseHideCursor();

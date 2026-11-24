@@ -372,14 +372,6 @@ static constexpr char kLoadSaveSlotDataSection[] = "POSITION";
 static constexpr char kLoadSaveSlotDataKey[] = "CurrentSlot";
 static constexpr char kLoadSaveSlotDataFile[] = "SAVEGAME\\slotdat.ini";
 
-// Set by `lsgRequestEmptySlotOnNextSave`, consumed by the next normal save screen.
-static bool gLoadSaveStartOnEmptySlot = false;
-
-void lsgRequestEmptySlotOnNextSave()
-{
-    gLoadSaveStartOnEmptySlot = true;
-}
-
 static void loadSaveRememberSelectedSlot()
 {
     assert(_patches != nullptr);
@@ -634,17 +626,6 @@ int lsgSaveGame(LoadSaveMode mode)
         lsgWindowFree(LoadSaveWindowType::SaveGame);
 
         return -1;
-    }
-
-    if (gLoadSaveStartOnEmptySlot) {
-        gLoadSaveStartOnEmptySlot = false;
-        for (int slot = 0; slot < saveLoadTotalSlots; slot++) {
-            if (_LSstatus[slot] == LoadSaveSlotState::Empty) {
-                _slot_cursor = slot;
-                _currentSlotPage = slot / slotsPerPage;
-                break;
-            }
-        }
     }
 
     switch (_LSstatus[_slot_cursor]) {

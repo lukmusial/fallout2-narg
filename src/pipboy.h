@@ -47,19 +47,6 @@ extern MessageList gPipboyMessageList;
 int pipboyMessageListInit();
 void pipboyMessageListFree();
 
-// Stimpack: read-only view of the quest table (data/quests.txt), sorted by
-// location. Text and location name come from quests.msg / map.msg.
-struct QuestInfo {
-    const char* location;
-    const char* text;
-    int gvar;
-    int displayThreshold;
-    int completedThreshold;
-};
-
-int questGetCount();
-bool questGetInfo(int index, QuestInfo* info);
-
 } // namespace fallout
 
 #endif /* PIPBOY_H */

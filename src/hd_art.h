@@ -109,6 +109,9 @@ struct HdArtStats {
 
 void hdArtGetStats(HdArtStats* stats);
 
+// Gives Stimpack's screens HD art (see stimpackSetRenderHooks).
+void hdArtAttachStimpack();
+
 } // namespace fallout
 
 #endif /* FALLOUT_HD_ART_H_ */

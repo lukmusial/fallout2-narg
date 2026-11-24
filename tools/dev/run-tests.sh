@@ -28,3 +28,9 @@ fi
 "$REPO_DIR/.venv/bin/python" "$REPO_DIR/tools/dev/make_test_hd_art.py"
 
 "$REPO_DIR/.venv/bin/python" "$REPO_DIR/tests/run_tests.py" "$@"
+
+# Stimpack's own tests (they make their own saves from a new game) on this build.
+if [[ "${SKIP_STIMPACK_TESTS:-0}" != "1" && $# -eq 0 ]]; then
+    FALLOUT2_GAME_DIR="${FALLOUT2_DATA_DIR:-$HOME/Games/Fallout 2}" \
+        python3 "$REPO_DIR/external/stimpack/tests/run_tests.py" --build-dir "$BUILD_DIR"
+fi

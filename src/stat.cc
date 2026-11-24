@@ -114,6 +114,7 @@ static int xpTable[PC_LEVEL_MAX];
 static int xpTableThresholds = 0;
 
 static void pcExperienceTableInit();
+static int pcGetMaxLevel();
 static int pcGetLevelForExperience(int xp);
 
 static std::string_view pcExperienceTableTrimToken(std::string_view token)
@@ -839,7 +840,7 @@ static void pcExperienceTableInit()
     }
 }
 
-int pcGetMaxLevel()
+static int pcGetMaxLevel()
 {
     if (xpTableThresholds == 0) {
         return PC_LEVEL_MAX;

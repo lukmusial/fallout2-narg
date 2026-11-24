@@ -401,16 +401,6 @@ int wmSetMapMusic(Map mapIdx, const char* name);
 int wmMatchAreaContainingMapIdx(Map mapIdx, City* areaIdxPtr);
 int wmTeleportToArea(City areaIdx);
 
-// Stimpack: towns of the world map and their discovery state
-// (0 unknown, 1 known, 2 visited), and a real move of the party to a town.
-int wmStimpackGetAreaCount();
-bool wmStimpackAreaHasEntrance(City areaIdx);
-int wmStimpackGetAreaState(City areaIdx);
-void wmStimpackSetAreaState(City areaIdx, int state);
-// Loads the town's first entrance map (as entering it from the world map
-// does) and places the party there. Returns 0 on success.
-int wmStimpackTravelToArea(City areaIdx);
-
 // CE
 bool wmStartWorldPosIsConfigured();
 void wmSetPartyCurArea(City areaIdx);

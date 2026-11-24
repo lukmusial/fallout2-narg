@@ -1084,10 +1084,8 @@ bool sfallArraysLoad(File* stream)
         return true;
     }
 
-    // CE 1.3.0 wrote a single zero DWORD for the arrays section and nothing
-    // after it, so a missing count right here means "no arrays".
     int count;
-    if (fileRead(&count, sizeof(count), 1, stream) != 1) return fileEof(stream) != 0;
+    if (fileRead(&count, sizeof(count), 1, stream) != 1) return false;
     if (count <= 0) return true;
     if (count > ARRAY_MAX_SIZE) return false; // sanity bound against corrupt data
 

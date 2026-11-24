@@ -7,7 +7,6 @@
 #include "color.h"
 #include "debug.h"
 #include "delay.h"
-#include "dev_automation.h"
 #include "dinput.h"
 #include "draw.h"
 #include "game.h"
@@ -225,8 +224,6 @@ void get_input_position(int* x, int* y)
 void _process_bk()
 {
     int v1;
-
-    devAutomationTick();
 
     tickersExecute();
 
@@ -1102,24 +1099,6 @@ void _GNW95_process_message()
     KeyboardData keyboardData;
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
-        // Scripted runs take input only from the script; stray user input
-        // (e.g. typing into a window that briefly had focus) would change results.
-        if (devAutomationIsActive()) {
-            switch (e.type) {
-            case SDL_MOUSEMOTION:
-            case SDL_MOUSEBUTTONDOWN:
-            case SDL_MOUSEBUTTONUP:
-            case SDL_MOUSEWHEEL:
-            case SDL_FINGERDOWN:
-            case SDL_FINGERMOTION:
-            case SDL_FINGERUP:
-            case SDL_KEYDOWN:
-            case SDL_KEYUP:
-            case SDL_TEXTINPUT:
-                continue;
-            }
-        }
-
         switch (e.type) {
         case SDL_MOUSEMOTION:
         case SDL_MOUSEBUTTONDOWN:
@@ -1176,10 +1155,6 @@ void _GNW95_process_message()
                 audioEngineResume();
                 break;
             case SDL_WINDOWEVENT_FOCUS_LOST:
-                // Scripted runs keep going in the background.
-                if (devAutomationIsActive()) {
-                    break;
-                }
                 gProgramIsActive = false;
                 mouseDeviceInitMode();
                 audioEnginePause();

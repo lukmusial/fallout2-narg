@@ -17,7 +17,6 @@ enum MainMenuOption : int {
     Exit,
     SelfRun,
     Options,
-    Stimpack,
 };
 
 int mainMenuWindowInit();

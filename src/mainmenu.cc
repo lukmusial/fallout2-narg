@@ -9,7 +9,6 @@
 #include "content_config.h"
 #include "debug.h"
 #include "delay.h"
-#include "dev_automation.h"
 #include "draw.h"
 #include "font_manager.h"
 #include "game.h"
@@ -23,7 +22,6 @@
 #include "platform_compat.h"
 #include "preferences.h"
 #include "settings.h"
-#include "stimpack.h"
 #include "svga.h"
 #include "text_font.h"
 #include "version.h"
@@ -68,7 +66,6 @@ enum MainMenuButton : int {
     MAIN_MENU_BUTTON_LOAD_GAME,
     MAIN_MENU_BUTTON_OPTIONS,
     MAIN_MENU_BUTTON_CREDITS,
-    MAIN_MENU_BUTTON_STIMPACK,
     MAIN_MENU_BUTTON_EXIT,
     MAIN_MENU_BUTTON_COUNT,
     MAIN_MENU_BUTTON_FIRST = MAIN_MENU_BUTTON_INTRO
@@ -119,8 +116,6 @@ static const MainMenuButtonSpec mainMenuButtonSpecs[MAIN_MENU_BUTTON_COUNT] = {
     { KEY_LOWERCASE_L, MainMenuOption::LoadGame, 11 },
     { KEY_LOWERCASE_O, MainMenuOption::Options, 12 },
     { KEY_LOWERCASE_C, MainMenuOption::Credits, 13 },
-    // Label from stimpack.msg (labelMessage < 0).
-    { KEY_LOWERCASE_S, MainMenuOption::Stimpack, -1 },
     { KEY_LOWERCASE_E, MainMenuOption::Exit, 14 },
 };
 
@@ -232,9 +227,7 @@ static bool mainMenuLoadArt()
             mainMenuBackgroundFrmImage.unlock();
         } else {
             // for highres main menu art, use separate panel art
-            // Stimpack adds a seventh button: prefer the seven-plate panel.
-            if (!mainMenuButtonPanelFrmImage.lock(InterfaceFrmId("hr_menu_bg_sp.png"))
-                && !mainMenuButtonPanelFrmImage.lock(InterfaceFrmId("HR_MENU_BG.FRM"))) {
+            if (!mainMenuButtonPanelFrmImage.lock(InterfaceFrmId("HR_MENU_BG.FRM"))) {
                 debugPrint("MAINMENU: failed to load hires HR_MENU_BG.FRM, falling back to vanilla mainmenu.frm\n");
                 mainMenuBackgroundFrmImage.unlock();
             }
@@ -242,9 +235,7 @@ static bool mainMenuLoadArt()
     }
 
     if (!mainMenuBackgroundFrmImage.isLocked()) {
-        // Stimpack adds a seventh button: prefer the seven-plate background.
-        if (!mainMenuBackgroundFrmImage.lock(InterfaceFrmId("mainmenu_sp.png"))
-            && !mainMenuBackgroundFrmImage.lock(InterfaceFrameId::MainMenuBackgroundImage)) {
+        if (!mainMenuBackgroundFrmImage.lock(InterfaceFrameId::MainMenuBackgroundImage)) {
             debugPrint("MAINMENU: failed to load vanilla mainmenu.frm\n");
             return false;
         }
@@ -542,9 +533,7 @@ static void mainMenuDrawButtonLabels(const MainMenuLayout& layout, const MainMen
 
     for (MainMenuButton index = MAIN_MENU_BUTTON_FIRST; index < MAIN_MENU_BUTTON_COUNT; index++) {
         msg.num = mainMenuButtonSpecs[index].labelMessage;
-        if (msg.num < 0) {
-            msg.text = const_cast<char*>(stimpackGetMessage(STIMPACK_MSG_MENU_BUTTON, "STIMPACK"));
-        } else if (!messageListGetItem(&gMiscMessageList, &msg)) {
+        if (!messageListGetItem(&gMiscMessageList, &msg)) {
             continue;
         }
 
@@ -845,7 +834,6 @@ int _main_menu_is_enabled()
 MainMenuOption mainMenuWindowHandleEvents()
 {
     _in_main_menu = true;
-    devAutomationSetState("mainmenu");
 
     bool oldCursorIsHidden = cursorIsHidden();
     if (oldCursorIsHidden) {
@@ -924,7 +912,6 @@ MainMenuOption mainMenuWindowHandleEvents()
     }
 
     _in_main_menu = false;
-    devAutomationSetState("");
 
     return rc;
 }

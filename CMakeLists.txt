@@ -97,8 +97,6 @@ set(FALLOUT_ENGINE_SOURCES
     "src/dialog.h"
     "src/dictionary.cc"
     "src/dictionary.h"
-    "src/dev_automation.cc"
-    "src/dev_automation.h"
     "src/dinput.cc"
     "src/dinput.h"
     "src/display_monitor.cc"
@@ -142,6 +140,8 @@ set(FALLOUT_ENGINE_SOURCES
     "src/graph_lib.h"
     "src/hd_art.cc"
     "src/hd_art.h"
+    "src/hd_dev_automation.cc"
+    "src/hd_dev_automation.h"
     "src/hd_format.cc"
     "src/hd_format.h"
     "src/hd_glyph.cc"
@@ -264,8 +264,6 @@ set(FALLOUT_ENGINE_SOURCES
     "src/sound.h"
     "src/stat_defs.h"
     "src/stat.cc"
-    "src/stimpack.cc"
-    "src/stimpack.h"
     "src/stat.h"
     "src/string_parsers.cc"
     "src/string_parsers.h"
@@ -842,3 +840,11 @@ if(CMAKE_SYSTEM_NAME MATCHES "Emscripten")
     set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -g")
     set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
 endif()
+
+# Stimpack (savegame editor) from the external/stimpack submodule: its patches
+# are applied to a copy of src/ at build time (see its docs/INTEGRATING.md).
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/external/stimpack/cmake/Stimpack.cmake")
+    message(FATAL_ERROR "external/stimpack is missing: git submodule update --init external/stimpack")
+endif()
+include("${CMAKE_SOURCE_DIR}/external/stimpack/cmake/Stimpack.cmake")
+stimpack_attach(${EXECUTABLE_NAME})

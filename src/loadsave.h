@@ -12,8 +12,6 @@ enum class LoadSaveMode : int {
 void _InitLoadSave();
 void _ResetLoadSave();
 int lsgSaveGame(LoadSaveMode mode);
-// Makes the next normal save screen start on the first empty slot (one-shot).
-void lsgRequestEmptySlotOnNextSave();
 int lsgLoadGame(LoadSaveMode mode);
 void lsgDevSetLoadGameSlot(int slot);
 int lsgGetTotalSlotCount();

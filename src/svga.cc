@@ -12,10 +12,11 @@
 
 #include "color.h"
 #include "config.h"
-#include "dev_automation.h"
 #include "dinput.h"
 #include "draw.h"
 #include "game.h"
+#include "hd_art.h"
+#include "hd_dev_automation.h"
 #include "hd_layer.h"
 #include "hd_lights.h"
 #include "hd_lights_map.h"
@@ -463,12 +464,6 @@ int _GNW95_init_window(int width, int height, WindowMode mode, int scale)
 
         Uint32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI;
 
-        // Scripted runs render into hidden windows (screenshots come from the
-        // game's own buffers), so nothing appears on screen or takes focus.
-        if (devAutomationWantsHiddenWindow()) {
-            windowFlags |= SDL_WINDOW_HIDDEN;
-        }
-
         if (mode == WindowMode::Fullscreen) {
             windowFlags |= SDL_WINDOW_FULLSCREEN;
         } else if (mode == WindowMode::WindowedFullscreen) {
@@ -509,6 +504,10 @@ int _GNW95_init_window(int width, int height, WindowMode mode, int scale)
 int directDrawInit(int width, int height, int bpp)
 {
     (void)bpp;
+
+    // HD commands for scripted test runs, HD art on Stimpack's screens.
+    hdDevAutomationInit();
+    hdArtAttachStimpack();
 
     if (!gScreenIndex.empty()) {
         directDrawFree();
@@ -919,7 +918,7 @@ void renderPresent()
     SDL_RenderPresent(gSdlRenderer);
 
     uint64_t elapsed = SDL_GetPerformanceCounter() - startCounter;
-    devAutomationOnPresent();
+    hdDevAutomationOnPresent();
     gStats.presents++;
     gStats.presentTicks += elapsed;
     gStats.presentMaxTicks = std::max(gStats.presentMaxTicks, elapsed);

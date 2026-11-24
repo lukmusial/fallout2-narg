@@ -88,8 +88,8 @@ INVENTORY_SCREENS = [
     "art/intrface/sattkbup.frm", "art/intrface/sattkbdn.frm", "art/intrface/saturbup.frm",
 ]
 
-# Named indexed PNGs from this repo's ce.dat (Stimpack art, expanded
-# inventory/loot/barter windows), same palette indices.
+# Named indexed PNGs (Stimpack's menu art from tools/dev/stimpack_menu_art.py,
+# expanded inventory/loot/barter windows from ce.dat), same palette indices.
 CE_DAT_PNG = [
     "art/intrface/mainmenu_sp.png",
     "art/intrface/hr_menu_bg_sp.png",
@@ -464,8 +464,13 @@ def main() -> None:
             "source": "ce.dat", "sample": False,
         })
         print(f"{'ce.dat':>12}  {key}  {idx.shape[1]}x{idx.shape[0]}")
+    # Stimpack's menu images are made at run time (no files in ce.dat);
+    # stimpack_menu_art.py writes the same images.
+    sys.path.insert(0, str(hdlib.REPO_ROOT / "tools" / "dev"))
+    import stimpack_menu_art
+    stimpack_art = stimpack_menu_art.art_dir()
     for path in CE_DAT_PNG + (CE_DAT_PNG_INVEN if args.inven else []):
-        src = hdlib.REPO_ROOT / "files" / "ce.dat" / path
+        src = (stimpack_art if path in CE_DAT_PNG else hdlib.REPO_ROOT / "files" / "ce.dat") / path
         if not src.exists() or palette_ref is None:
             print(f"warning: {src} missing", file=sys.stderr)
             continue

@@ -6,7 +6,7 @@
 #include <algorithm>
 
 #include "db.h"
-#include "dev_automation.h"
+#include "hd_dev_automation.h"
 #include "memory.h"
 #include "svga.h"
 
@@ -142,7 +142,7 @@ void colorPaletteFadeBetween(unsigned char* oldPalette, unsigned char* newPalett
 
         memcpy(_systemCmap, palette, sizeof(_systemCmap));
         colorPresentPalette8(palette8, 0, COLOR_COUNT);
-        devAutomationOnFadeStep(step, steps, toBlack);
+        hdDevAutomationOnFadeStep(step, steps, toBlack);
         renderPresent();
         sharedFpsLimiter.throttle();
     }

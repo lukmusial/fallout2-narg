@@ -1,27 +1,10 @@
-#ifndef FALLOUT_DEV_AUTOMATION_H_
-#define FALLOUT_DEV_AUTOMATION_H_
-
-#include "dinput.h"
+#ifndef FALLOUT_HD_DEV_AUTOMATION_H_
+#define FALLOUT_HD_DEV_AUTOMATION_H_
 
 namespace fallout {
 
-// Scripted input driver for automated testing and screenshots.
-//
-// Enabled with `--dev-script=<file>`; output (screenshots, state dumps) goes to
-// `--dev-out=<dir>` (default `devout`, relative to the working directory).
-//
-// Script format: one command per line, `#` starts a comment.
-//   wait <ms>                 pause
-//   until <state> [<ms>]      wait until the engine reports a state (mainmenu,
-//                             game, stimpack, input = a text input dialog is open),
-//                             fail after timeout (default 30000)
-//   key <name|char|code> [n]  send a key (n times, one per input poll) (esc, enter, space, tab, backspace,
-//                             up, down, left, right, home, end, pageup, pagedown, f1..f12)
-//   text <string>             type the rest of the line
-//   move <x> <y>              move the cursor (logical screen coordinates)
-//   click <x> <y> [right]     move and click
-//   shot <name>               write <out>/<name>.png
-//   dump <name>               write <out>/<name>.json with player, party, quest and world state
+// HD commands for the scripted test mode (Stimpack's dev_automation.h), added
+// through its extension API:
 //   fbshot <name>             write the presented framebuffer (output resolution)
 //   legacyshot <name>         write the 8-bit window composition (logical
 //                             resolution) through the presented palette, also
@@ -45,6 +28,7 @@ namespace fallout {
 //   hdlights off|colour|glow|shadows|all|<mask>
 //                             switch HD lights live (glow = colour + glow)
 //   hdlights dump <name>      write the HD light emitters to <name>.json
+//   hdlights field <name>     write the applied light field as images
 //   refresh                   redraw the whole map window (in a game)
 //   benchrefresh <name> <n>   redraw it n times in a row; min/median/max ms
 //                             per redraw (and HD tile drawing) to <name>.json
@@ -71,37 +55,18 @@ namespace fallout {
 //   mousetoparty <n>          the cursor to party member n's sprite as shown
 //   mousetotile <tile|dude>   the cursor to the centre of a hex as shown
 //   pick <name>               the object and hex under the cursor to <name>.json
-//   log <text>                write a line to the debug log
-//   quit [<code>]             exit the process
+//
+// In HD mode `shot` writes the presented framebuffer (see screenshotSavePng).
 
-// Called from `main` before SDL starts. When a script is requested the game runs
-// unattended: background app on macOS (never takes focus), hidden window, no audio
-// device, and it counts as active without ever receiving focus.
-void devAutomationEarlyInit(int argc, char** argv);
-bool devAutomationWantsHiddenWindow();
-
-void devAutomationParseArgs(int argc, char** argv);
-bool devAutomationIsActive();
-
-// `--dev-fast`: palette fades take no time (tests that measure fades leave it off).
-bool devAutomationFastFades();
-
-// Advances the script; called once per input poll.
-void devAutomationTick();
-
-// Replaces the hardware mouse state while a script is active.
-bool devAutomationOverrideMouse(MouseData* mouseData);
+// Registers the commands; called once at start-up (directDrawInit).
+void hdDevAutomationInit();
 
 // Called after every present, for `frames` captures.
-void devAutomationOnPresent();
+void hdDevAutomationOnPresent();
 
 // Called by palette fades for `fadeshot` captures.
-void devAutomationOnFadeStep(int step, int steps, bool toBlack);
-
-// Engine state marks matched by `until`.
-void devAutomationSetState(const char* state);
-const char* devAutomationGetState();
+void hdDevAutomationOnFadeStep(int step, int steps, bool toBlack);
 
 } // namespace fallout
 
-#endif /* FALLOUT_DEV_AUTOMATION_H_ */
+#endif /* FALLOUT_HD_DEV_AUTOMATION_H_ */
