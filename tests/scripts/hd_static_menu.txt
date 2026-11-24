@@ -1,0 +1,9 @@
+# Phase 2.14: the character selector (main menu, New Game) in HD; see
+# hd_static_game.txt.
+until mainmenu 20000
+wait 500
+key n
+wait 2500
+fbshot selector
+legacyshot selector_legacy
+quit 0

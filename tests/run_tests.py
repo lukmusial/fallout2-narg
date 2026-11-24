@@ -755,6 +755,110 @@ def make_hd_inventory_test(pack):
     return test
 
 
+# --- Phase 2.14: the other static screens -------------------------------------
+#
+# tests/scripts/hd_static_game.txt (slot 1) opens the Pip-Boy, automap,
+# skilldex, options, preferences, help and a dialogue; hd_static_menu.txt the
+# character selector; hd_static_death.txt the death scene (its own palette). With hd=1 and a pack the art must show HD detail and the
+# 8-bit composition (legacyshot) must equal an hd=0 run's frame inside the
+# screen's window (the map behind some of them animates).
+
+HD_STATIC_PACKS = ("ai", "mixed")
+# Logical 640x480 rectangles: the screen's window, and art that must show HD
+# detail (not the map behind it, which is HD anyway).
+HD_STATIC_WINDOW = {
+    "pipboy": [(0, 0, 640, 480)],
+    "automap": [(60, 0, 580, 480)],
+    "skilldex": [(455, 5, 635, 370)],
+    "options": [(240, 50, 400, 310)],
+    "preferences": [(0, 0, 640, 480)],
+    "help": [(0, 0, 640, 480)],
+    "dialog": [(0, 240, 640, 480)],
+    "selector": [(0, 0, 640, 480)],
+    "death": [(0, 0, 640, 480)],
+}
+HD_STATIC_ART = {
+    "pipboy": [(0, 40, 200, 330), (480, 0, 640, 60)],
+    "automap": [(420, 100, 560, 300)],
+    "skilldex": [(460, 20, 620, 320)],
+    "options": [(245, 60, 395, 290)],
+    "preferences": [(0, 0, 640, 480)],
+    "help": [(320, 0, 640, 240), (0, 240, 640, 480)],
+    "dialog": [(0, 240, 640, 300), (0, 0, 80, 240)],
+    "selector": [(0, 0, 640, 480)],
+    "death": [(0, 0, 640, 480)],
+}
+HD_STATIC_TEXT = {"dialog": [(120, 330, 520, 470)]}
+HD_STATIC_MIN_DETAIL = 0.3
+
+_hd_static_legacy_out = None
+
+
+def static_pack_installed(pack):
+    packs = ("scripted", "ai") if pack == "mixed" else (pack,)
+    return all((RUN_DIR / f"data/hd/{p}/art/{art}").exists() for p in packs
+               for art in ("intrface/pip.png", "intrface/prefscrn.png", "intrface/wrldmp00.png", "skilldex/strength.png"))
+
+
+def hd_static_legacy_reference():
+    global _hd_static_legacy_out
+    if _hd_static_legacy_out is None:
+        reset_saves()
+        game, _ = run_game("hd_static_legacy", "hd_static_game.txt", ["--dev-load-game=1"])
+        menu, _ = run_game("hd_static_menu_legacy", "hd_static_menu.txt")
+        death, _ = run_game("hd_static_death_legacy", "hd_static_death.txt", ["--dev-load-game=1"])
+        _hd_static_legacy_out = {"game": game, "menu": menu, "death": death}
+    return _hd_static_legacy_out
+
+
+def make_hd_static_test(pack):
+    def test(update):
+        """Pip-Boy, automap, skilldex, options, preferences, help, dialogue
+        and character selector with a real HD pack: HD art, legacy text
+        intact, the 8-bit frames exactly as with hd=0, goldens with tolerance."""
+        if not static_pack_installed(pack):
+            raise TestSkipped(f"pack '{pack}' lacks the Phase 2.14 art (tools/hd: extract.py --areas --objects "
+                              "--inven --interface, enhance_*.py, install.py)")
+        legacy_outs = hd_static_legacy_reference()
+        reset_saves()
+        args = [*HD_ARGS, f"[graphics]hd_pack={pack}"]
+        outs = {}
+        seconds = 0
+        for run, script, extra in (("game", "hd_static_game.txt", ["--dev-load-game=1"]),
+                                   ("menu", "hd_static_menu.txt", []), ("death", "hd_static_death.txt", ["--dev-load-game=1"])):
+            outs[run], took = run_game(f"hd_static_{run}_{pack}", script, [*extra, *args])
+            seconds += took
+        notes = []
+        for screen in HD_STATIC_WINDOW:
+            run = {"selector": "menu", "death": "death"}.get(screen, "game")
+            out, legacy_out = outs[run], legacy_outs[run]
+            fb = load_png(out / f"{screen}.png")
+            eight = load_png(out / f"{screen}_legacy.png")
+            legacy = load_png(legacy_out / f"{screen}.png")
+            if fb.shape != (960, 1280, 3) or eight.shape != legacy.shape:
+                raise TestFailure(f"{screen}: unexpected sizes {fb.shape} / {eight.shape} / {legacy.shape}")
+            for left, top, right, bottom in HD_STATIC_WINDOW[screen]:
+                changed = float(np.any(eight[top:bottom, left:right] != legacy[top:bottom, left:right], axis=2).mean())
+                if changed > HD_INVENTORY_MAX_CHANGED:
+                    raise TestFailure(f"{screen}: 8-bit frame differs from hd=0 in {(left, top, right, bottom)} "
+                                      f"({changed:.2%} of pixels)")
+            details = []
+            for region in HD_STATIC_ART[screen]:
+                detail = blocks_detail(fb, region)
+                if detail < HD_STATIC_MIN_DETAIL:
+                    raise TestFailure(f"{screen}: no HD detail in {region} ({detail:.0%} of 2x2 blocks)")
+                details.append(f"{detail:.0%}")
+            for region in HD_STATIC_TEXT.get(screen, ()):
+                kept, count = legacy_text_kept(fb, eight, region)
+                if count < 50 or kept < 0.98:
+                    raise TestFailure(f"{screen}: legacy text in {region}: {kept:.1%} of {count} pixels kept")
+            golden = compare_hd_golden_live(out / f"{screen}.png", f"hd_static_{pack}_{screen}.png", update)
+            notes.append(f"{screen} {'/'.join(details)} golden {golden}")
+        return ", ".join(notes) + f" ({seconds:.0f}s)"
+    test.__name__ = f"test_hd_static_{pack}"
+    return test
+
+
 def make_slot_test(slot, hd=False):
     def test(update):
         reset_saves()
@@ -926,7 +1030,13 @@ def test_hd_mixed_pack(update):
     if (arrow, menu, roof, wall) != ("scripted", "ai", "scripted", "scripted"):
         raise TestFailure(f"mixed pack resolved the arrow from {arrow}, the menu from {menu}, "
                           f"the metal roof from {roof}, the scrap wall from {wall}")
-    return f"arrow and metal roof from scripted, menu from ai ({seconds:.0f}s)"
+    # Phase 2.14: digit strips from scripted, world map terrain from ai (when
+    # the packs have them).
+    if (run_dir() / "data/hd/ai/art/intrface/wrldmp00.png").exists():
+        numbers, terrain = source("numbers", "numbers"), source("terrain", "wrldmp00")
+        if (numbers, terrain) != ("scripted", "ai"):
+            raise TestFailure(f"mixed pack resolved the digits from {numbers}, the terrain from {terrain}")
+    return f"arrow, digits and metal roof from scripted, menu and terrain from ai ({seconds:.0f}s)"
 
 
 def test_stimpack_perk_scan(update):
@@ -1003,25 +1113,58 @@ def field_neutral_mask(out, shape):
     return neutral
 
 
+WM_VIEW = (22, 21, 472, 465)        # logical rectangle of the world map's view
+WM_MIN_TERRAIN_DETAIL = 0.5         # explored terrain: 2x2 blocks with HD detail
+WM_MAX_TERRAIN_COLOUR_DIFF = 16.0   # HD terrain box-downsampled vs legacy, mean abs
+
+
 def test_worldmap_scroll(update):
     """World map in HD (mixed pack, HD text): after scrolling, no HD pixels or
-    HD text survive over unexplored (black) land; labels still show in HD."""
+    HD text survive over unexplored (black) land; labels still show in HD;
+    explored and fogged terrain shows HD detail in the legacy colours (fog
+    darkened in RGB) at every step; the frame and the town map are HD."""
+    if not static_pack_installed("mixed"):
+        raise TestSkipped("packs lack the Phase 2.14 art (tools/hd: extract.py ... --interface, enhance_*.py, install.py)")
     out, seconds = run_game("worldmap_scroll", "worldmap_scroll.txt",
                             ["--dev-load-game=1", "[graphics]hd=1", "[graphics]hd_pack=mixed", "[graphics]hd_text=1"])
     notes = []
+    left, top, right, bottom = WM_VIEW
     for step in range(4):
         framebuffer = load_png(out / f"s{step}.png")
-        legacy = load_png(out / f"l{step}.png").repeat(2, axis=0).repeat(2, axis=1)
+        legacy1 = load_png(out / f"l{step}.png")
+        legacy = legacy1.repeat(2, axis=0).repeat(2, axis=1)
         if framebuffer.shape != legacy.shape:
             raise TestFailure(f"step {step}: size {framebuffer.shape} != {legacy.shape}")
         differs = np.abs(framebuffer - legacy).sum(axis=2) > 60
-        # Black legacy pixels next to live labels get the labels' 2x edges;
+        # Unexplored land: black with a black neighbourhood (the darkest
+        # pixels of HD terrain under the fog are near-black in 8 bits, and
+        # black legacy pixels next to live labels get the labels' 2x edges);
         # leftovers of fogged-over text are hundreds of pixels.
-        over_black = int((differs & (legacy.sum(axis=2) < 30)).sum())
+        black1 = legacy1.sum(axis=2) < 30
+        unexplored = black1.copy()
+        for dy in range(-3, 4):
+            for dx in range(-3, 4):
+                unexplored &= np.roll(np.roll(black1, dy, 0), dx, 1)
+        unexplored = unexplored.repeat(2, axis=0).repeat(2, axis=1)
+        over_black = int((differs & unexplored).sum())
         if over_black > 120:
             raise TestFailure(f"step {step}: {over_black} HD pixels over black land (leftovers)")
-        notes.append(str(over_black))
-    return f"HD pixels over black land per step: {', '.join(notes)} ({seconds:.0f}s)"
+        # Terrain: logical pixels of the view that are not black in 8 bits.
+        view = legacy1[top:bottom, left:right]
+        hd = framebuffer[top * 2:bottom * 2, left * 2:right * 2]
+        blocks = hd.reshape(bottom - top, 2, right - left, 2, 3)
+        land = view.sum(axis=2) > 60
+        detail = float((np.abs(blocks - blocks[:, :1, :, :1, :]).sum(axis=(1, 3, 4)) > 0)[land].mean())
+        colour = float(np.abs(blocks.mean(axis=(1, 3)) - view)[land].mean())
+        if land.mean() > 0.1 and (detail < WM_MIN_TERRAIN_DETAIL or colour > WM_MAX_TERRAIN_COLOUR_DIFF):
+            raise TestFailure(f"step {step}: terrain detail {detail:.0%}, colour difference {colour:.1f}")
+        notes.append(f"{over_black}/{detail:.0%}/{colour:.1f}")
+    frame = blocks_detail(load_png(out / "s0.png"), (480, 60, 630, 470))
+    town = blocks_detail(load_png(out / "town.png"), WM_VIEW)
+    if frame < 0.5 or town < 0.5:
+        raise TestFailure(f"world map frame {frame:.0%} / town map {town:.0%} of 2x2 blocks with HD detail")
+    return (f"per step HD pixels over black land/terrain detail/colour diff: {', '.join(notes)}; "
+            f"frame {frame:.0%}, town map {town:.0%} ({seconds:.0f}s)")
 
 
 def test_hd_lights(update):
@@ -1298,6 +1441,7 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
          + [make_hd_text_screens_test(style) for style in HD_TEXT_STYLES]
          + [test_hd_text_game, test_hd_lights, test_worldmap_scroll]
          + [make_hd_inventory_test(pack) for pack in HD_INVENTORY_PACKS]
+         + [make_hd_static_test(pack) for pack in HD_STATIC_PACKS]
          + [test_view_identity, test_view_pan, test_view_zoom, test_view_zoom_hd0, test_view_light_follow])
 
 
@@ -1389,7 +1533,7 @@ def main():
         results[test.__name__] = outcome[0]
 
     # Longest tests first so the pool finishes together.
-    order = sorted(selected, key=lambda t: 0 if any(k in t.__name__ for k in ("hd_screens", "hd_text", "hd_inventory", "stimpack", "lists")) else 1)
+    order = sorted(selected, key=lambda t: 0 if any(k in t.__name__ for k in ("hd_screens", "hd_text", "hd_inventory", "hd_static", "stimpack", "lists")) else 1)
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         list(pool.map(run_one, order))
 

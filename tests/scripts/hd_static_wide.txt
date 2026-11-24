@@ -1,0 +1,13 @@
+# Phase 2.14 review sheet: the Pip-Boy and the world map at a wide
+# resolution (tools/hd/static_sheet.py).
+until game 30000
+wait 2000
+key p
+wait 1500
+fbshot pipboy
+key esc
+wait 1000
+worldmap
+wait 2500
+fbshot worldmap
+quit 0

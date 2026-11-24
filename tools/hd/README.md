@@ -305,6 +305,69 @@ Observations (see `docs/screens/phase2.10_inventory/`):
   applied. `brain1` (AI deepens the grooves) and `eastregg` (edge metric
   flagged, bands look the same) were checked and are not proposed.
 
+## Other static screens (Phase 2.14)
+
+Every other interface image (`art/intrface`: master.dat, patch000.dat's help
+screen, f2_res.dat's `HR_*`, ce.dat's `actmenu`, `hr_iface_800`,
+`iface_apbar_e`, `opbase_help.png`; 445 FRMs/PNGs) and all 173 skilldex card
+illustrations (`art/skilldex`). The endgame slides (`eg_*`) and the intro and
+ending sequences (`seq*`, `arroyo01`, `dp`) are left out. The death scene and
+the help screen have their own palettes (`death.pal`, `helpscrn.pal`) and are
+extracted through them; multi-frame art (world map dial `wmdial`, car
+`wmcarmve`, `endanim`, `wait`, `wait2`) becomes `.fhd` like objects. 594 new
+assets (24.3 Mpx): scripted 9 min, AI 9 min (machine shared with other work).
+
+```sh
+cd tools/hd
+.venv/bin/python extract.py --areas --objects --inven --interface
+.venv/bin/python enhance_scripted.py $(cat work/keys_2.14.txt)   # the new keys
+.venv/bin/python enhance_ai.py $(cat work/keys_2.14.txt)
+.venv/bin/python install.py
+.venv/bin/python static_sheet.py        # runs the game hidden -> docs/screens/phase2.14/
+```
+
+In the engine (HD drawn right after each legacy blit, as in Phase 2.6;
+`hdArtDrawImageOffset` takes a blit's own offsets, `hdArtDrawFrameRegion` art
+the code blits from cached frame data):
+
+- World map (`worldmap.cc`): frame, terrain tiles (`wrldmp*`, drawn per
+  visible part of each 350x300 tile, so scrolling stays correct), town
+  circles (blended over the HD terrain in RGB with the legacy formula, tint
+  green), markers, tabs and town labels, day/night dial, car, globe, date,
+  buttons. Fog: unknown land stays black (HD cleared); known but unvisited
+  land keeps its HD terrain darkened in RGB by the same factor as the legacy
+  table (`intensityColorTable[..][75]`, `windowHdShadeRect`), so it looks like
+  the legacy fog without its palette banding. Town maps (`twnmap*` etc.) and
+  their entrance hotspots.
+- Pip-Boy (background, its restores, logo, alarm and red buttons, date) and
+  the automap (background, buttons). The map lines and dots stay legacy.
+- Options, pause, preferences (background, switches, knobs and sliders
+  where they move), help (`helpscrn.pal`).
+- Character selector (background, the premade characters' portraits,
+  buttons) and dialogue: the background (`alltlk`/`HR_ALLTLK`), the talk
+  panel once it has slid in, the reply and option windows (HD copied with
+  their legacy pixels), review window, party member control and custom
+  windows. Talking heads stay legacy.
+- Skilldex cards in the character editor and the perk dialog (with the
+  background restores around them), the skilldex window (background, values,
+  buttons), elevators (background, panel, gauge, buttons) and the death
+  scene (scaled with it when `death_screen_size` stretches it).
+- Not in HD yet: the interface bar background (`iface`, `hr_iface_800`) and
+  its buttons other than the item button, the combat/action menus
+  (`actmenu`, called-shot screen `called`), endgame slides and movies.
+
+Mixed pack: AI for everything except the digit and month strips
+(`numbers`, `months`, `bignum`): the AI smears the thin red and yellow
+digits (`mixed_choice.png`). The other small art (markers, knobs, red
+buttons, town labels) looks the same in both packs and stays AI.
+
+Tests (`tests/run_tests.py`): `test_hd_static_ai` / `_mixed` open each screen
+with hd=1 and compare the 8-bit composition with an hd=0 run (identical inside
+the window) and require HD detail on the art; `test_worldmap_scroll` also
+checks the terrain's HD detail and colour against the legacy frame after
+every scroll step (fog included), the frame and the town map. Harness: `die`
+kills the player (death scene).
+
 ## Timings (Apple M5 Pro, 64 GB; per asset, warm)
 
 | Asset | Scripted | AI (x2plus, MPS) |

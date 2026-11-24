@@ -1,0 +1,8 @@
+# Phase 2.14: the death scene (its own palette) in HD; see hd_static_game.txt.
+until game 30000
+wait 1500
+die
+wait 4000
+fbshot death
+legacyshot death_legacy
+quit 0

@@ -1,0 +1,47 @@
+# Phase 2.14 static screens in HD (run with --dev-load-game=1, [graphics]
+# hd=1 and an hd_pack; with hd=0 fbshot writes the plain legacy frame).
+# fbshot <screen> is the presented frame, legacyshot <screen>_legacy the 8-bit
+# composition, which must equal the hd=0 frame.
+until game 30000
+wait 2000
+key p
+wait 1500
+fbshot pipboy
+legacyshot pipboy_legacy
+key esc
+wait 1000
+key tab
+wait 1500
+fbshot automap
+legacyshot automap_legacy
+key esc
+wait 1000
+key s
+wait 1500
+fbshot skilldex
+legacyshot skilldex_legacy
+key esc
+wait 1000
+key o
+wait 1500
+fbshot options
+legacyshot options_legacy
+key p
+wait 1500
+fbshot preferences
+legacyshot preferences_legacy
+key esc
+wait 1000
+key esc
+wait 1000
+key f1
+wait 1500
+fbshot help
+legacyshot help_legacy
+key space
+wait 1500
+talk 1
+wait 3000
+fbshot dialog
+legacyshot dialog_legacy
+quit 0
