@@ -1,0 +1,24 @@
+# Phase 2.15 gunshot light (run with --dev-load-game=8, [graphics]hd=1, an
+# hd_pack, [graphics]hd_shot_light=1 and hd_lights=0, so the light field holds
+# nothing but the shots). The player fires a pistol at the nearest critter:
+# the view before, at the shot (the shots' clock held as the round leaves the
+# muzzle) and after it; then a burst (one light per round); the shots fired
+# (muzzle, target, frame) and the light field once they are over.
+until game 30000
+wait 1500
+fbshot before
+shoot 8 nearest
+hdfx waitshot 1
+fbshot lit
+hdfx shotclock run
+wait 500
+fbshot after
+hdfx dump single
+wait 1500
+shoot 9 nearest secondary
+hdfx waitshot 3
+hdfx shotclock run
+wait 500
+hdfx dump burst
+hdlights field after
+quit 0

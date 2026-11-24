@@ -303,6 +303,58 @@ static void testMovedLight()
     CHECK(fabsf(atHex - atSprite) < 0.02f * maximum);
 }
 
+// Phase 2.15: a gunshot's cone from the muzzle and the muzzle flash.
+static void testShotLight()
+{
+    HdShotLight shot;
+    shot.mx = 20.0f;
+    shot.my = 24.0f;
+    shot.dirX = 1.0f;
+    shot.dirY = 0.0f;
+    shot.reach = 20.0f;
+    shot.spill = 4.0f;
+    // Forward (in the cone) much brighter than behind the muzzle; falls off.
+    float ahead = hdShotLightAt(shot, 32.0f, 24.0f);
+    float behind = hdShotLightAt(shot, 8.0f, 24.0f);
+    float far = hdShotLightAt(shot, 60.0f, 24.0f);
+    float side = hdShotLightAt(shot, 32.0f, 40.0f);
+    CHECK(ahead > 1.0f);
+    CHECK(behind < 0.05f * ahead);
+    CHECK(far < ahead);
+    CHECK(side < 0.1f * ahead);
+    CHECK(hdShotLightAt(shot, 20.0f, 24.0f) > 1.0f); // glow at the muzzle
+
+    HdLightField field;
+    hdLightFieldInit(&field, kWidth, kHeight);
+    hdLightFieldAddShot(&field, shot);
+    HdLightFlash flash;
+    flash.x = 20.0f;
+    flash.y = 24.0f;
+    field.flashes.push_back(flash);
+    hdLightFieldFinish(&field);
+    Output out(0x00404040, kHdMaskLit | kHdMaskShows);
+    out.apply(field);
+    CHECK(red(out.at(32, 24)) > 0x60); // lit ahead
+    CHECK(red(out.at(4, 24)) < 0x48); // dark behind
+    CHECK(red(out.at(20, 24)) >= 0xF0 && green(out.at(20, 24)) > 0xC0); // flash at the muzzle
+    CHECK(red(out.at(32, 24)) > blue(out.at(32, 24))); // warm
+
+    // The flash's pixels are in the diff against an empty field.
+    HdLightField empty;
+    hdLightFieldInit(&empty, kWidth, kHeight);
+    hdLightFieldFinish(&empty);
+    std::vector<HdLightRect> rects;
+    hdLightFieldDiff(empty, field, &rects);
+    bool covers = false;
+    for (const HdLightRect& rect : rects) {
+        covers = covers || (rect.left <= 20 && rect.top <= 24 && rect.left + rect.width > 20 && rect.top + rect.height > 24);
+    }
+    CHECK(covers);
+    // Cleared: no flashes, neutral.
+    hdLightFieldClear(&field);
+    CHECK(field.flashes.empty());
+}
+
 int main()
 {
     testNeutral();
@@ -312,6 +364,7 @@ int main()
     testShadow();
     testDiffAndClear();
     testMovedLight();
+    testShotLight();
 
     if (gFailures != 0) {
         fprintf(stderr, "%d check(s) failed\n", gFailures);

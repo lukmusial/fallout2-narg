@@ -86,6 +86,18 @@ Object* objectFindNextAtElevation();
 Object* objectFindFirstAtLocation(MapElevation elevation, int tile);
 Object* objectFindNextAtLocation();
 void objectGetRect(Object* obj, Rect* rect);
+
+// CE: wind in HD (Phase 2.15, hd_wind.h). A redraw pass of the map begins
+// (tile.cc); the scene is dropped; an object is going away.
+void objectHdWindPassBegin();
+void objectHdWindClear();
+void objectHdWindForget(Object* object);
+// Moves the given plants to their current sway by recomposing the HD layer
+// in `rects[i]` (the part of plant i whose rows moved) only (see object.cc)
+// and shows the result; `done[i]` tells whether plant i was recomposed (the
+// others need a redraw). Returns how many were.
+double objectHdWindShowMs();
+int objectHdWindRecompose(Object* const* objects, const Rect* rects, int count, unsigned char* done);
 bool _obj_occupied(int tile_num, MapElevation elev);
 Object* _obj_blocking_at(Object* excludeObj, int tile_num, MapElevation elev);
 Object* _obj_shoot_blocking_at(Object* excludeObj, int tile, MapElevation elev);

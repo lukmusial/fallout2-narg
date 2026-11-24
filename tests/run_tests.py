@@ -1285,6 +1285,143 @@ def test_view_light_follow(update):
     return f"light vs sprite residual {residual['follow']:.2f} px (hex by hex {residual['hex']:.2f} px)"
 
 
+# --- Phase 2.15: gunshot light and wind ----------------------------------------
+#
+# Both are off in the test run directory (setup-run-dir.sh); these tests turn
+# them on. The other tests' goldens are unaffected.
+
+SHOT_SLOT = 8
+SHOT_ARGS = [*HD_ARGS, "[graphics]hd_pack=mixed", "[graphics]hd_shot_light=1", "[graphics]hd_lights=0"]
+
+
+def shot_gain(image, base, shot):
+    """Mean brightening of `image` over `base` ahead of the muzzle (towards
+    the target) and behind it (output pixels around the muzzle)."""
+    mx, my = int(shot["muzzle_x"] * 2), int(shot["muzzle_y"] * 2)
+    side = 1 if shot["target_x"] >= shot["muzzle_x"] else -1
+    diff = image.astype(float) - base.astype(float)
+    rows = slice(my - 30, my + 30)
+    ahead = diff[rows, mx + side * 20:mx + side * 160:side].mean()
+    behind = diff[rows, mx - side * 160:mx - side * 20:side].mean()
+    return float(ahead), float(behind)
+
+
+def test_hd_shot_light(update):
+    """Den at night, the player fires a pistol, then a burst: one light per
+    round, starting at the muzzle (found in the shot frame's flash, at the
+    weapon on the sprite) and lighting ahead of it, not behind; afterwards
+    the light field is empty again."""
+    if not map_pack_installed("mixed"):
+        raise TestSkipped("pack 'mixed' lacks the area art")
+    reset_saves()
+    out, seconds = run_game("hd_shot_light", "hd_shot_light.txt", [f"--dev-load-game={SHOT_SLOT}", *SHOT_ARGS])
+    single = json.loads((out / "single.json").read_text())["shots"]["fired"]
+    burst = json.loads((out / "burst.json").read_text())["shots"]["fired"][len(single):]
+    if len(single) != 1:
+        raise TestFailure(f"single shot: {len(single)} lights fired")
+    if len(burst) < 3:
+        raise TestFailure(f"burst: only {len(burst)} light(s) fired")
+
+    state = json.loads((out / "single.json").read_text())
+    for shot in single + burst:
+        if not shot["from_flash"]:
+            raise TestFailure(f"muzzle not found from the flash: {shot}")
+    # At the weapon: in front of the shooter at chest height (Den save: the
+    # player stands at hex 13292, screen (320, 190) at 1280x960).
+    feet_x, feet_y = 320, 190
+    for shot in single + burst:
+        up = feet_y - shot["muzzle_y"]
+        across = (shot["muzzle_x"] - feet_x) * (1 if shot["target_x"] >= feet_x else -1)
+        if not (15 <= up <= 70 and -6 <= across <= 45):
+            raise TestFailure(f"muzzle not at the weapon: {up:.0f} px above the feet, {across:.0f} px ahead ({shot})")
+
+    before, lit, after = (load_png(out / f"{name}.png") for name in ("before", "lit", "after"))
+    ahead, behind = shot_gain(lit, before, single[0])
+    if ahead < 8.0:
+        raise TestFailure(f"too little light ahead of the muzzle: +{ahead:.1f}")
+    if behind > 0.5 * ahead:
+        raise TestFailure(f"behind the shooter nearly as bright as ahead: +{behind:.1f} vs +{ahead:.1f}")
+    late, _ = shot_gain(after, before, single[0])
+    if abs(late) > 3.0:
+        raise TestFailure(f"the light did not decay: {late:.1f} levels left ahead of the muzzle")
+
+    # Nothing left in the field once the shots are over.
+    for name in ("mul", "add"):
+        field = np.asarray(Image.open(out / f"after_{name}.png").convert("RGB"))
+        if field.max() > 0:
+            raise TestFailure(f"light field not empty after the shots ({name} max {field.max()})")
+    return (f"{len(burst)} burst rounds, at the shot ahead +{ahead:.1f} / behind +{behind:.1f} levels, "
+            f"after {late:.1f} ({seconds:.0f}s)")
+
+
+WIND_ARGS = [*HD_ARGS, "[graphics]hd_pack=mixed", "[graphics]hd_wind=1"]
+WIND_SLOTS = (3, 9)
+
+
+def make_hd_wind_test(slot):
+    def test(update):
+        """Arroyo with hd_wind=1: whole redraws with the wind held at other
+        times and off leave the 8-bit buffer unchanged; between two wind
+        times the plants' tops move while their bottom 35% stays put."""
+        if not map_pack_installed("mixed"):
+            raise TestSkipped("pack 'mixed' lacks the area art")
+        reset_saves()
+        out, seconds = run_game(f"hd_wind_slot{slot:02d}", "hd_wind.txt", [f"--dev-load-game={slot}", *WIND_ARGS])
+        legacy = json.loads((out / "legacy.json").read_text())
+        if not legacy["wind_was_on"] or any(legacy["differing"]):
+            raise TestFailure(f"8-bit buffer changed by wind redraws: {legacy}")
+        a, b = load_png(out / "t0.png"), load_png(out / "t1.png")
+        h, w = a.shape[0] // 2, a.shape[1] // 2
+        p0 = json.loads((out / "t0.json").read_text())["wind"]["plants"]
+        p1 = json.loads((out / "t1.json").read_text())["wind"]["plants"]
+        if len(p0) < 3 or len(p0) != len(p1):
+            raise TestFailure(f"plants on screen: {len(p0)} / {len(p1)}")
+        # Pixels that may change for other reasons: where the 8-bit view
+        # changed (critters walking) and other plants (grass in front of a
+        # tree's base), grown by a pixel.
+        l0, l1 = load_png(out / "l0.png"), load_png(out / "l1.png")
+        busy = np.abs(l0 - l1).sum(axis=2) > 0
+        busy = busy | np.roll(busy, 1, 0) | np.roll(busy, -1, 0) | np.roll(busy, 1, 1) | np.roll(busy, -1, 1)
+        busy = busy.repeat(2, 0).repeat(2, 1)
+        moved = 0
+        for index, (q0, q1) in enumerate(zip(p0, p1)):
+            left, top, right, bottom = q0["rect"]
+            others = np.zeros(busy.shape, dtype=bool)
+            for other in p0[:index] + p0[index + 1:]:
+                ol, ot, orr, ob = other["rect"]
+                others[max(2 * ot, 0):max(2 * (ob + 1), 0), max(2 * ol, 0):max(2 * (orr + 1), 0)] = True
+            # Inside the map view (above the interface bar).
+            y0, y1 = max(top, 0), min(bottom + 1, h - 100)
+            x0, x1 = max(left, 0), min(right + 1, w)
+            if y1 - y0 < 8 or x1 - x0 < 4:
+                continue
+            region = (slice(2 * y0, 2 * y1), slice(2 * x0, 2 * x1))
+            diff = (np.abs(a[region] - b[region]).sum(axis=2) > 0) & ~busy[region] & ~others[region]
+            # Rows from the frame's top: the bottom 35% never moves.
+            row = np.arange(2 * y0, 2 * y1)[:, None]
+            from_bottom = (2 * (bottom + 1) - row - 0.5) / (2 * q0["height"])
+            base = diff & (from_bottom < 0.34)
+            if base.sum() > 0:
+                raise TestFailure(f"{q0['art']} at {q0['tile']}: {int(base.sum())} pixels moved near its base")
+            if abs(q1["sway"] - q0["sway"]) >= 2 and (diff & (from_bottom > 0.7)).sum() > 0:
+                moved += 1
+        if moved < 2:
+            raise TestFailure(f"only {moved} plant(s) moved at the top between the two wind times")
+        # The ticker moves the plants by recomposing the HD layer alone: the
+        # result equals a whole redraw at the same wind time.
+        stats = json.loads((out / "t2.json").read_text())["wind"]["stats"]
+        if stats["recomposes"] == 0:
+            raise TestFailure("the ticker never recomposed a plant")
+        recomposed, redrawn = load_png(out / "recomposed.png"), load_png(out / "redrawn.png")
+        changed = float((np.abs(recomposed - redrawn).sum(axis=2) > 0).mean())
+        if changed > 0.002:
+            raise TestFailure(f"recomposed plants differ from a redraw on {changed:.2%} of the pixels")
+        return (f"{len(p0)} plants on screen, {moved} swayed, recomposed = redraw ({changed:.3%} differ), "
+                f"8-bit buffer unchanged ({seconds:.0f}s)")
+    test.__name__ = f"test_hd_wind_slot{slot:02d}"
+    return test
+
+
 TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_art, test_main_menu_hd_fhd,
           test_hd_art_lookup]
          + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
@@ -1298,7 +1435,8 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
          + [make_hd_text_screens_test(style) for style in HD_TEXT_STYLES]
          + [test_hd_text_game, test_hd_lights, test_worldmap_scroll]
          + [make_hd_inventory_test(pack) for pack in HD_INVENTORY_PACKS]
-         + [test_view_identity, test_view_pan, test_view_zoom, test_view_zoom_hd0, test_view_light_follow])
+         + [test_view_identity, test_view_pan, test_view_zoom, test_view_zoom_hd0, test_view_light_follow]
+         + [test_hd_shot_light] + [make_hd_wind_test(slot) for slot in WIND_SLOTS])
 
 
 PERF_CONFIGS = [

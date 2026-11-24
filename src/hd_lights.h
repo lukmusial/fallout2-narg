@@ -59,6 +59,26 @@ struct HdLightBox {
     void add(const HdLightBox& other);
 };
 
+// A muzzle flash (Phase 2.15, hd_shot_light): a short bright streak from
+// the muzzle along the aim and a small core at the muzzle, added per output
+// pixel on top of the light (the light cells are too coarse for it).
+// Positions in logical pixels (fractions allowed); the aim (dirX, dirY) is a
+// unit vector on the ground, i.e. in screen x and doubled screen y (iso
+// foreshortening), like the cone of hdLightFieldAddShot.
+struct HdLightFlash {
+    float x = 0.0f;
+    float y = 0.0f;
+    float dirX = 1.0f;
+    float dirY = 0.0f;
+    // Streak length, half-width and core radius in logical pixels.
+    float length = 13.0f;
+    float width = 1.5f;
+    float core = 2.0f;
+    // Colour (0..1 per channel) and brightness (1 = full flash).
+    float colour[3] = { 1.0f, 0.92f, 0.7f };
+    float intensity = 1.0f;
+};
+
 struct HdLightField {
     // Logical size covered (the screen).
     int width = 0;
@@ -81,7 +101,12 @@ struct HdLightField {
     // clearing, finishing and comparing skip the rest.
     HdLightBox lightBox;
     HdLightBox shadeBox;
+    // Muzzle flashes (applied per output pixel by hdLightApplyRow).
+    std::vector<HdLightFlash> flashes;
 };
+
+// The logical rectangle a flash can touch.
+HdLightBox hdLightFlashBounds(const HdLightFlash& flash);
 
 void hdLightFieldInit(HdLightField* field, int width, int height);
 void hdLightFieldClear(HdLightField* field);
@@ -161,6 +186,38 @@ void hdLightFieldAddFootprint(HdLightField* field, const HdLightFootprint& footp
 // darkness at the centre `darkness`, smooth to 0 at the edge. Shadows
 // combine as 1 - (1 - a)(1 - b).
 void hdLightFieldAddShadow(HdLightField* field, float cx, float cy, float axisX, float axisY, float minor, float darkness);
+
+// A gunshot's light (Phase 2.15, hd_shot_light), all distances in logical
+// pixels on the ground (screen x, doubled screen y). With `omni` false it is
+// a cone from the muzzle (mx, my) along the unit aim (dirX, dirY):
+//   cone    = clip((cos - coneCos) / (1 - coneCos), 0, 1) ^ 1.2
+//   forward = 1 / (1 + (d / reach)^2)
+//   spill   = exp(-d / spill) * (0.35 + 0.65 * max(cos, 0))
+//   mul    += strength * (3.0 * cone * forward + 2.2 * spill) * colour
+//   add    += strength * 0.05 * 255 * spill * colour
+// (d: distance from the muzzle, cos: of the angle to the aim), i.e. a glow
+// at the muzzle, light forward, almost nothing behind the shooter. With
+// `omni` (explosions) the light spreads evenly:
+//   mul += strength * 2.5 / (1 + (d / reach)^2) * colour,
+//   add += strength * 0.2 * 255 * exp(-d / spill) * colour.
+struct HdShotLight {
+    float mx = 0.0f;
+    float my = 0.0f;
+    float dirX = 1.0f;
+    float dirY = 0.0f;
+    float coneCos = 0.80f;
+    float reach = 70.0f;
+    float spill = 14.0f;
+    float colour[3] = { 1.0f, 0.80f, 0.50f };
+    float strength = 1.0f;
+    bool omni = false;
+};
+
+void hdLightFieldAddShot(HdLightField* field, const HdShotLight& shot);
+
+// The light a shot adds at logical point (x, y) (mul factor, one channel of
+// colour 1); for tests and dumps.
+float hdShotLightAt(const HdShotLight& shot, float x, float y);
 
 // A light carried by a walking critter (Phase 2.13). The engine lights hexes:
 // its light sits on the critter's hex while the sprite is drawn up to a hex

@@ -125,6 +125,12 @@ struct GraphicsSettings {
     // With hd_lights=1: the light a walking critter carries follows the
     // drawn sprite instead of jumping hex by hex (Phase 2.13).
     bool hd_lights_follow = true;
+    // With hd=1: a short light from the muzzle of every ranged attack and a
+    // flash at explosions (Phase 2.15, see hd_shot_light.h).
+    bool hd_shot_light = false;
+    // With hd=1: trees, bushes, grass and cacti sway in the wind; their base
+    // stays put (Phase 2.15, see hd_wind.h).
+    bool hd_wind = false;
     // Map view (Phase 2.13, see map_view.h): smooth, per-frame map panning
     // (scroll_speed in percent of the original speed) and zooming the map
     // (mouse wheel, Ctrl+= / Ctrl+- / Ctrl+0).

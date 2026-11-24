@@ -29,6 +29,7 @@
 #include "loadsave.h"
 #include "map_defs.h"
 #include "map_edge.h"
+#include "hd_wind.h"
 #include "map_view.h"
 #include "memory.h"
 #include "object.h"
@@ -353,6 +354,8 @@ void mapInit()
 
     mapNewMap();
     tickersAdd(gameMouseRefresh);
+    // CE: wind in HD (hd_wind.h).
+    hdWindInit();
     _gmouse_disable(0);
     windowShow(gIsoWindow);
 
@@ -365,6 +368,7 @@ void mapExit()
     windowHide(gIsoWindow);
     gameMouseSetCursor(MOUSE_CURSOR_ARROW);
     tickersRemove(gameMouseRefresh);
+    hdWindExit();
 
     messageListRepositorySetStandardMessageList(STANDARD_MESSAGE_LIST_MAP, nullptr);
     if (!messageListFree(&gMapMessageList)) {

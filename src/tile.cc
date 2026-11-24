@@ -432,6 +432,16 @@ void tileHdInvalidateMasked(const unsigned char* src, int srcPitch, int x, int y
     }
 }
 
+// CE: shows a rectangle of the map window again after its HD layer changed
+// (the wind, hd_wind.h).
+void tileWindowShowRect(Rect* rect)
+{
+    Rect clipped;
+    if (gTileEnabled && rectIntersection(rect, &gTileWindowRect, &clipped) == 0) {
+        gTileWindowRefreshProc(&clipped);
+    }
+}
+
 void tileHdScroll(int dx, int dy)
 {
     HdLayer* layer = tileHdExistingLayer();
@@ -1030,6 +1040,7 @@ static void tileRefreshMapper(Rect* rect, MapElevation elevation)
 
     // CE: everything in the rectangle is drawn again.
     tileHdInvalidateRect(&rectToUpdate);
+    objectHdWindPassBegin();
 
     // HRP EdgeClipping: when clipped, clear only if CheckRect; otherwise always clear.
     if (didClear) {
@@ -1088,6 +1099,7 @@ static void tileRefreshGameImpl(Rect* rect, MapElevation elevation)
 
     // CE: everything in the rectangle is drawn again.
     tileHdInvalidateRect(&rectToUpdate);
+    objectHdWindPassBegin();
 
     // HRP EdgeClipping: when clipped, clear only if CheckRect; otherwise always clear.
     if (didClear) {

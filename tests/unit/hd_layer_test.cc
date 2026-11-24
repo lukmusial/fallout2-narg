@@ -820,8 +820,79 @@ static void testGlyphUpscale()
     CHECK(!hdGlyphStyleFromName("blurry", &style));
 }
 
+// Phase 2.15: a swaying plant. A 2x4 frame (a 1-pixel-wide stem in column
+// 0 on the bottom two rows, a 2-pixel crown on top) on a ground of HD red
+// (index 20) 8 pixels wide; the top output rows shift 2 output pixels right.
+static void testDrawSwayed()
+{
+    std::vector<unsigned char> palette = makePalette();
+    const int width = 8;
+    const int height = 4;
+    HdLayer layer;
+    hdLayerInit(&layer, width, height);
+    Staging staging(width, height);
+    std::vector<unsigned char> buffer(width * height, 20);
+    hdLayerDrawImage(&layer, buffer.data(), width, 0, 0, width, height, solidImage(width * 2, height * 2, kRed), palette.data());
+
+    // The frame at (3, 0): rows 0-1 crown (both columns), rows 2-3 stem.
+    const unsigned char frame[] = { 50, 50, 50, 50, 50, 0, 50, 0 };
+    HdImage image = solidImage(4, 8, 0);
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 4; x++) {
+            if (frame[(y / 2) * 2 + x / 2] != 0) {
+                image.pixels[y * 4 + x] = kGreen;
+            }
+        }
+    }
+    // Rect redrawn: the frame widened by 2 logical pixels on each side.
+    std::vector<uint32_t> under;
+    hdLayerCapture(&layer, buffer.data(), width, 1, 0, 6, height, palette.data(), &under);
+    // The legacy draw (in place).
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < 2; x++) {
+            if (frame[y * 2 + x] != 0) {
+                buffer[y * width + 3 + x] = 50;
+            }
+        }
+    }
+    std::vector<int> shifts = { 2, 2, 2, 2, 0, 0, 0, 0 };
+    HdSwayDraw draw;
+    draw.frame = frame;
+    draw.frameWidth = 2;
+    draw.frameHeight = height;
+    draw.image = &image;
+    draw.frameLeft = 3;
+    draw.frameTop = 0;
+    draw.shifts = shifts.data();
+    draw.x = 1;
+    draw.y = 0;
+    draw.width = 6;
+    draw.height = height;
+    draw.under = under.data();
+    hdLayerDrawSwayed(&layer, buffer.data(), width, draw);
+    staging.compose(&layer, buffer, width);
+
+    // Bottom rows (the stem) unchanged: green in place, red beside it.
+    CHECK(staging.at(3, 3) == 1 && staging.hd(3, 3) == 0x00FF00);
+    CHECK(staging.at(4, 3) == 1 && staging.hd(4, 3) == 0xFF0000);
+    // The crown moved one logical pixel right: column 3 (vacated, the
+    // legacy plant is still there) shows the ground, column 5 (beside the
+    // legacy frame, over legacy ground) shows the crown.
+    CHECK(staging.at(3, 0) == 1 && staging.hd(3, 0) == 0xFF0000);
+    CHECK(staging.at(4, 0) == 1 && staging.hd(4, 0) == 0x00FF00);
+    CHECK(staging.at(5, 0) == 1 && staging.hd(5, 0) == 0x00FF00);
+    // Untouched outside the plant.
+    CHECK(staging.at(6, 0) == 1 && staging.hd(6, 0) == 0xFF0000);
+
+    // A critter drawn later over the moved crown wins.
+    buffer[5] = 99;
+    staging.compose(&layer, buffer, width);
+    CHECK(staging.at(5, 0) == 0);
+}
+
 int main()
 {
+    testDrawSwayed();
     testShadowValidation();
     testClipAndSource();
     testOverwriteByLegacyThenHdRedraw();
