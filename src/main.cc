@@ -20,6 +20,7 @@
 #include "game_mouse.h"
 #include "game_movie.h"
 #include "game_sound.h"
+#include "hd_art.h"
 #include "game_speed.h"
 #include "input.h"
 #include "kb.h"
@@ -524,6 +525,12 @@ static void showDeath()
                 Buffer2D(windowBuffer, screenWidth, screenHeight),
                 COLOR_BLACK,
                 settings.ui.death_screen_size != 0);
+            // CE: the death scene's HD art, scaled with it (its own palette is
+            // the base palette now, so the HD colours follow it).
+            if (std::shared_ptr<const HdImage> hd = hdArtFindImage(backgroundFrmImage)) {
+                windowHdDrawImage(win, deathFrameBounds.left, deathFrameBounds.top,
+                    rectGetWidth(&deathFrameBounds), rectGetHeight(&deathFrameBounds), *hd);
+            }
 
             const char* deathFileName = endgameDeathEndingGetFileName();
 

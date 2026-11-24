@@ -13,6 +13,7 @@
 #include "draw.h"
 #include "game_mouse.h"
 #include "game_sound.h"
+#include "hd_art.h"
 #include "geometry.h"
 #include "input.h"
 #include "interface.h"
@@ -413,6 +414,9 @@ int elevatorSelectLevel(int elevator, Map* mapPtr, int* elevationPtr, int* tileP
         _elevatorFrmImages[ELEVATOR_FRM_GAUGE].getWidth(),
         gElevatorWindowBuffer + _elevatorBackgroundFrmImage.getWidth() * 41 + 121,
         _elevatorBackgroundFrmImage.getWidth());
+    hdArtDrawImageOffset(gElevatorWindow, _elevatorFrmImages[ELEVATOR_FRM_GAUGE], gaugeSliceSize * (int)((float)(*elevationPtr) * gaugeUnitsPerLevel),
+        _elevatorFrmImages[ELEVATOR_FRM_GAUGE].getWidth(), _elevatorFrmImages[ELEVATOR_FRM_GAUGE].getHeight() / 13,
+        _elevatorBackgroundFrmImage.getWidth() * 41 + 121, _elevatorBackgroundFrmImage.getWidth());
     windowRefresh(gElevatorWindow);
 
     bool done = false;
@@ -477,6 +481,9 @@ int elevatorSelectLevel(int elevator, Map* mapPtr, int* elevationPtr, int* tileP
                     _elevatorFrmImages[ELEVATOR_FRM_GAUGE].getWidth(),
                     gElevatorWindowBuffer + _elevatorBackgroundFrmImage.getWidth() * 41 + 121,
                     _elevatorBackgroundFrmImage.getWidth());
+                hdArtDrawImageOffset(gElevatorWindow, _elevatorFrmImages[ELEVATOR_FRM_GAUGE], gaugeSliceSize * (int)currentGaugePosition,
+                    _elevatorFrmImages[ELEVATOR_FRM_GAUGE].getWidth(), _elevatorFrmImages[ELEVATOR_FRM_GAUGE].getHeight() / 13,
+                    _elevatorBackgroundFrmImage.getWidth() * 41 + 121, _elevatorBackgroundFrmImage.getWidth());
 
                 windowRefresh(gElevatorWindow);
 
@@ -598,6 +605,7 @@ static int elevatorWindowInit(int elevator)
 
     gElevatorWindowBuffer = windowGetBuffer(gElevatorWindow);
     memcpy(gElevatorWindowBuffer, _elevatorBackgroundFrmImage.getData(), static_cast<size_t>(_elevatorBackgroundFrmImage.getWidth()) * _elevatorBackgroundFrmImage.getHeight());
+    hdArtDrawImage(gElevatorWindow, _elevatorBackgroundFrmImage, 0, 0);
 
     if (_elevatorPanelFrmImage.isLocked()) {
         blitBufferToBuffer(_elevatorPanelFrmImage.getData(),
@@ -606,6 +614,7 @@ static int elevatorWindowInit(int elevator)
             _elevatorPanelFrmImage.getWidth(),
             gElevatorWindowBuffer + static_cast<size_t>(_elevatorBackgroundFrmImage.getWidth()) * (_elevatorBackgroundFrmImage.getHeight() - _elevatorPanelFrmImage.getHeight()),
             _elevatorBackgroundFrmImage.getWidth());
+        hdArtDrawImage(gElevatorWindow, _elevatorPanelFrmImage, 0, _elevatorBackgroundFrmImage.getHeight() - _elevatorPanelFrmImage.getHeight());
     }
 
     int y = 40;
@@ -625,6 +634,7 @@ static int elevatorWindowInit(int elevator)
             BUTTON_FLAG_TRANSPARENT);
         if (btn != -1) {
             buttonSetCallbacks(btn, _gsound_red_butt_press, nullptr);
+            hdArtSetButtonArt(btn, &_elevatorFrmImages[ELEVATOR_FRM_BUTTON_UP], &_elevatorFrmImages[ELEVATOR_FRM_BUTTON_DOWN]);
         }
         y += 60;
     }

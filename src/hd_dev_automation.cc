@@ -1053,6 +1053,18 @@ namespace {
         return true;
     }
 
+    // `die`: the player dies (the game loop then shows the death scene; the
+    // next commands run inside it).
+    bool commandDie(const DevAutomationCommand& command, bool first)
+    {
+        (void)first;
+        if (strcmp(devAutomationGetState(), "game") != 0 || gDude == nullptr) {
+            devAutomationFail(command, "usage: die (in a game)");
+        }
+        gDude->data.critter.combat.results |= DAM_DEAD;
+        return true;
+    }
+
     // `scrollhold` keeps scrolling while later commands run.
     void scrollTicker()
     {
@@ -1107,6 +1119,7 @@ void hdDevAutomationInit()
     devAutomationRegisterCommand("fadeshot", commandFadeshot);
     devAutomationRegisterCommand("perf", commandPerf);
     devAutomationRegisterCommand("worldmap", commandWorldmap);
+    devAutomationRegisterCommand("die", commandDie);
 }
 
 void hdDevAutomationOnFadeStep(int step, int steps, bool toBlack)

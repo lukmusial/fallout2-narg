@@ -56,6 +56,7 @@ namespace fallout {
 //   mousetotile <tile|dude>   the cursor to the centre of a hex as shown
 //   pick <name>               the object and hex under the cursor to <name>.json
 //   worldmap                  open the world map (in a game)
+//   die                       the player dies (in a game): the death scene
 //
 // In HD mode `shot` writes the presented framebuffer (see screenshotSavePng).
 
