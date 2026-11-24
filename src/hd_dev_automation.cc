@@ -1041,6 +1041,18 @@ namespace {
         return true;
     }
 
+    // `worldmap`: opens the world map, as a script's request would (the
+    // game loop handles it; the next commands run inside the world map).
+    bool commandWorldmap(const DevAutomationCommand& command, bool first)
+    {
+        (void)first;
+        if (strcmp(devAutomationGetState(), "game") != 0) {
+            devAutomationFail(command, "usage: worldmap (in a game)");
+        }
+        scriptsRequestWorldMap();
+        return true;
+    }
+
     // `scrollhold` keeps scrolling while later commands run.
     void scrollTicker()
     {
@@ -1094,6 +1106,7 @@ void hdDevAutomationInit()
     devAutomationRegisterCommand("hdstats", commandHdstats);
     devAutomationRegisterCommand("fadeshot", commandFadeshot);
     devAutomationRegisterCommand("perf", commandPerf);
+    devAutomationRegisterCommand("worldmap", commandWorldmap);
 }
 
 void hdDevAutomationOnFadeStep(int step, int steps, bool toBlack)

@@ -1003,6 +1003,27 @@ def field_neutral_mask(out, shape):
     return neutral
 
 
+def test_worldmap_scroll(update):
+    """World map in HD (mixed pack, HD text): after scrolling, no HD pixels or
+    HD text survive over unexplored (black) land; labels still show in HD."""
+    out, seconds = run_game("worldmap_scroll", "worldmap_scroll.txt",
+                            ["--dev-load-game=1", "[graphics]hd=1", "[graphics]hd_pack=mixed", "[graphics]hd_text=1"])
+    notes = []
+    for step in range(4):
+        framebuffer = load_png(out / f"s{step}.png")
+        legacy = load_png(out / f"l{step}.png").repeat(2, axis=0).repeat(2, axis=1)
+        if framebuffer.shape != legacy.shape:
+            raise TestFailure(f"step {step}: size {framebuffer.shape} != {legacy.shape}")
+        differs = np.abs(framebuffer - legacy).sum(axis=2) > 60
+        # Black legacy pixels next to live labels get the labels' 2x edges;
+        # leftovers of fogged-over text are hundreds of pixels.
+        over_black = int((differs & (legacy.sum(axis=2) < 30)).sum())
+        if over_black > 120:
+            raise TestFailure(f"step {step}: {over_black} HD pixels over black land (leftovers)")
+        notes.append(str(over_black))
+    return f"HD pixels over black land per step: {', '.join(notes)} ({seconds:.0f}s)"
+
+
 def test_hd_lights(update):
     """Den at night with hd_lights=1: warm light and glow near the fire,
     nothing changes where the light field is neutral, shadows only darken,
@@ -1275,7 +1296,7 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
          + [make_hd_map_test(pack, slot) for pack in HD_MAP_PACKS for slot in range(1, SLOT_COUNT + 1)]
          + [test_hd_mixed_pack]
          + [make_hd_text_screens_test(style) for style in HD_TEXT_STYLES]
-         + [test_hd_text_game, test_hd_lights]
+         + [test_hd_text_game, test_hd_lights, test_worldmap_scroll]
          + [make_hd_inventory_test(pack) for pack in HD_INVENTORY_PACKS]
          + [test_view_identity, test_view_pan, test_view_zoom, test_view_zoom_hd0, test_view_light_follow])
 

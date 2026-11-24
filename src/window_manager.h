@@ -308,6 +308,9 @@ bool windowHdDrawImageEx(int win, int x, int y, int width, int height, const HdI
 void windowHdClear(int win);
 // Marks a rectangle of the window's layer as having no HD pixels.
 void windowHdInvalidateRect(int win, int x, int y, int width, int height);
+// Same, and removes HD text there too (legacy code redrew the rectangle
+// completely, text included).
+void windowHdClearRect(int win, int x, int y, int width, int height);
 // The HD side of copying a rectangle of one window's buffer into another's
 // (inventory panes cut from the barter window): the layer's pixels and
 // shadows are copied along, so they stay valid exactly where they were.

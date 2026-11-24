@@ -1090,6 +1090,15 @@ void windowHdInvalidateRect(int win, int x, int y, int width, int height)
     }
 }
 
+void windowHdClearRect(int win, int x, int y, int width, int height)
+{
+    Window* window = windowGetWindow(win);
+    if (window != nullptr && window->hdLayer != nullptr) {
+        hdLayerInvalidateRect(window->hdLayer, x, y, width, height);
+        hdLayerClearTextRect(window->hdLayer, x, y, width, height);
+    }
+}
+
 void windowHdCopyRect(int srcWin, int srcX, int srcY, int width, int height, int destWin, int destX, int destY)
 {
     if (!windowHdIsActive()) {

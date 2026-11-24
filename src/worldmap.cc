@@ -5762,6 +5762,11 @@ static int wmInterfaceRefresh()
         return 0;
     }
 
+    // CE: the whole view is redrawn below. HD pixels drawn over the previous
+    // view (labels as HD text) would otherwise survive wherever the new
+    // view has the same palette index, such as the black of unexplored land.
+    windowHdClearRect(wmBkWin, WM_VIEW_X, WM_VIEW_Y, WM_VIEW_WIDTH, WM_VIEW_HEIGHT);
+
     int v17 = wmWorldOffsetX % WM_TILE_WIDTH;
     int v18 = wmWorldOffsetY % WM_TILE_HEIGHT;
     int v20 = WM_TILE_HEIGHT - v18;
@@ -6245,6 +6250,14 @@ static int wmInterfaceDrawSubTileList(TileInfo* tileInfo, int column, int row, i
             break;
         default:
             break;
+        }
+
+        // CE: unknown land is filled black and known land is darkened over
+        // what was drawn there before (town labels). HD pixels of those
+        // labels, such as glyph edges over pixels that were already black,
+        // would otherwise survive the fill.
+        if (subtileInfo->state == SUBTILE_STATE_UNKNOWN || subtileInfo->state == SUBTILE_STATE_KNOWN) {
+            windowHdClearRect(wmBkWin, destX, destY, width, height);
         }
     }
 

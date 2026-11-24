@@ -1,0 +1,21 @@
+# World map in HD: open it, scroll right, down and left; framebuffer and
+# legacy composition after each step (no HD leftovers over unexplored land).
+until game 30000
+wait 1000
+worldmap
+wait 2500
+fbshot s0
+legacyshot l0
+key right 4
+wait 1200
+fbshot s1
+legacyshot l1
+key down 4
+wait 1200
+fbshot s2
+legacyshot l2
+key left 6
+wait 1200
+fbshot s3
+legacyshot l3
+quit 0

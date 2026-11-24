@@ -351,6 +351,8 @@ void hdLayerTintChanged(HdLayer* layer, const unsigned char* buffer, int bufferP
 
 // Marks a rectangle (logical, clipped to the layer) as having no HD pixels.
 void hdLayerInvalidateRect(HdLayer* layer, int x, int y, int width, int height);
+// Removes the text overlay in a rectangle (legacy code redrew it all).
+void hdLayerClearTextRect(HdLayer* layer, int x, int y, int width, int height);
 
 // Same, only where `mask` (aligned with the rectangle) is not 0; used where
 // legacy art (objects) is drawn over HD pixels, so it stays legacy even where

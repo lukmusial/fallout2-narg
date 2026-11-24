@@ -732,6 +732,21 @@ void hdLayerInvalidateRect(HdLayer* layer, int x, int y, int width, int height)
     }
 }
 
+void hdLayerClearTextRect(HdLayer* layer, int x, int y, int width, int height)
+{
+    if (layer == nullptr || layer->textGuard.empty()) {
+        return;
+    }
+
+    int left = std::max(x, 0);
+    int top = std::max({ y, 0, layer->textTop });
+    int right = std::min(x + width, layer->width);
+    int bottom = std::min({ y + height, layer->height, layer->textBottom });
+    for (int ly = top; ly < bottom; ly++) {
+        std::fill_n(layer->textGuard.data() + static_cast<size_t>(ly) * layer->width + left, std::max(right - left, 0), uint16_t { 0 });
+    }
+}
+
 void hdLayerInvalidateMasked(HdLayer* layer, int x, int y, int width, int height, const unsigned char* mask, int maskPitch)
 {
     if (layer == nullptr || mask == nullptr) {
