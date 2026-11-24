@@ -1536,6 +1536,7 @@ int gameDialogReviewWindowInit(int* win)
         GAME_DIALOG_REVIEW_WINDOW_WIDTH,
         windowBuffer,
         GAME_DIALOG_REVIEW_WINDOW_WIDTH);
+    hdArtDrawImage(*win, backgroundFrmImage, 0, 0);
 
     backgroundFrmImage.unlock();
 
@@ -1611,6 +1612,8 @@ int gameDialogReviewWindowInit(int* win)
     }
 
     buttonSetCallbacks(doneBtn, _gsound_red_butt_press, _gsound_red_butt_release);
+
+    hdArtAttachButtonArt(*win, _reviewFrmImages, GAME_DIALOG_REVIEW_WINDOW_BUTTON_FRM_COUNT);
 
     fontSetCurrent(101);
 
@@ -2997,6 +3000,7 @@ void _demo_copy_title(int win)
     unsigned char* dest = windowGetBuffer(win);
 
     blitBufferToBuffer(src + 640 * 225 + 135, width, height, 640, dest, width);
+    windowHdCopyRect(gameDialogBackgroundWindow, 135, 225, width, height, win, 0, 0);
 }
 
 // demo_copy_options
@@ -3042,6 +3046,7 @@ void _demo_copy_options(int win)
 
     unsigned char* dest = windowGetBuffer(win);
     blitBufferToBuffer(src + 640 * (335 - windowRect.top) + 127, width, height, 640, dest, width);
+    windowHdCopyRect(gameDialogWindow, 127, 335 - windowRect.top, width, height, win, 0, 0);
 }
 
 // gDialogRefreshOptionsRect
@@ -3096,6 +3101,8 @@ void _gDialogRefreshOptionsRect(int win, Rect* drawRect)
         640,
         dest + destWidth * drawRect->top,
         destWidth);
+    windowHdCopyRect(gameDialogWindow, 127 + drawRect->left, 335 - windowRect.top + drawRect->top,
+        drawRect->right - drawRect->left, drawRect->bottom - drawRect->top, win, 0, drawRect->top);
 }
 
 // 0x447A58
@@ -3750,6 +3757,7 @@ int partyMemberControlWindowInit()
     unsigned char* src = windowGetBuffer(gameDialogBackgroundWindow);
     blitBufferToBuffer(src + (GAME_DIALOG_WINDOW_WIDTH) * (GAME_DIALOG_WINDOW_HEIGHT - _dialogue_subwin_len), GAME_DIALOG_WINDOW_WIDTH, _dialogue_subwin_len, GAME_DIALOG_WINDOW_WIDTH, windowBuffer, GAME_DIALOG_WINDOW_WIDTH);
     _gdialog_scroll_subwin(gameDialogWindow, true, backgroundData, windowBuffer, nullptr, _dialogue_subwin_len);
+    hdArtDrawImage(gameDialogWindow, backgroundFrmImage, 0, 0);
     backgroundFrmImage.unlock();
 
     // TALK
@@ -3888,6 +3896,7 @@ void partyMemberControlWindowFree()
 
     FrmImage backgroundFrmImage;
     if (backgroundFrmImage.lock(InterfaceFrameId::PartyControlInterface)) {
+        windowHdClear(gameDialogWindow);
         _gdialog_scroll_subwin(gameDialogWindow, false, backgroundFrmImage.getData(), windowGetBuffer(gameDialogWindow), windowGetBuffer(gameDialogBackgroundWindow) + (GAME_DIALOG_WINDOW_WIDTH) * (480 - _dialogue_subwin_len), _dialogue_subwin_len);
     }
 
@@ -3911,15 +3920,19 @@ void partyMemberControlWindowUpdate()
 
         // Clear "Weapon Used:".
         blitBufferToBuffer(buffer + width * 20 + 112, 110, fontGetLineHeight(), width, windowBuffer + windowWidth * 20 + 112, windowWidth);
+        hdArtDrawImageRegion(gameDialogWindow, backgroundFrmImage, 112, 20, 110, fontGetLineHeight(), 112, 20);
 
         // Clear "Armor Used:".
         blitBufferToBuffer(buffer + width * 49 + 112, 110, fontGetLineHeight(), width, windowBuffer + windowWidth * 49 + 112, windowWidth);
+        hdArtDrawImageRegion(gameDialogWindow, backgroundFrmImage, 112, 49, 110, fontGetLineHeight(), 112, 49);
 
         // Clear character preview.
         blitBufferToBuffer(buffer + width * 84 + 8, 70, 98, width, windowBuffer + windowWidth * 84 + 8, windowWidth);
+        hdArtDrawImageRegion(gameDialogWindow, backgroundFrmImage, 8, 84, 70, 98, 8, 84);
 
         // Clear ?
         blitBufferToBuffer(buffer + width * 80 + 232, 132, 106, width, windowBuffer + windowWidth * 80 + 232, windowWidth);
+        hdArtDrawImageRegion(gameDialogWindow, backgroundFrmImage, 232, 80, 132, 106, 232, 80);
 
         backgroundFrmImage.unlock();
     }
@@ -4221,6 +4234,7 @@ int partyMemberCustomizationWindowInit()
         GAME_DIALOG_WINDOW_WIDTH);
 
     _gdialog_scroll_subwin(gameDialogWindow, true, backgroundFrmData, windowBuffer, nullptr, _dialogue_subwin_len);
+    hdArtDrawImage(gameDialogWindow, backgroundFrmImage, 0, 0);
     backgroundFrmImage.unlock();
 
     _gdialog_buttons[0] = createDialogRedButton(gameDialogWindow, 593, 101, nullptr, 13);
@@ -4323,6 +4337,7 @@ void partyMemberCustomizationWindowFree()
 
     FrmImage backgroundFrmImage;
     if (backgroundFrmImage.lock(InterfaceFrameId::PartyCustomInterface)) {
+        windowHdClear(gameDialogWindow);
         _gdialog_scroll_subwin(gameDialogWindow, false, backgroundFrmImage.getData(), windowGetBuffer(gameDialogWindow), windowGetBuffer(gameDialogBackgroundWindow) + (GAME_DIALOG_WINDOW_WIDTH) * (480 - _dialogue_subwin_len), _dialogue_subwin_len);
     }
 
@@ -4382,6 +4397,7 @@ void partyMemberCustomizationWindowUpdate()
     int backgroundHeight = backgroundFrmImage.getHeight();
     unsigned char* backgroundData = backgroundFrmImage.getData();
     blitBufferToBuffer(backgroundData, backgroundWidth, backgroundHeight, backgroundWidth, windowBuffer, GAME_DIALOG_WINDOW_WIDTH);
+    hdArtDrawImage(gameDialogWindow, backgroundFrmImage, 0, 0);
 
     backgroundFrmImage.unlock();
 
@@ -4500,6 +4516,7 @@ int _gdCustomSelect(int option)
         backgroundFrmWidth,
         windowBuffer,
         backgroundFrmWidth);
+    hdArtDrawImage(win, backgroundFrmImage, 0, 0);
 
     backgroundFrmImage.unlock();
 
@@ -4751,6 +4768,11 @@ int _gdialog_window_create()
     }
     _gdialog_scroll_subwin(win, true, backgroundFrmData, windowBuf.data, nullptr, _dialogue_subwin_len, instantScroll);
 
+    // CE: HD (Phase 2.14): the talk panel once it has slid in.
+    if (hdArtDrawImage(win, backgroundFrmImage, 0, 0)) {
+        windowRefresh(win);
+    }
+
     // BARTER/TRADE
     int barterBtn = createDialogRedButton(win, 593, 41, gameDialogBarterButtonUpMouseUp);
     if (barterBtn == -1) return -1;
@@ -4794,6 +4816,8 @@ void _gdialog_window_destroy()
     FrmImage backgroundFrmImage;
     if (backgroundFrmImage.lock(backgroundFrmId)) {
         unsigned char* windowBuffer = windowGetBuffer(gameDialogWindow);
+        // CE: the panel slides out in 8 bits (its HD art does not move with it).
+        windowHdClear(gameDialogWindow);
         _gdialog_scroll_subwin(gameDialogWindow, false, backgroundFrmImage.getData(), windowBuffer, backgroundWindowBuffer, _dialogue_subwin_len);
         windowDestroy(gameDialogWindow);
         _gdialog_window_created = false;
@@ -4860,6 +4884,7 @@ int gameDialogWindowRenderBackground()
     ConstBuffer2D backgroundFrmBuf = backgroundFrmImage.getBuffer();
     Buffer2D windowBuf = windowGetBuffer2D(gameDialogBackgroundWindow);
     blitBuffer2D(backgroundFrmBuf, 0, 0, GAME_DIALOG_WINDOW_WIDTH, GAME_DIALOG_WINDOW_HEIGHT, windowBuf);
+    hdArtDrawImageRegion(gameDialogBackgroundWindow, backgroundFrmImage, 0, 0, GAME_DIALOG_WINDOW_WIDTH, GAME_DIALOG_WINDOW_HEIGHT, 0, 0);
 
     if (!_dialogue_just_started) {
         windowRefresh(gameDialogBackgroundWindow);
@@ -4886,6 +4911,8 @@ int _talkToRefreshDialogWindowRect(Rect* rect)
         GAME_DIALOG_WINDOW_WIDTH,
         windowBuffer + offset,
         GAME_DIALOG_WINDOW_WIDTH);
+    hdArtDrawImageRegion(gameDialogWindow, backgroundFrmImage, rect->left, rect->top, rect->right - rect->left,
+        rect->bottom - rect->top, rect->left, rect->top);
 
     windowRefreshRect(gameDialogWindow, rect);
 

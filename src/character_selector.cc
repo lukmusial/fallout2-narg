@@ -16,6 +16,7 @@
 #include "draw.h"
 #include "game.h"
 #include "game_sound.h"
+#include "hd_art.h"
 #include "input.h"
 #include "kb.h"
 #include "mainmenu.h"
@@ -128,6 +129,10 @@ static unsigned char* gCharacterSelectorWindowBuffer = nullptr;
 
 // 0x51C800 monitor
 static unsigned char* gCharacterSelectorBackground = nullptr;
+
+// CE: the background art, kept locked for its HD art (restored with the
+// legacy copy above).
+static FrmImage gCharacterSelectorBackgroundFrmImage;
 
 // 0x51C804 previous_button
 static int gCharacterSelectorWindowPreviousButton = -1;
@@ -311,6 +316,8 @@ static bool characterSelectorWindowInit()
         CS_WINDOW_WIDTH,
         gCharacterSelectorWindowBuffer,
         CS_WINDOW_WIDTH);
+    hdArtDrawImage(gCharacterSelectorWindow, backgroundFrmImage, 0, 0);
+    gCharacterSelectorBackgroundFrmImage.lock(InterfaceFrameId::CharacterSelectorBackground);
 
     gCharacterSelectorBackground = (unsigned char*)internal_malloc(CS_WINDOW_BACKGROUND_WIDTH * CS_WINDOW_BACKGROUND_HEIGHT);
     if (gCharacterSelectorBackground == nullptr)
@@ -347,6 +354,7 @@ static bool characterSelectorWindowInit()
         _previousButtonPressedFrmImage.getData(),
         nullptr,
         BUTTON_FLAG_NONE);
+    hdArtSetButtonArt(gCharacterSelectorWindowPreviousButton, &_previousButtonNormalFrmImage, &_previousButtonPressedFrmImage);
     if (gCharacterSelectorWindowPreviousButton == -1) {
         return characterSelectorWindowFatalError(false);
     }
@@ -375,6 +383,7 @@ static bool characterSelectorWindowInit()
         _nextButtonPressedFrmImage.getData(),
         nullptr,
         BUTTON_FLAG_NONE);
+    hdArtSetButtonArt(gCharacterSelectorWindowNextButton, &_nextButtonNormalFrmImage, &_nextButtonPressedFrmImage);
     if (gCharacterSelectorWindowNextButton == -1) {
         return characterSelectorWindowFatalError(false);
     }
@@ -403,6 +412,7 @@ static bool characterSelectorWindowInit()
         _takeButtonPressedFrmImage.getData(),
         nullptr,
         BUTTON_FLAG_TRANSPARENT);
+    hdArtSetButtonArt(gCharacterSelectorWindowTakeButton, &_takeButtonNormalFrmImage, &_takeButtonPressedFrmImage);
     if (gCharacterSelectorWindowTakeButton == -1) {
         return characterSelectorWindowFatalError(false);
     }
@@ -430,6 +440,7 @@ static bool characterSelectorWindowInit()
         _modifyButtonPressedFrmImage.getData(),
         nullptr,
         BUTTON_FLAG_TRANSPARENT);
+    hdArtSetButtonArt(gCharacterSelectorWindowModifyButton, &_modifyButtonNormalFrmImage, &_modifyButtonPressedFrmImage);
     if (gCharacterSelectorWindowModifyButton == -1) {
         return characterSelectorWindowFatalError(false);
     }
@@ -458,6 +469,7 @@ static bool characterSelectorWindowInit()
         _createButtonPressedFrmImage.getData(),
         nullptr,
         BUTTON_FLAG_TRANSPARENT);
+    hdArtSetButtonArt(gCharacterSelectorWindowCreateButton, &_createButtonNormalFrmImage, &_createButtonPressedFrmImage);
     if (gCharacterSelectorWindowCreateButton == -1) {
         return characterSelectorWindowFatalError(false);
     }
@@ -486,6 +498,7 @@ static bool characterSelectorWindowInit()
         _backButtonPressedFrmImage.getData(),
         nullptr,
         BUTTON_FLAG_TRANSPARENT);
+    hdArtSetButtonArt(gCharacterSelectorWindowBackButton, &_backButtonNormalFrmImage, &_backButtonPressedFrmImage);
     if (gCharacterSelectorWindowBackButton == -1) {
         return characterSelectorWindowFatalError(false);
     }
@@ -562,6 +575,7 @@ static void characterSelectorWindowFree()
         internal_free(gCharacterSelectorBackground);
         gCharacterSelectorBackground = nullptr;
     }
+    gCharacterSelectorBackgroundFrmImage.unlock();
 
     windowDestroy(gCharacterSelectorWindow);
     gCharacterSelectorWindow = -1;
@@ -585,6 +599,8 @@ static bool characterSelectorWindowRefresh()
         CS_WINDOW_BACKGROUND_WIDTH,
         gCharacterSelectorWindowBuffer + CS_WINDOW_WIDTH * CS_WINDOW_BACKGROUND_Y + CS_WINDOW_BACKGROUND_X,
         CS_WINDOW_WIDTH);
+    hdArtDrawImageRegion(gCharacterSelectorWindow, gCharacterSelectorBackgroundFrmImage, CS_WINDOW_BACKGROUND_X, CS_WINDOW_BACKGROUND_Y,
+        CS_WINDOW_BACKGROUND_WIDTH, CS_WINDOW_BACKGROUND_HEIGHT, CS_WINDOW_BACKGROUND_X, CS_WINDOW_BACKGROUND_Y);
 
     bool success = false;
     if (characterSelectorWindowRenderFace()) {
@@ -611,6 +627,7 @@ static bool characterSelectorWindowRenderFace()
             int width = faceFrmImage.getWidth();
             int height = faceFrmImage.getHeight();
             blitBufferToBufferTrans(data, width, height, width, (gCharacterSelectorWindowBuffer + CS_WINDOW_WIDTH * 23 + 27), CS_WINDOW_WIDTH);
+            hdArtDrawImage(gCharacterSelectorWindow, faceFrmImage, 27, 23);
             success = true;
         }
         faceFrmImage.unlock();
