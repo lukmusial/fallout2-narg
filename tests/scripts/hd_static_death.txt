@@ -2,7 +2,7 @@
 until game 30000
 wait 1500
 die
-wait 4000
+wait 6000
 fbshot death
 legacyshot death_legacy
 quit 0

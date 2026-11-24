@@ -20,6 +20,7 @@
 #include "game.h"
 #include "game_mouse.h"
 #include "game_sound.h"
+#include "hd_art.h"
 #include "input.h"
 #include "interface.h"
 #include "item.h"
@@ -5798,6 +5799,7 @@ static int calledShotSelectHitLocation(Object* critter, HitLocation* hitLocation
         CALLED_SHOT_WINDOW_WIDTH,
         windowBuffer,
         CALLED_SHOT_WINDOW_WIDTH);
+    hdArtDrawImage(gCalledShotWindow, backgroundFrm, 0, 0);
 
     FrmImage critterFrm;
     const FrmId critterFrmId = FrmId(critter, ANIM_CALLED_SHOT_PIC, WeaponAnimation::None, ROTATION_NE);
@@ -5838,6 +5840,7 @@ static int calledShotSelectHitLocation(Object* critter, HitLocation* hitLocation
         BUTTON_FLAG_TRANSPARENT);
     if (cancelBtn != -1) {
         buttonSetCallbacks(cancelBtn, _gsound_red_butt_press, _gsound_red_butt_release);
+        hdArtSetButtonArt(cancelBtn, &cancelButtonNormalFrmImage, &cancelButtonPressedFrmImage);
     }
 
     int oldFont = fontGetCurrent();
