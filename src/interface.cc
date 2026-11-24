@@ -180,6 +180,7 @@ static void customInterfaceBarInit();
 static void customInterfaceBarExit();
 
 static void extendedApBarInitToWindow();
+static void interfaceBarHdBuildBackground();
 
 static void sidePanelsInit();
 static void sidePanelsExit();
@@ -382,6 +383,52 @@ static Buffer2D interfaceWindowBuf2D()
     return { gInterfaceWindowBuffer, gInterfaceBarWidth, INTERFACE_BAR_HEIGHT };
 }
 
+// CE: HD (Phase 2.16). The bar's static background is the bar art with the
+// extended AP bar art blitted over it; its HD version is composed the same
+// way once (gInterfaceBarHdBackground), with the legacy composite it stands
+// for (gInterfaceBarHdSource), and redrawn wherever legacy code restores
+// part of the background.
+static HdImage gInterfaceBarHdBackground;
+static std::vector<unsigned char> gInterfaceBarHdSource;
+static bool gInterfaceBarHdReady = false;
+
+static void interfaceBarHdRestore(int x, int y, int width, int height)
+{
+    if (!gInterfaceBarHdReady || gInterfaceBarWindow == -1) {
+        return;
+    }
+    hdArtDrawRegion(gInterfaceBarWindow, gInterfaceBarHdBackground, gInterfaceBarHdSource.data(), gInterfaceBarWidth,
+        INTERFACE_BAR_HEIGHT - 1, x, y, width, height, x, y);
+}
+
+// HD art of `image` for a legacy blit from `src` (inside the image's data,
+// row pitch = its width) to `dest` (inside the bar's window buffer).
+static void interfaceBarHdEndButtonsFrame(int frame, const unsigned char* src)
+{
+    hdArtDrawFrameRegion(gInterfaceBarWindow, InterfaceFrmId(InterfaceFrameId::EndTurnWindowAnimation), frame, src, 57, 58,
+        0, 0, 57, 58, 580 + gInterfaceBarContentOffset, 38);
+}
+
+static void interfaceBarHdBlit(const FrmImage& image, const unsigned char* src, int width, int height, const unsigned char* dest);
+
+// The bar's digits (numbers.frm strips, pitch 360) with their HD art.
+static void interfaceBarBlitNumber(const unsigned char* src, int width, unsigned char* dest);
+
+static void interfaceBarHdBlit(const FrmImage& image, const unsigned char* src, int width, int height, const unsigned char* dest)
+{
+    if (!windowHdIsActive() || !image.isLocked()) {
+        return;
+    }
+    hdArtDrawImageOffset(gInterfaceBarWindow, image, static_cast<int>(src - image.getData()), width, height,
+        static_cast<int>(dest - gInterfaceWindowBuffer), gInterfaceBarWidth);
+}
+
+static void interfaceBarBlitNumber(const unsigned char* src, int width, unsigned char* dest)
+{
+    blitBufferToBuffer(src, width, 17, 360, dest, gInterfaceBarWidth);
+    interfaceBarHdBlit(_numbersFrmImage, src, width, 17, dest);
+}
+
 static Buffer2D apBarBackgroundBuf2D()
 {
     return { apBarBackgroundData, apBarWidth, kApBarBulbSize };
@@ -431,6 +478,8 @@ int interfaceInit()
     }
 
     extendedApBarInitToWindow();
+    interfaceBarHdBuildBackground();
+    interfaceBarHdRestore(0, 0, gInterfaceBarWidth, INTERFACE_BAR_HEIGHT - 1);
 
     if (!_inventoryButtonNormalFrmImage.lock(InterfaceFrameId::InventoryButtonUp)) {
         // NOTE: Uninline.
@@ -443,6 +492,8 @@ int interfaceInit()
     }
 
     gInventoryButton = buttonCreate(gInterfaceBarWindow, 211 + gInterfaceBarContentOffset, 40, 32, 21, -1, -1, -1, KEY_LOWERCASE_I, _inventoryButtonNormalFrmImage.getData(), _inventoryButtonPressedFrmImage.getData(), nullptr, BUTTON_FLAG_NONE);
+
+    hdArtSetButtonArt(gInventoryButton, &_inventoryButtonNormalFrmImage, &_inventoryButtonPressedFrmImage);
     if (gInventoryButton == -1) {
         // NOTE: Uninline.
         return intface_fatal_error(-1);
@@ -461,6 +512,8 @@ int interfaceInit()
     }
 
     gOptionsButton = buttonCreate(gInterfaceBarWindow, 210 + gInterfaceBarContentOffset, 61, 34, 34, -1, -1, -1, KEY_LOWERCASE_O, _optionsButtonNormalFrmImage.getData(), _optionsButtonPressedFrmImage.getData(), nullptr, BUTTON_FLAG_NONE);
+
+    hdArtSetButtonArt(gOptionsButton, &_optionsButtonNormalFrmImage, &_optionsButtonPressedFrmImage);
     if (gOptionsButton == -1) {
         // NOTE: Uninline.
         return intface_fatal_error(-1);
@@ -484,6 +537,8 @@ int interfaceInit()
     }
 
     gSkilldexButton = buttonCreate(gInterfaceBarWindow, 523 + gInterfaceBarContentOffset, 6, 22, 21, -1, -1, -1, KEY_LOWERCASE_S, _skilldexButtonNormalFrmImage.getData(), _skilldexButtonPressedFrmImage.getData(), nullptr, BUTTON_FLAG_TRANSPARENT);
+
+    hdArtSetButtonArt(gSkilldexButton, &_skilldexButtonNormalFrmImage, &_skilldexButtonPressedFrmImage);
     if (gSkilldexButton == -1) {
         // NOTE: Uninline.
         return intface_fatal_error(-1);
@@ -508,6 +563,8 @@ int interfaceInit()
     }
 
     gMapButton = buttonCreate(gInterfaceBarWindow, 526 + gInterfaceBarContentOffset, 39, 41, 19, -1, -1, -1, KEY_TAB, _mapButtonNormalFrmImage.getData(), _mapButtonPressedFrmImage.getData(), nullptr, BUTTON_FLAG_TRANSPARENT);
+
+    hdArtSetButtonArt(gMapButton, &_mapButtonNormalFrmImage, &_mapButtonPressedFrmImage);
     if (gMapButton == -1) {
         // NOTE: Uninline.
         return intface_fatal_error(-1);
@@ -527,6 +584,8 @@ int interfaceInit()
     }
 
     gPipboyButton = buttonCreate(gInterfaceBarWindow, 526 + gInterfaceBarContentOffset, 77, 41, 19, -1, -1, -1, KEY_LOWERCASE_P, _pipboyButtonNormalFrmImage.getData(), _pipboyButtonPressedFrmImage.getData(), nullptr, BUTTON_FLAG_NONE);
+
+    hdArtSetButtonArt(gPipboyButton, &_pipboyButtonNormalFrmImage, &_pipboyButtonPressedFrmImage);
     if (gPipboyButton == -1) {
         // NOTE: Uninline.
         return intface_fatal_error(-1);
@@ -546,6 +605,8 @@ int interfaceInit()
     }
 
     gCharacterButton = buttonCreate(gInterfaceBarWindow, 526 + gInterfaceBarContentOffset, 58, 41, 19, -1, -1, -1, KEY_LOWERCASE_C, _characterButtonNormalFrmImage.getData(), _characterButtonPressedFrmImage.getData(), nullptr, BUTTON_FLAG_NONE);
+
+    hdArtSetButtonArt(gCharacterButton, &_characterButtonNormalFrmImage, &_characterButtonPressedFrmImage);
     if (gCharacterButton == -1) {
         // NOTE: Uninline.
         return intface_fatal_error(-1);
@@ -598,6 +659,7 @@ int interfaceInit()
 
     // Swap hands button
     gChangeHandsButton = buttonCreate(gInterfaceBarWindow, 218 + gInterfaceBarContentOffset, 6, 22, 21, -1, -1, -1, KEY_LOWERCASE_B, _changeHandsButtonNormalFrmImage.getData(), _changeHandsButtonPressedFrmImage.getData(), nullptr, BUTTON_FLAG_TRANSPARENT);
+    hdArtSetButtonArt(gChangeHandsButton, &_changeHandsButtonNormalFrmImage, &_changeHandsButtonPressedFrmImage);
     if (gChangeHandsButton == -1) {
         // NOTE: Uninline.
         return intface_fatal_error(-1);
@@ -1065,8 +1127,11 @@ void interfaceRenderActionPoints(int actionPointsLeft, int bonusActionPoints)
     }
 
     blitBuffer2D(apBarBackgroundBuf2D(), interfaceWindowBuf2D(), gInterfaceBarContentOffset + apBarXOffset, kApBarYOffset);
+    interfaceBarHdRestore(gInterfaceBarContentOffset + apBarXOffset, kApBarYOffset, apBarWidth, kApBarBulbSize);
 
+    const FrmImage* bulbFrmImage = &_greenLightFrmImage;
     if (actionPointsLeft == -1) {
+        bulbFrmImage = &_redLightFrmImage;
         bulbFrmBuf = _redLightFrmImage.getBuffer();
         actionPointsLeft = apBarMaxAP;
         bonusActionPoints = 0;
@@ -1097,6 +1162,8 @@ void interfaceRenderActionPoints(int actionPointsLeft, int bonusActionPoints)
             ? bulbFrmBuf
             : _yellowLightFrmImage.getBuffer();
         blitBuffer2D(frmBuf, 0, 0, kApBarBulbSize, kApBarBulbSize, interfaceWindowBuf2D(), gInterfaceBarContentOffset + apBarXOffset + index * bulbXOffset, kApBarYOffset);
+        hdArtDrawImageRegion(gInterfaceBarWindow, index < actionPointsLeft ? *bulbFrmImage : _yellowLightFrmImage, 0, 0,
+            kApBarBulbSize, kApBarBulbSize, gInterfaceBarContentOffset + apBarXOffset + index * bulbXOffset, kApBarYOffset);
     }
 
     if (!gInterfaceBarInitialized) {
@@ -1511,6 +1578,7 @@ void interfaceBarEndButtonsShow(bool animated)
                 unsigned char* src = artGetFrameData(art, frame);
                 if (src != nullptr) {
                     blitBufferToBuffer(src, 57, 58, 57, gInterfaceWindowBuffer + gInterfaceBarWidth * 38 + 580 + gInterfaceBarContentOffset, gInterfaceBarWidth);
+                    interfaceBarHdEndButtonsFrame(frame, src);
                     windowRefreshRect(gInterfaceBarWindow, &gInterfaceBarEndButtonsRect);
                 }
 
@@ -1525,6 +1593,7 @@ void interfaceBarEndButtonsShow(bool animated)
     } else {
         unsigned char* src = artGetFrameData(art, frameCount - 1);
         blitBufferToBuffer(src, 57, 58, 57, gInterfaceWindowBuffer + gInterfaceBarWidth * 38 + 580 + gInterfaceBarContentOffset, gInterfaceBarWidth);
+        interfaceBarHdEndButtonsFrame(frameCount - 1, src);
         windowRefreshRect(gInterfaceBarWindow, &gInterfaceBarEndButtonsRect);
     }
 
@@ -1571,6 +1640,7 @@ void interfaceBarEndButtonsHide(bool animated)
                 unsigned char* dest = gInterfaceWindowBuffer + gInterfaceBarWidth * 38 + 580 + gInterfaceBarContentOffset;
                 if (src != nullptr) {
                     blitBufferToBuffer(src, 57, 58, 57, dest, gInterfaceBarWidth);
+                    interfaceBarHdEndButtonsFrame(frame - 1, src);
                     windowRefreshRect(gInterfaceBarWindow, &gInterfaceBarEndButtonsRect);
                 }
 
@@ -1586,6 +1656,7 @@ void interfaceBarEndButtonsHide(bool animated)
         unsigned char* dest = gInterfaceWindowBuffer + gInterfaceBarWidth * 38 + 580 + gInterfaceBarContentOffset;
         unsigned char* src = artGetFrameData(art);
         blitBufferToBuffer(src, 57, 58, 57, dest, gInterfaceBarWidth);
+        interfaceBarHdEndButtonsFrame(0, src);
         windowRefreshRect(gInterfaceBarWindow, &gInterfaceBarEndButtonsRect);
     }
 
@@ -1607,6 +1678,7 @@ void interfaceBarEndButtonsRenderGreenLights()
 
         soundPlayFile("icombat2");
         blitBufferToBufferTrans(lightsFrmImage.getData(), 57, 58, 57, gInterfaceWindowBuffer + 38 * gInterfaceBarWidth + 580 + gInterfaceBarContentOffset, gInterfaceBarWidth);
+        hdArtDrawImage(gInterfaceBarWindow, lightsFrmImage, 580 + gInterfaceBarContentOffset, 38);
         windowRefreshRect(gInterfaceBarWindow, &gInterfaceBarEndButtonsRect);
     }
 }
@@ -1625,6 +1697,7 @@ void interfaceBarEndButtonsRenderRedLights()
 
         soundPlayFile("icombat1");
         blitBufferToBufferTrans(lightsFrmImage.getData(), 57, 58, 57, gInterfaceWindowBuffer + 38 * gInterfaceBarWidth + 580 + gInterfaceBarContentOffset, gInterfaceBarWidth);
+        hdArtDrawImage(gInterfaceBarWindow, lightsFrmImage, 580 + gInterfaceBarContentOffset, 38);
         windowRefreshRect(gInterfaceBarWindow, &gInterfaceBarEndButtonsRect);
     }
 }
@@ -2099,6 +2172,8 @@ static int endTurnButtonInit()
     }
 
     gEndTurnButton = buttonCreate(gInterfaceBarWindow, 590 + gInterfaceBarContentOffset, 43, 38, 22, -1, -1, -1, 32, _endTurnButtonNormalFrmImage.getData(), _endTurnButtonPressedFrmImage.getData(), nullptr, BUTTON_FLAG_NONE);
+
+    hdArtSetButtonArt(gEndTurnButton, &_endTurnButtonNormalFrmImage, &_endTurnButtonPressedFrmImage);
     if (gEndTurnButton == -1) {
         return -1;
     }
@@ -2147,6 +2222,8 @@ static int endCombatButtonInit()
     }
 
     gEndCombatButton = buttonCreate(gInterfaceBarWindow, 590 + gInterfaceBarContentOffset, 65, 38, 22, -1, -1, -1, 13, _endCombatButtonNormalFrmImage.getData(), _endCombatButtonPressedFrmImage.getData(), nullptr, BUTTON_FLAG_NONE);
+
+    hdArtSetButtonArt(gEndCombatButton, &_endCombatButtonNormalFrmImage, &_endCombatButtonPressedFrmImage);
     if (gEndCombatButton == -1) {
         return -1;
     }
@@ -2327,6 +2404,7 @@ static void interfaceRestoreAlternateAmmoMeterBackground(int x)
         gInterfaceBarWidth,
         gInterfaceWindowBuffer + gInterfaceBarWidth * kAmmoAlternateMeterTopBorder + x,
         gInterfaceBarWidth);
+    interfaceBarHdRestore(x, kAmmoAlternateMeterTopBorder, kAmmoAlternateMeterWidth, height);
 }
 
 static void interfaceUpdateAlternateAmmoMeterRow(unsigned char* dest, bool filled, bool lowerHalf)
@@ -2410,7 +2488,7 @@ static int _intface_item_reload()
 // internal helper for interfaceRenderCounter
 static void interfaceRenderCounterAnimationStep(unsigned char* src, unsigned char* dest, int delayMs, Rect* numbersRect, bool refreshMouse)
 {
-    blitBufferToBuffer(src, 9, 17, 360, dest, gInterfaceBarWidth);
+    interfaceBarBlitNumber(src, 9, dest);
 
     if (refreshMouse) {
         _mouse_info();
@@ -2464,10 +2542,10 @@ static void interfaceRenderCounter(int x, int y, int previousValue, int value, i
     int tens = (normalizedValue / 10) % 10;
     int hundreds = normalizedValue / 100;
 
-    blitBufferToBuffer(numbers + 9 * hundreds, 9, 17, 360, hundredsDest, gInterfaceBarWidth);
-    blitBufferToBuffer(numbers + 9 * tens, 9, 17, 360, tensDest, gInterfaceBarWidth);
-    blitBufferToBuffer(numbers + 9 * ones, 9, 17, 360, onesDest, gInterfaceBarWidth);
-    blitBufferToBuffer(normalizedSign >= 0 ? plusSrc : minusSrc, 6, 17, 360, signDest, gInterfaceBarWidth);
+    interfaceBarBlitNumber(numbers + 9 * hundreds, 9, hundredsDest);
+    interfaceBarBlitNumber(numbers + 9 * tens, 9, tensDest);
+    interfaceBarBlitNumber(numbers + 9 * ones, 9, onesDest);
+    interfaceBarBlitNumber(normalizedSign >= 0 ? plusSrc : minusSrc, 6, signDest);
 
     if (!gInterfaceBarInitialized) {
         Rect numbersRect = { x, y, x + 33, y + 17 };
@@ -2509,11 +2587,11 @@ static void interfaceRenderCounter(int x, int y, int previousValue, int value, i
 
                 previousValue += change;
 
-                blitBufferToBuffer(numbers + 9 * hundreds, 9, 17, 360, hundredsDest, gInterfaceBarWidth);
-                blitBufferToBuffer(numbers + 9 * tens, 9, 17, 360, tensDest, gInterfaceBarWidth);
-                blitBufferToBuffer(numbers + 9 * ones, 9, 17, 360, onesDest, gInterfaceBarWidth);
+                interfaceBarBlitNumber(numbers + 9 * hundreds, 9, hundredsDest);
+                interfaceBarBlitNumber(numbers + 9 * tens, 9, tensDest);
+                interfaceBarBlitNumber(numbers + 9 * ones, 9, onesDest);
 
-                blitBufferToBuffer(previousValue >= 0 ? plusSrc : minusSrc, 6, 17, 360, signDest, gInterfaceBarWidth);
+                interfaceBarBlitNumber(previousValue >= 0 ? plusSrc : minusSrc, 6, signDest);
                 _mouse_info();
                 gameMouseRefresh();
                 renderPresent();
@@ -3125,6 +3203,54 @@ static void extendedApBarInitToWindow()
     blitBuffer2D(ifaceBarBuf, gInterfaceBarContentOffset + apBarXOffset, kApBarYOffset, abBarBgBuf.width, abBarBgBuf.height, abBarBgBuf);
 }
 
+static void interfaceBarHdBuildBackground()
+{
+    gInterfaceBarHdReady = false;
+    if (!windowHdIsActive()) {
+        return;
+    }
+
+    char path[COMPAT_MAX_PATH];
+    if (gInterfaceBarIsCustom) {
+        snprintf(path, sizeof(path), "art\\intrface\\HR_IFACE_%d.FRM", gInterfaceBarWidth);
+    } else {
+        snprintf(path, sizeof(path), "%s", InterfaceFrmId(InterfaceFrameId::MainInterface).filePath());
+    }
+
+    std::shared_ptr<const HdImage> base = hdArtFindFrame(path, 0, 0);
+    const int width = gInterfaceBarWidth * kHdScale;
+    const int height = (INTERFACE_BAR_HEIGHT - 1) * kHdScale;
+    if (base == nullptr || base->width != width || base->height < height) {
+        return;
+    }
+
+    HdImage& image = gInterfaceBarHdBackground;
+    image.width = width;
+    image.height = height;
+    image.pixels.assign(base->pixels.begin(), base->pixels.begin() + static_cast<size_t>(width) * height);
+
+    // The extended AP bar art is copied over the bar (index 0 included, which
+    // stays legacy black: alpha 0).
+    if (settings.ui.extend_ap_bar) {
+        std::shared_ptr<const HdImage> apBar = hdArtFindFrame("art\\intrface\\iface_apbar_e.frm", 0, 0);
+        if (apBar != nullptr) {
+            int left = (gInterfaceBarContentOffset + apBarXOffset - 23) * kHdScale;
+            int top = (kApBarYOffset - 4) * kHdScale;
+            for (int y = 0; y < apBar->height && top + y < height; y++) {
+                for (int x = 0; x < apBar->width && left + x < width; x++) {
+                    if (left + x < 0 || top + y < 0) {
+                        continue;
+                    }
+                    image.pixels[static_cast<size_t>(top + y) * width + left + x] = apBar->pixels[static_cast<size_t>(y) * apBar->width + x];
+                }
+            }
+        }
+    }
+
+    gInterfaceBarHdSource.assign(gInterfaceWindowBuffer, gInterfaceWindowBuffer + static_cast<size_t>(gInterfaceBarWidth) * (INTERFACE_BAR_HEIGHT - 1));
+    gInterfaceBarHdReady = true;
+}
+
 unsigned char* customInterfaceBarGetBackgroundImageData()
 {
     if (!gInterfaceBarIsCustom) {
@@ -3222,6 +3348,7 @@ static void sidePanelsDraw(const char* path, int win, bool isLeading)
     if (settings.ui.iface_bar_sides_ori && !isLeading) {
         imageData += imageWidth - width;
     }
+    int cropX = static_cast<int>(imageData - artGetFrameData(image));
 
     blitBufferToBufferStretch(imageData,
         width,
@@ -3231,6 +3358,23 @@ static void sidePanelsDraw(const char* path, int win, bool isLeading)
         windowWidth,
         windowHeight,
         windowWidth);
+
+    // CE: HD (Phase 2.16): the same part of the panel's HD art, stretched
+    // the same way.
+    if (windowHdIsActive()) {
+        std::shared_ptr<const HdImage> hd = hdArtFindFrame(path, 0, 0);
+        if (hd != nullptr && hd->width == imageWidth * kHdScale && hd->height == imageHeight * kHdScale) {
+            HdImage part;
+            part.width = width * kHdScale;
+            part.height = hd->height;
+            part.pixels.resize(static_cast<size_t>(part.width) * part.height);
+            for (int y = 0; y < part.height; y++) {
+                std::copy_n(hd->pixels.begin() + static_cast<size_t>(y) * hd->width + cropX * kHdScale, part.width,
+                    part.pixels.begin() + static_cast<size_t>(y) * part.width);
+            }
+            windowHdDrawImage(win, 0, 0, windowWidth, windowHeight, part);
+        }
+    }
 
     internal_free(image);
 }
