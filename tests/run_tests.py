@@ -1249,6 +1249,7 @@ def test_hd_lights_text(update):
 # the town's ground and leave the 8-bit picture alone.
 
 HD_TOWN_MIN_FLOOR_DETAIL = 0.9    # HD floor/roof pixels whose 2x2 block is not flat
+HD_TOWN_MAX_LEGACY_DIFFER = 1536   # 8-bit pixels (0.5% of 640x480): walking townspeople
 HD_TOWN_MIN_VARIANT_CHANGE = 0.01  # of the frame, per material: all variants vs that material's off
 HD_TOWN_MIN_SCENERY_DETAIL = 0.5  # Phase 2.18: HD wall/scenery/item blocks with detail (pack art)
 HD_TOWN_VARIANT_LEVELS = 8         # summed RGB difference that counts as changed (pavement variants are light)
@@ -1389,7 +1390,9 @@ def make_hd_town_test(town, keys, goto, materials):
             plain, more = run_game(f"hd_town_{town}_hd0", script, ["[graphics]hd=0"])
             seconds += more
             differ = legacy_differs(load_png(plain / "legacy.png"), load_png(off / "legacy.png"))
-            if differ:
+            # Townspeople walk differently in the two runs (up to ~700 pixels
+            # in NCR); HD changing the 8-bit picture would change far more.
+            if differ > HD_TOWN_MAX_LEGACY_DIFFER:
                 raise TestFailure(f"{town}: the 8-bit picture differs from hd=0 ({differ} pixels outside colour "
                                   "cycling)")
             result += ", 8-bit picture = hd=0"
@@ -1401,7 +1404,7 @@ def make_hd_town_test(town, keys, goto, materials):
             on, more = run_game(f"hd_town_{town}_on", script_on, args + ["[graphics]hd_ground_variants=1"])
             seconds += more
             differ = legacy_differs(load_png(off / "legacy.png"), load_png(on / "legacy.png"))
-            if differ:
+            if differ > HD_TOWN_MAX_LEGACY_DIFFER:
                 raise TestFailure(f"{town}: the 8-bit picture changed with ground variants ({differ} pixels "
                                   "outside colour cycling)")
             game = load_png(on / "game.png")
@@ -1816,6 +1819,9 @@ def make_hd_wind_test(slot):
         h, w = a.shape[0] // 2, a.shape[1] // 2
         p0 = json.loads((out / "t0.json").read_text())["wind"]["plants"]
         p1 = json.loads((out / "t1.json").read_text())["wind"]["plants"]
+        rigid = [p["art"] for p in p0 + p1 if p["art"].rsplit("/", 1)[-1].startswith("cac")]
+        if rigid:
+            raise TestFailure(f"cacti sway: {sorted(set(rigid))}")
         if len(p0) < 3 or len(p0) != len(p1):
             raise TestFailure(f"plants on screen: {len(p0)} / {len(p1)}")
         # Pixels that may change for other reasons: where the 8-bit view

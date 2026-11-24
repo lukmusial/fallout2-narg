@@ -59,6 +59,10 @@ void hdWindForget(Object* object);
 
 // Harness: hold the wind at `ms` (the sway is a function of time), or let it
 // run with the clock again (`ms` < 0).
+// Test mode: a gust over `tile`, wide enough to reach the whole view, that starts
+// blowing at `startMs` of the wind clock (see hdWindSetTime).
+void hdWindGust(int tile, unsigned int startMs);
+
 void hdWindSetTime(int ms);
 
 // JSON: plants on screen, their sway now, ticker timing (harness).

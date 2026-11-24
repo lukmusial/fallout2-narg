@@ -28,7 +28,7 @@ namespace {
     constexpr float kFixedShare = 0.35f;
 
     // Plants by scenery art name (lower case, without extension) and how
-    // freely they move (1 = leaves and grass). Picked from the 1863 names of
+    // freely they move (1 = leaves and grass; cacti are rigid and stay out). Picked from the 1863 names of
     // art/scenery/scenery.lst and checked on a contact sheet: the weeds that
     // are mostly rocks, dirt mounds or junk (weed05-09, 11-13, 15-23) and
     // the cave weeds (cvweed*, no wind underground) are left out.
@@ -47,9 +47,7 @@ namespace {
         if (strncmp(name, "maryj", 5) == 0) {
             return 0.8f;
         }
-        if (strncmp(name, "cac", 3) == 0) {
-            return 0.35f;
-        }
+        // Cacti are rigid: they do not move in the wind.
         return 0.0f;
     }
 
@@ -146,15 +144,160 @@ namespace {
         return static_cast<int>(ceilf(amplitude(stiffness, height) * 0.5f)) + 1;
     }
 
-    // The sway (output pixels at the top) of a plant now: a sway of about a
-    // second, out of step per tile, under slow gusts.
+    // Wind (Phase 2.15, revised): still air with gusts. A gust starts at a
+    // random time and place, sweeps downwind over an area a few hexes wide for
+    // a few seconds, bending the plants it reaches away from it (with a
+    // flutter while it blows), and lets them spring back with a small
+    // overshoot. Everything is a function of the map position and the time,
+    // so every draw of a plant agrees with every other.
+    //
+    // Positions are in the map's own logical pixels (the screen position of
+    // a tile minus that of tile 0, so panning does not move the gusts); the
+    // map is cut into cells, and each cell may start one gust per time slot.
+    constexpr int kGustCellWidth = 320;
+    constexpr int kGustCellHeight = 240;
+    constexpr unsigned int kGustSlotMs = 1700;
+    constexpr int kGustChancePercent = 9;
+    constexpr float kGustSpeed = 110.0f; // logical pixels per second
+    constexpr unsigned int kGustRecoilMs = 1600;
+
+    struct Gust {
+        float x;
+        float y;
+        float dirX;
+        float dirY;
+        float radius;
+        float strength;
+        unsigned int start;
+        unsigned int duration;
+    };
+
+    // Gusts made by the test mode (`hdfx gust`), on top of the natural ones.
+    std::vector<Gust> gForcedGusts;
+
+    uint32_t mix(uint32_t value)
+    {
+        value ^= value >> 16;
+        value *= 0x7feb352du;
+        value ^= value >> 15;
+        value *= 0x846ca68bu;
+        value ^= value >> 16;
+        return value;
+    }
+
+    float unit(uint32_t value)
+    {
+        return (value & 0xFFFFFF) / 16777216.0f;
+    }
+
+    // The map's wind direction (screen axes, y pointing down): mostly
+    // across the screen, so the lean shows; one per map.
+    void windDirection(float* dirX, float* dirY)
+    {
+        uint32_t seed = mix(static_cast<uint32_t>(mapGetCurrentMap()) * 2654435761u + 0x9e3779b9u);
+        float angle = (unit(seed) - 0.5f) * 1.2f; // within ~35 degrees of horizontal
+        float sign = (seed & 0x80000000u) != 0 ? -1.0f : 1.0f;
+        *dirX = sign * cosf(angle);
+        *dirY = sinf(angle);
+    }
+
+    bool naturalGust(int cellX, int cellY, unsigned int slot, Gust* gust)
+    {
+        uint32_t seed = mix(static_cast<uint32_t>(cellX) * 73856093u ^ static_cast<uint32_t>(cellY) * 19349663u
+            ^ slot * 83492791u ^ static_cast<uint32_t>(mapGetCurrentMap()) * 2654435761u);
+        if (static_cast<int>(seed % 100) >= kGustChancePercent) {
+            return false;
+        }
+        uint32_t a = mix(seed + 1);
+        uint32_t b = mix(seed + 2);
+        windDirection(&gust->dirX, &gust->dirY);
+        gust->x = (cellX + unit(a)) * kGustCellWidth;
+        gust->y = (cellY + unit(b)) * kGustCellHeight;
+        gust->radius = 70.0f + 70.0f * unit(mix(seed + 3));
+        gust->strength = 0.6f + 0.4f * unit(mix(seed + 4));
+        gust->start = slot * kGustSlotMs + static_cast<unsigned int>(unit(mix(seed + 5)) * kGustSlotMs);
+        gust->duration = 2200 + static_cast<unsigned int>(unit(mix(seed + 6)) * 1800.0f);
+        return true;
+    }
+
+    float smoothstep(float value)
+    {
+        value = std::clamp(value, 0.0f, 1.0f);
+        return value * value * (3.0f - 2.0f * value);
+    }
+
+    // How far a gust bends a plant at (x, y) now: downwind lean while it
+    // blows, a damped swing back afterwards.
+    float gustLean(const Gust& gust, float x, float y, unsigned int timeMs, float phase)
+    {
+        if (timeMs < gust.start) {
+            return 0.0f;
+        }
+        float age = static_cast<float>(timeMs - gust.start);
+        if (age > gust.duration + kGustRecoilMs) {
+            return 0.0f;
+        }
+        float travelled = kGustSpeed * std::min(age, static_cast<float>(gust.duration)) / 1000.0f;
+        float centreX = gust.x + gust.dirX * travelled;
+        float centreY = gust.y + gust.dirY * travelled;
+        float dx = x - centreX;
+        float dy = (y - centreY) * 2.0f; // the map is foreshortened
+        float reach = expf(-(dx * dx + dy * dy) / (gust.radius * gust.radius));
+        if (reach < 0.02f) {
+            return 0.0f;
+        }
+        float duration = static_cast<float>(gust.duration);
+        if (age <= duration) {
+            float envelope = smoothstep(age / 600.0f) * (1.0f - smoothstep((age - (duration - 800.0f)) / 800.0f));
+            float flutter = 1.0f + 0.18f * sinf(2.0f * kPi * age / 380.0f + phase);
+            return gust.strength * reach * envelope * flutter;
+        }
+        // Springing back: a little past upright, then settling.
+        float after = age - duration;
+        return -0.3f * gust.strength * reach * sinf(2.0f * kPi * after / 900.0f) * expf(-after / 550.0f);
+    }
+
+    // The sway (output pixels at the top; signed, downwind) of a plant now.
     float swayNow(float stiffness, int height, int tile, unsigned int timeMs)
     {
-        uint32_t hash = static_cast<uint32_t>(tile) * 2654435761u;
-        float phase = (hash >> 8) * (2.0f * kPi / 16777216.0f);
-        float t = timeMs / 1000.0f;
-        float gust = 0.55f + 0.45f * (0.5f + 0.5f * sinf(2.0f * kPi * t / 6.3f + phase * 0.37f)) * (0.75f + 0.25f * sinf(2.0f * kPi * t / 9.7f + 1.3f));
-        return amplitude(stiffness, height) * gust * sinf(2.0f * kPi * t / 1.1f + phase);
+        int x;
+        int y;
+        int originX;
+        int originY;
+        if (tileToScreenXY(tile, &x, &y) != 0 || tileToScreenXY(0, &originX, &originY) != 0) {
+            return 0.0f;
+        }
+        float px = static_cast<float>(x - originX);
+        float py = static_cast<float>(y - originY);
+        float phase = unit(mix(static_cast<uint32_t>(tile))) * 2.0f * kPi;
+
+        float lean = 0.0f;
+        int cellX = static_cast<int>(floorf(px / kGustCellWidth));
+        int cellY = static_cast<int>(floorf(py / kGustCellHeight));
+        unsigned int slot = timeMs / kGustSlotMs;
+        // A gust lives up to ~5.6 s and travels up to ~440 px: look at the
+        // cells around the plant and at the slots that can still reach now.
+        for (unsigned int back = 0; back <= 4 && back <= slot; back++) {
+            for (int cy = cellY - 2; cy <= cellY + 2; cy++) {
+                for (int cx = cellX - 2; cx <= cellX + 2; cx++) {
+                    Gust gust;
+                    if (naturalGust(cx, cy, slot - back, &gust)) {
+                        lean += gustLean(gust, px, py, timeMs, phase);
+                    }
+                }
+            }
+        }
+        for (const Gust& gust : gForcedGusts) {
+            lean += gustLean(gust, px, py, timeMs, phase);
+        }
+        if (lean == 0.0f) {
+            return 0.0f;
+        }
+        float dirX;
+        float dirY;
+        windDirection(&dirX, &dirY);
+        lean = std::clamp(lean, -0.4f, 1.2f);
+        return amplitude(stiffness, height) * lean * (dirX >= 0.0f ? 1.0f : -1.0f);
     }
 
     // Shift of output row `row` (0 = top) of a plant 2 * height output rows
@@ -397,6 +540,30 @@ void hdWindForget(Object* object)
 {
     gState.drawn.erase(object);
     gState.plants.erase(std::remove(gState.plants.begin(), gState.plants.end(), object), gState.plants.end());
+}
+
+void hdWindGust(int tile, unsigned int startMs)
+{
+    initialize();
+    int x;
+    int y;
+    int originX;
+    int originY;
+    if (tileToScreenXY(tile, &x, &y) != 0 || tileToScreenXY(0, &originX, &originY) != 0) {
+        return;
+    }
+    Gust gust;
+    windDirection(&gust.dirX, &gust.dirY);
+    // Starts a little upwind, so it reaches the tile while it blows hardest.
+    gust.x = static_cast<float>(x - originX) - gust.dirX * 120.0f;
+    gust.y = static_cast<float>(y - originY) - gust.dirY * 120.0f;
+    // Covers the whole view at full strength (natural gusts reach 70-140 px).
+    gust.radius = 4000.0f;
+    gust.strength = 1.2f;
+    gust.start = startMs;
+    gust.duration = 3000;
+    gForcedGusts.push_back(gust);
+    gState.lastTick = 0;
 }
 
 void hdWindSetTime(int ms)

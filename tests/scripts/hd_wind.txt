@@ -1,4 +1,4 @@
-# Phase 2.15 wind (run with --dev-load-game=N, [graphics]hd=1, an hd_pack and
+# Phase 2.15 wind, gusts (run with --dev-load-game=N, [graphics]hd=1, an hd_pack and
 # [graphics]hd_wind=1): the map's 8-bit buffer after whole redraws with the
 # wind held at several times and off equals the buffer before; the view with
 # the wind held at two times (plants on screen and their sway dumped); the
@@ -6,6 +6,8 @@
 until game 30000
 wait 1500
 hdfx legacycheck legacy
+# A gust over the player from 0 ms: still at 0 ms, leaning at 550 ms.
+hdfx gust dude 0
 hdfx windtime 0
 wait 400
 hdfx dump t0

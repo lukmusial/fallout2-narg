@@ -74,6 +74,7 @@ namespace fallout {
 //                             the shots' clock (their light stays)
 //   hdfx shotclock hold|run   hold the shots' clock or let it run
 //   hdfx windtime <ms>|run    hold the wind at a time, or let it run again
+//   hdfx gust dude|<tile> <ms> a gust over that place from <ms> of the wind clock
 //   hdfx legacycheck <name>   whole map redraws with the wind at four times
 //                             and off: changed 8-bit pixels to <name>.json
 //

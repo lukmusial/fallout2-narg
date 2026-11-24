@@ -692,6 +692,13 @@ namespace {
             hdShotLightHold(args[1] == "hold");
             return true;
         }
+        if (args[0] == "gust" && args.size() > 2) {
+            // `hdfx gust dude|<tile> <ms>`: a gust over that place from <ms>
+            // of the wind clock.
+            int tile = args[1] == "dude" ? (gDude != nullptr ? gDude->tile : -1) : atoi(args[1].c_str());
+            hdWindGust(tile, static_cast<unsigned int>(atoi(args[2].c_str())));
+            return true;
+        }
         if (args[0] == "windtime" && args.size() > 1) {
             hdWindSetTime(args[1] == "run" ? -1 : atoi(args[1].c_str()));
             return true;
