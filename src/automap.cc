@@ -16,6 +16,7 @@
 #include "game_mouse.h"
 #include "game_sound.h"
 #include "graph_lib.h"
+#include "hd_art.h"
 #include "input.h"
 #include "item.h"
 #include "kb.h"
@@ -42,7 +43,7 @@ namespace fallout {
 #define AUTOMAP_ENTRY_DATA_SIZE (10000)
 #define AUTOMAP_ENTRY_BUFFER_SIZE (11024)
 
-static void automapRenderInMapWindow(int window, MapElevation elevation, unsigned char* backgroundData, AutomapFlags flags);
+static void automapRenderInMapWindow(int window, MapElevation elevation, const FrmImage& background, AutomapFlags flags);
 static int automapSaveEntry(File* stream);
 static int automapLoadEntry(Map map, MapElevation elevation);
 static int automapSaveHeader(File* stream);
@@ -353,6 +354,7 @@ void automapShow(bool isInGame, bool isUsingScanner)
         frmImages[AUTOMAP_FRM_BUTTON_DOWN].getData(),
         nullptr,
         BUTTON_FLAG_TRANSPARENT);
+    hdArtSetButtonArt(scannerBtn, &frmImages[AUTOMAP_FRM_BUTTON_UP], &frmImages[AUTOMAP_FRM_BUTTON_DOWN]);
     if (scannerBtn != -1) {
         buttonSetCallbacks(scannerBtn, _gsound_red_butt_press, _gsound_red_butt_release);
     }
@@ -370,6 +372,7 @@ void automapShow(bool isInGame, bool isUsingScanner)
         frmImages[AUTOMAP_FRM_BUTTON_DOWN].getData(),
         nullptr,
         BUTTON_FLAG_TRANSPARENT);
+    hdArtSetButtonArt(cancelBtn, &frmImages[AUTOMAP_FRM_BUTTON_UP], &frmImages[AUTOMAP_FRM_BUTTON_DOWN]);
     if (cancelBtn != -1) {
         buttonSetCallbacks(cancelBtn, _gsound_red_butt_press, _gsound_red_butt_release);
     }
@@ -387,6 +390,7 @@ void automapShow(bool isInGame, bool isUsingScanner)
         frmImages[AUTOMAP_FRM_SWITCH_DOWN].getData(),
         nullptr,
         BUTTON_FLAG_TRANSPARENT | BUTTON_FLAG_CHECKABLE);
+    hdArtSetButtonArt(switchBtn, &frmImages[AUTOMAP_FRM_SWITCH_UP], &frmImages[AUTOMAP_FRM_SWITCH_DOWN]);
     if (switchBtn != -1) {
         buttonSetCallbacks(switchBtn, _gsound_toggle_butt_press_, _gsound_toggle_butt_press_);
     }
@@ -407,7 +411,7 @@ void automapShow(bool isInGame, bool isUsingScanner)
         gAutomapFlags |= AUTOMAP_WITH_SCANNER;
     }
 
-    automapRenderInMapWindow(window, elevation, frmImages[AUTOMAP_FRM_BACKGROUND].getData(), gAutomapFlags);
+    automapRenderInMapWindow(window, elevation, frmImages[AUTOMAP_FRM_BACKGROUND], gAutomapFlags);
 
     bool isoWasEnabled = isoDisable();
     gameMouseSetCursor(MOUSE_CURSOR_ARROW);
@@ -493,7 +497,7 @@ void automapShow(bool isInGame, bool isUsingScanner)
         }
 
         if (needsRefresh) {
-            automapRenderInMapWindow(window, elevation, frmImages[AUTOMAP_FRM_BACKGROUND].getData(), gAutomapFlags);
+            automapRenderInMapWindow(window, elevation, frmImages[AUTOMAP_FRM_BACKGROUND], gAutomapFlags);
             needsRefresh = false;
         }
 
@@ -519,8 +523,9 @@ int automapGetWindow()
 // Renders automap in Map window.
 //
 // 0x41BD1C draw_top_down_map
-static void automapRenderInMapWindow(int window, MapElevation elevation, unsigned char* backgroundData, AutomapFlags flags)
+static void automapRenderInMapWindow(int window, MapElevation elevation, const FrmImage& background, AutomapFlags flags)
 {
+    unsigned char* backgroundData = background.getData();
     Color color;
     if ((flags & AUTOMAP_IN_GAME) != AUTOMAP_NONE) {
         color = COLOR_DARK_GREY;
@@ -533,6 +538,9 @@ static void automapRenderInMapWindow(int window, MapElevation elevation, unsigne
 
     unsigned char* windowBuffer = windowGetBuffer(window);
     blitBufferToBuffer(backgroundData, AUTOMAP_WINDOW_WIDTH, AUTOMAP_WINDOW_HEIGHT, AUTOMAP_WINDOW_WIDTH, windowBuffer, AUTOMAP_WINDOW_WIDTH);
+    // CE: the background's HD art (the map's dots and lines drawn below stay legacy).
+    windowHdClear(window);
+    hdArtDrawImage(window, background, 0, 0);
 
     for (Object* object = objectFindFirstAtElevation(elevation); object != nullptr; object = objectFindNextAtElevation()) {
         if (object->tile == -1) {
