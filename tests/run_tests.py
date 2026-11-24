@@ -1118,6 +1118,23 @@ WM_MIN_TERRAIN_DETAIL = 0.5         # explored terrain: 2x2 blocks with HD detai
 WM_MAX_TERRAIN_COLOUR_DIFF = 16.0   # HD terrain box-downsampled vs legacy, mean abs
 
 
+def test_hd_ground_variants(update):
+    """Ground variants (2.14): in Arroyo the desert ground shows per-square
+    variants with hd_ground_variants=1; the 8-bit picture is identical."""
+    if not (run_dir() / "data/hd/ai/art/tiles/variants/edg5000").is_dir():
+        return "skipped: no ground variants in the pack (tools/hd/ground_variants.py)"
+    args = ["--dev-load-game=3", "[graphics]hd=1", "[graphics]hd_pack=mixed"]
+    off, _ = run_game("hd_ground_off", "hd_ground.txt", args + ["[graphics]hd_ground_variants=0"])
+    on, seconds = run_game("hd_ground_on", "hd_ground.txt", args + ["[graphics]hd_ground_variants=1"])
+    if not np.array_equal(load_png(off / "legacy.png"), load_png(on / "legacy.png")):
+        raise TestFailure("the 8-bit picture changed with ground variants")
+    a, b = load_png(off / "fb.png"), load_png(on / "fb.png")
+    changed = (np.abs(a - b).sum(axis=2) > 24).mean()
+    if changed < 0.05:
+        raise TestFailure(f"only {changed:.1%} of the frame changed: variants not drawn")
+    return f"{changed:.0%} of the frame shows variants, legacy identical ({seconds:.0f}s)"
+
+
 def test_worldmap_scroll(update):
     """World map in HD (mixed pack, HD text): after scrolling, no HD pixels or
     HD text survive over unexplored (black) land; labels still show in HD;
@@ -1439,7 +1456,7 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
          + [make_hd_map_test(pack, slot) for pack in HD_MAP_PACKS for slot in range(1, SLOT_COUNT + 1)]
          + [test_hd_mixed_pack]
          + [make_hd_text_screens_test(style) for style in HD_TEXT_STYLES]
-         + [test_hd_text_game, test_hd_lights, test_worldmap_scroll]
+         + [test_hd_text_game, test_hd_lights, test_worldmap_scroll, test_hd_ground_variants]
          + [make_hd_inventory_test(pack) for pack in HD_INVENTORY_PACKS]
          + [make_hd_static_test(pack) for pack in HD_STATIC_PACKS]
          + [test_view_identity, test_view_pan, test_view_zoom, test_view_zoom_hd0, test_view_light_follow])

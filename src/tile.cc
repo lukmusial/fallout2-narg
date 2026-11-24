@@ -313,6 +313,12 @@ namespace {
         std::unordered_map<int, std::shared_ptr<const HdImage>> images;
         unsigned int generation = 0;
 
+        // Ground variants (Phase 2.14): per tile fid, the pack's variant
+        // images (empty: none); the square being drawn picks one.
+        std::unordered_map<int, std::vector<std::shared_ptr<const HdImage>>> variants;
+        int square = -1;
+        int elevation = 0;
+
         // Colours under the roof cut-out (Phase 2.8), captured before the
         // legacy blend.
         std::vector<uint32_t> under;
@@ -360,6 +366,7 @@ static void tileHdBegin()
 
     if (gTileHd.generation != hdArtGeneration() || gTileHd.images.size() > kTileHdMaxImages) {
         gTileHd.images.clear();
+        gTileHd.variants.clear();
         gTileHd.generation = hdArtGeneration();
     }
 
@@ -391,6 +398,60 @@ static const HdImage* tileHdImage(const FrmId& frmId, Art* art)
 
     gTileHd.images.emplace(frmId.fid(), image);
     return image.get();
+}
+
+// Variants of a floor tile in the pack: art/tiles/variants/<name>/<k>.png,
+// k = 0, 1, ... (tools/hd/ground_variants.py).
+static const std::vector<std::shared_ptr<const HdImage>>& tileHdVariants(const FrmId& frmId, int width, int height)
+{
+    auto found = gTileHd.variants.find(frmId.fid());
+    if (found != gTileHd.variants.end()) {
+        return found->second;
+    }
+
+    std::vector<std::shared_ptr<const HdImage>> list;
+    const char* path = frmId.filePath();
+    if (path != nullptr) {
+        std::string name = path;
+        size_t slash = name.find_last_of("\\/");
+        std::string stem = name.substr(slash + 1);
+        size_t dot = stem.find_last_of('.');
+        if (dot != std::string::npos) {
+            stem.erase(dot);
+        }
+        for (int index = 0; index < 16; index++) {
+            std::string variantPath = "art\\tiles\\variants\\" + stem + "\\" + std::to_string(index) + ".frm";
+            std::shared_ptr<const HdImage> image = hdArtFindFrame(variantPath.c_str(), 0, 0);
+            if (image == nullptr) {
+                break;
+            }
+            if (image->width != width * kHdScale || image->height != height * kHdScale) {
+                auto resampled = std::make_shared<HdImage>();
+                hdImageResample(*image, width * kHdScale, height * kHdScale, resampled.get());
+                image = resampled;
+            }
+            list.push_back(image);
+        }
+    }
+
+    return gTileHd.variants.emplace(frmId.fid(), std::move(list)).first->second;
+}
+
+// The 2x image of the floor tile on the square being drawn: one of the
+// tile's variants (the same one for a square every time), else its image.
+static const HdImage* tileHdFloorImage(const FrmId& frmId, Art* art)
+{
+    if (settings.graphics.hd_ground_variants && gTileHd.square >= 0) {
+        const auto& variants = tileHdVariants(frmId, artGetWidth(art), artGetHeight(art));
+        if (!variants.empty()) {
+            uint32_t hash = static_cast<uint32_t>(gTileHd.square) * 2654435761u ^ static_cast<uint32_t>(gTileHd.elevation + 1) * 40503u;
+            hash ^= hash >> 15;
+            hash *= 2246822519u;
+            hash ^= hash >> 13;
+            return variants[hash % variants.size()].get();
+        }
+    }
+    return tileHdImage(frmId, art);
 }
 
 void tileHdInvalidateRect(const Rect* rect)
@@ -1977,7 +2038,10 @@ void tileRenderFloorsInRect(Rect* rect, MapElevation elevation)
                 if (frameId == TileFrameId::Invalid) {
                     frameId = TileFrameId::Last;
                 }
+                gTileHd.square = squareTile;
+                gTileHd.elevation = elevation;
                 tileRenderFloor(frameId, tileScreenX, tileScreenY, rect);
+                gTileHd.square = -1;
             }
         }
         baseSquareTile += gSquareGridWidth;
@@ -2156,7 +2220,7 @@ static void tileHdDrawFloor(const TileFrmId& frmId, Art* art, int frameX, int fr
         return;
     }
 
-    const HdImage* image = tileHdImage(frmId, art);
+    const HdImage* image = tileHdFloorImage(frmId, art);
     if (image == nullptr) {
         return;
     }
