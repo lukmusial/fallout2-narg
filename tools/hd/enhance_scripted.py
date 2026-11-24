@@ -231,10 +231,13 @@ def restore_gradients(rgb: np.ndarray, sigma2x: np.ndarray, valid: np.ndarray) -
 # --- driver -------------------------------------------------------------------
 
 def enhance_indices(indices: np.ndarray, palette: np.ndarray, tile: bool = False,
-                    dedither_strength: float = 0.55, context: dict | None = None) -> np.ndarray:
+                    dedither_strength: float = 0.55, context: dict | None = None,
+                    wall_context: list | None = None) -> np.ndarray:
     """Return the enhanced 2x RGB (float) for an index image."""
     if tile:
         work, _own = hdlib.wrap_pad_tile(indices, TILE_PAD, context)
+    elif wall_context:
+        work = hdlib.pad_with_context(indices, TILE_PAD, wall_context)
     else:
         work = indices
     transparent, cycling = hdlib.masks(work)
@@ -250,7 +253,7 @@ def enhance_indices(indices: np.ndarray, palette: np.ndarray, tile: bool = False
     big = dcci2x(base, guide)
     big = restore_gradients(big, hdlib.nearest2x(steps), hdlib.nearest2x(~holes))
     big += (1.0 - dedither_strength) * bilinear2x(rgb - base)
-    if tile:
+    if tile or wall_context:
         p = 2 * TILE_PAD
         big = big[p:p + 2 * indices.shape[0], p:p + 2 * indices.shape[1]]
     return np.clip(big, 0, 255)
@@ -266,7 +269,9 @@ def main() -> None:
         t0 = time.perf_counter()
         idx, pal = hdlib.load_indexed(hdlib.source_path(asset))
         big = enhance_indices(idx, pal, tile=hdlib.is_tile(asset),
-                              context=hdlib.tile_context(asset["name"]) if hdlib.is_tile(asset) else None)
+                              context=hdlib.tile_context(asset["name"]) if hdlib.is_tile(asset) else None,
+                              wall_context=(hdlib.object_context(asset["key"]) if asset["type"] == "walls"
+                                            else None))
         rgba = hdlib.compose_rgba(big, idx)
         dst = hdlib.save_outputs(PACK, asset, rgba, idx)
         dt = time.perf_counter() - t0

@@ -206,6 +206,28 @@ class RealArt(unittest.TestCase):
             missing = sorted(a["key"] for a in tiles if not hdlib.out_path(pack, a).exists())
             self.assertEqual(missing, [], pack)
 
+    def test_all_objects_complete(self):
+        """Phase 2.18: every wall, scenery and item on every map and every
+        item's ground art, every frame, in both packs."""
+        assets = [a for a in hdlib.load_manifest() if a["type"] in ("walls", "scenery", "items")]
+        if len({a.get("fhd", a["key"]) for a in assets}) < 3000:
+            self.skipTest("run extract.py --all-objects first")
+        for pack in PACKS:
+            missing = sorted(a["key"] for a in assets if not hdlib.out_path(pack, a).exists())
+            self.assertEqual(missing, [], pack)
+
+    def test_wall_context(self):
+        """Wall pieces are enhanced with their usual neighbours around them."""
+        if not hdlib.WALL_NEIGHBOURS.exists():
+            self.skipTest("run extract.py --all-objects first")
+        neighbours = json.loads(hdlib.WALL_NEIGHBOURS.read_text())
+        self.assertGreater(len(neighbours), 1000)
+        key = next(k for k, v in neighbours.items() if v)
+        idx, _ = hdlib.load_indexed(hdlib.SRC_DIR / key)
+        padded = hdlib.pad_with_context(idx, 16, hdlib.object_context(key))
+        self.assertTrue(np.array_equal(padded[16:16 + idx.shape[0], 16:16 + idx.shape[1]][idx != 0], idx[idx != 0]))
+        self.assertGreater(int((padded != 0).sum()), int((idx != 0).sum()))
+
     def test_picture_tiles_seams(self):
         """Pieces of a larger picture are padded with their real neighbours:
         the Gecko reactor shows no added seams (it did with self-padding)."""

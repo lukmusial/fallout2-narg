@@ -140,7 +140,8 @@ def _read_object(r: Reader, protos: Protos, version: int, out: list, depth: int)
         elif otype == OBJ_TYPE_MISC:
             if 0x5000010 <= pid <= 0x5000017:
                 r.skip(4)
-    out.append({"fid": fid & 0xFFFFFFFF, "pid": pid, "tile": tile, "frame": frame, "rotation": rotation,
+    out.append({"fid": fid & 0xFFFFFFFF, "pid": pid, "tile": tile, "x": x, "y": y, "frame": frame,
+                "rotation": rotation,
                 "flags": flags & 0xFFFFFFFF, "elevation": elevation, "depth": depth})
     for _ in range(length):
         r.skip(1)  # quantity

@@ -675,3 +675,65 @@ with `hd_ground_variants=0` (with the desert variants installed, slots 3, 5
 and 9 differed from them by 7-11%). Comparisons of the 8-bit picture in the
 town tests ignore pixels whose colour is a colour-cycling one in both frames
 (New Reno's trash-can fires animate between runs).
+
+## Walls, scenery and items of every town (Phase 2.18)
+
+Until now only the objects of the save games' areas had pack art (Phase
+2.8); everything else drew as doubled legacy pixels. `extract.py
+--all-objects` (with `--objects --all-tiles`) adds every wall, scenery and
+item placed on any of the 155 maps and the ground art of every item in
+`items.lst` (items are carried and dropped anywhere): 3194 art files in all
+(1454 walls, 1549 scenery, 191 items), 1933 new, 2559 new assets with the
+frames of 100 new multi-frame FRMs (16.7 Mpx). Scripted 72 s, AI 274 s (M5
+Pro). Effects (`art/misc`: explosions, projectiles) are left out.
+
+```sh
+cd tools/hd
+.venv/bin/python extract.py --areas --objects --inven --interface --all-tiles --all-objects
+.venv/bin/python enhance_scripted.py $(cat work/keys_2.18.txt)   # the new keys
+.venv/bin/python enhance_ai.py $(cat work/keys_2.18.txt)
+.venv/bin/python install.py            # keeps the ground variants in the packs
+.venv/bin/python wallmap.py newr1 ncr1 vctydwtn sfchina navarro encdet mbase12 broken1 \
+    --sheet ../../docs/screens/phase2.18
+.venv/bin/python pack_review.py        # mixed-pack candidates
+.venv/bin/python towns_sheet.py        # runs the game hidden -> docs/screens/phase2.18/town_*.png
+```
+
+Wall runs. Walls are drawn as adjacent pieces, one FRM per hex. Each piece
+was enhanced alone, with transparency around it, so its edges did not
+continue into the next piece (the Enclave's riveted panels showed doubled
+lines at the joins). `extract.py --all-objects` now also writes
+`work/wall_neighbours.json`: for every wall FRM, the walls around it (within
+16 px) in its most common placement over all maps, with their offsets
+(1454 pieces, 5.5 neighbours on average). The enhancers draw those
+neighbours around the piece before upscaling (`hdlib.object_context`), as
+the floor tiles get their neighbours. The 768 new walls were made this way
+(scripted 18 s, AI 48 s); the approved area walls were not re-run.
+`wallmap.py` assembles the walls of a map window the way `objectGetRect`
+places them and measures seams like `tilemap.py` (the pieces against the
+same enhancer run on the whole composite). With wall context:
+
+| Map | scripted seam_excess / grad_excess | ai |
+|---|---|---|
+| kladwtwn, denbus1 (2.8) | 1.7-2.7 / 1.06-1.08 | 0.8-2.0 / 0.93-1.01 |
+| newr1, ncr1, sfchina, broken1 | 1.3-2.2 / 1.03-1.08 | 0.5-1.8 / 0.94-1.00 |
+| navarro, mbase12 | 4.2-4.3 / 1.02-1.03 | 1.8-2.9 / 0.94-1.02 |
+| encdet (Enclave) | 3.3 / 1.18 | 3.9 / 1.12 (5.5 / 1.32 without context) |
+| vctydwtn | 10.5 / 0.87 | 5.4 / 0.57 |
+
+Vault City's numbers come from its chain-link fences (transparent holes the
+whole-composite reference fills in), not from seams: `walls_vctydwtn.png`
+shows none. No visible seams in the `walls_*.png` and `town_*.png` sheets.
+
+Mixed pack (`pack_review.py`: 3128 art files measured, 180 flagged, looked
+at by eye): the AI is fine for nearly all of them (the edge metric flags
+chain-link fences and thin rails, which look the same in both packs because
+alpha is exact). To the scripted pack: the round grilles `encl37`, `encl38`
+and `shipsc09` (the AI wipes the grille out) and the opening containers
+`ammobox1`, `ammobox4`, `walllkr1`, `walllkr3`, `safe` (the AI renders the
+frames differently, so still parts shimmer while they open).
+
+The wind (Phase 2.15) picks plants by name, so the new trees and bushes
+sway too. `test_hd_town_*` also check that walls, scenery and items in New
+Reno, NCR and Vault City show pack art (2x2 blocks with detail: 98-100%)
+and that the 8-bit picture equals the same view with `hd=0`.

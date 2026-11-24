@@ -102,7 +102,9 @@ def install(pack: str, run_dir: Path) -> tuple[int, int, int]:
         copied += 1
     if dst.is_dir():
         for path in list(dst.rglob("*.png")) + list(dst.rglob("*.fhd")):
-            if path.relative_to(dst) not in wanted:
+            rel = path.relative_to(dst)
+            # ground variants are written into the installed pack (ground_variants.py)
+            if rel not in wanted and rel.parts[:3] != ("art", "tiles", "variants"):
                 path.unlink()
                 removed += 1
     return copied, kept, removed
