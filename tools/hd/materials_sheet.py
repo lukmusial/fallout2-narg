@@ -6,8 +6,9 @@ without running the game.
   materials_sheet.py packs                  # legacy 2x / scripted / ai of
                                             # roofs, metal, carpet, grids
   materials_sheet.py families               # material classification sheet
-  materials_sheet.py proposal asphalt ...   # current HD floor vs variants
-      [--variants DIR]                      # (ground_variants.py --out DIR)
+  materials_sheet.py proposal asphalt asphalt_cracked [--maps ...]
+                                            # current HD floor vs each option
+  materials_sheet.py exemplars              # the SDXL exemplars
 
 Output: docs/screens/phase2.17/.
 """
@@ -17,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -59,6 +61,7 @@ NO_VARIANTS = {
     **dict.fromkeys(("plt", "shipflr", "stlflr", "grt", "encl", "enfl"), "regular: metal plates/grids"),
     **dict.fromkeys(("rst", "mstrflr", "tepflr"), "regular: floor tiles/slabs"),
     "carpet": "regular: carpet",
+    "towr": "regular: New Reno building floors",
     **dict.fromkeys(("geka", "gekb", "tpla", "tplb", "head", "brn"), "picture / plates"),
     **dict.fromkeys(("slime", "shore"), "colour cycling"),
     **dict.fromkeys(("bld", "shut"), "black / unused"),
@@ -233,11 +236,11 @@ def families_sheet(materials: dict[str, str]) -> None:
 
 
 def best_regions(families: tuple[str, ...], size: int, count: int, maps: list[str] | None = None,
-                 layer: str = "floor") -> list[tuple]:
+                 layer: str = "floor", exclude: tuple[str, ...] = ()) -> list[tuple]:
     """(score, map, elevation, row, col): windows where the families cover the
     most squares, one per map."""
     names = tilemap.tile_names()
-    fam_of = np.array([family(n) in families for n in names] + [False] * (4096 - len(names)))
+    fam_of = np.array([family(n) in families and n not in exclude for n in names] + [False] * (4096 - len(names)))
     found = []
     for path in sorted((hdlib.WORK_DIR / "raw" / "maps").glob("*.map")):
         if maps and path.stem not in maps:
@@ -259,40 +262,72 @@ def best_regions(families: tuple[str, ...], size: int, count: int, maps: list[st
     return sorted(found, reverse=True)[:count]
 
 
-def proposal_sheet(material: str, families: tuple[str, ...], variants: Path, maps: list[str] | None,
-                   pack: str = "ai", size: int = 22, width: int = 1200, height: int = 420) -> Path:
+def proposal_sheet(sheet: str, materials: list[str], maps: list[str] | None, pack: str = "ai", size: int = 22,
+                   width: int = 1200, height: int = 380, exclude: tuple[str, ...] = ()) -> Path:
+    """Two real map regions where the first material's families cover the
+    most squares: the current HD floor, then each material (option) with
+    its variants (generated into work/ground/proposal/<material>)."""
+    import ground_variants
     names = tilemap.tile_names()
+    options = [(m, ground_variants.MATERIALS[m]) for m in materials]
+    families = options[0][1].families
+    for name, material in options:
+        out = hdlib.WORK_DIR / "ground" / "proposal" / name / pack
+        if out.exists():
+            shutil.rmtree(out)
+        ground_variants.generate(material, pack, out)
     panels = []
-    for score, m, elevation, row, col in best_regions(families, size, 2, maps):
+    for score, m, elevation, row, col in best_regions(families, size, 2, maps, exclude=exclude):
         region = tilemap.map_region(m, elevation, row, col, size, "floor", names)
-        where = f"{m} elevation {elevation}, squares {row},{col} ({score} of {size * size} {'/'.join(families)})"
-        current = render(region, Source("pack", PACKS_DIR / pack))
-        varied = render(region, Source("pack", PACKS_DIR / pack, variants / pack))
-        panels.append(labelled(to_rgb(centre_crop(current, width, height)), f"current HD floor ({pack}): {where}"))
-        panels.append(labelled(to_rgb(centre_crop(varied, width, height)),
-                               f"{material} variants, 8 per tile: {where}"))
-    path = OUT / f"proposal_{material}.png"
+        where = f"{m}, elevation {elevation}"
+        panels.append(labelled(to_rgb(centre_crop(render(region, Source("pack", PACKS_DIR / pack)), width, height)),
+                               f"current HD floor ({pack} pack): {where}"))
+        for k, (name, material) in enumerate(options, 1):
+            src = Source("pack", PACKS_DIR / pack, hdlib.WORK_DIR / "ground" / "proposal" / name / pack)
+            panels.append(labelled(to_rgb(centre_crop(render(region, src), width, height)),
+                                   f"option {k}: {name.replace('_', ' ')} variants ({material.exemplar}, "
+                                   f"strength {material.amount}), 8 per tile: {where}"))
+    path = OUT / f"proposal_{sheet}.png"
     stack(panels, gap=8).save(path)
+    return path
+
+
+def exemplars_sheet(materials: list[str]) -> Path:
+    """The text-to-image exemplars (SDXL, no game art) the variants take
+    their detail from."""
+    import ground_variants
+    cells = []
+    for name in materials:
+        material = ground_variants.MATERIALS[name]
+        img = Image.open(ground_variants.WORK / material.exemplar).convert("RGB").resize((300, 300), Image.LANCZOS)
+        cells.append(labelled(img, f"{name}: {material.exemplar}"))
+    rows = [stack(cells[i:i + 4], horizontal=True) for i in range(0, len(cells), 4)]
+    path = OUT / "exemplars.png"
+    stack(rows).save(path)
     return path
 
 
 def main() -> None:
     import ground_variants
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("what", choices=["packs", "families", "proposal"])
-    ap.add_argument("materials", nargs="*")
-    ap.add_argument("--variants", type=Path, default=hdlib.WORK_DIR / "ground" / "proposal")
+    ap.add_argument("what", choices=["packs", "families", "proposal", "exemplars"])
+    ap.add_argument("materials", nargs="*", help="proposal: the material and its options (asphalt asphalt_cracked)")
     ap.add_argument("--maps", nargs="*", help="proposal: pick the regions from these maps only")
+    ap.add_argument("--name", help="proposal: sheet name (default: the first material)")
+    ap.add_argument("--exclude", nargs="*", default=[], help="proposal: tiles not counted when picking regions")
     args = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     if args.what == "packs":
         packs_sheet()
     elif args.what == "families":
-        materials = {f: name for name, m in ground_variants.MATERIALS.items() for f in m.families}
+        materials = {f: name for name, m in ground_variants.MATERIALS.items() if "_" not in name
+                     for f in m.families}
         families_sheet(materials)
+    elif args.what == "exemplars":
+        print(exemplars_sheet(args.materials or list(ground_variants.MATERIALS)))
     else:
-        for name in args.materials or list(ground_variants.MATERIALS):
-            print(proposal_sheet(name, ground_variants.MATERIALS[name].families, args.variants, args.maps))
+        print(proposal_sheet(args.name or args.materials[0], args.materials, args.maps,
+                             exclude=tuple(args.exclude)))
 
 
 if __name__ == "__main__":

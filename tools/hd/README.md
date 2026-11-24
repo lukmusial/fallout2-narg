@@ -608,3 +608,37 @@ Observations (`docs/screens/phase2.17/packs_*.png`):
 `test_hd_town_*` (tests/run_tests.py) moves the party of slot 1 to New Reno,
 NCR and Vault City with Stimpak's TRAVEL and checks that the floor shows pack
 art there (2x2 output blocks with detail), not doubled legacy pixels.
+
+### More ground materials (Phase 2.17, proposal)
+
+`docs/screens/phase2.17/families_*.png` sorts every floor family (most map
+squares first) into the desert ground (done), materials proposed for variants
+and floors that stay regular (wood, brick, metal plates and grids, floor
+tiles, carpet, New Reno's building floors `towr`, pictures such as the Gecko
+reactor, colour cycling). `ground_variants.py` has a material table:
+families, exemplar, prompt and seed, scale, strength. New in this phase:
+
+- `project`: the exemplar is laid onto the isometric floor plane (an affine
+  map with the floor lattice), so cracks and grain are foreshortened like
+  the ground instead of facing the camera.
+- `seamless`: for continuous surfaces (asphalt, grass) the detail does not
+  fade out towards the diamond edges, which showed the tile grid on dark,
+  even asphalt. It crossfades to a field that is periodic on the floor
+  lattice (`lattice_field`, built from the same exemplar), so every tile
+  of the material has the same detail along its edges and neighbouring
+  squares join whatever variants they show. Pavement slabs (`curb`, `cmt`)
+  keep the fade: their joints run along the tile edges anyway.
+
+```sh
+cd tools/hd
+python materials_sheet.py families
+python materials_sheet.py proposal asphalt asphalt_cracked --maps newr2 depolv1
+python materials_sheet.py proposal concrete concrete_light --maps newr3 ncr1
+python materials_sheet.py proposal grass --maps vctycocl ncr1
+python materials_sheet.py proposal cave --maps arcaves cave0 klaratcv --exclude cav4009 cav4010
+python materials_sheet.py exemplars desert asphalt asphalt_cracked concrete cave grass
+```
+
+(`python` = a venv with scipy, torch and diffusers; the exemplars come from
+the local SDXL base model, offline, about 23 s each.) The proposal variants
+go to `work/ground/proposal/<material>/`, not into the packs.
