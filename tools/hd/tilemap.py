@@ -8,11 +8,16 @@ of tileRenderFloorsInRect (row-major, increasing tile number).  Index 0 is
 transparent at 1x; at 2x the RGBA alpha is binary.
 
   tilemap.py                # print seam metrics for every manifest region
+  tilemap.py --maps ncr1 vctycocl ...
+                            # also a 6x6 patch picked from each of these maps
+                            # (the one with the most different floor tiles)
 """
 
 from __future__ import annotations
 
+import argparse
 import json
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -155,12 +160,76 @@ def enhancers() -> dict:
     return out
 
 
+def tile_names() -> list[str]:
+    lst = hdlib.WORK_DIR / "raw" / "art/tiles/tiles.lst"
+    return [l.strip().lower().removesuffix(".frm") for l in lst.read_text(encoding="latin-1").splitlines()]
+
+
+def map_grid(name: str, elevation: int, layer: str = "floor") -> np.ndarray | None:
+    """100x100 tile numbers of one elevation of work/raw/maps/<name>.map
+    (extract.py --all-tiles extracts every map); None if it has no such
+    elevation."""
+    import extract
+    grids = extract.read_map_grids(hdlib.WORK_DIR / "raw" / "maps" / f"{name}.map")
+    if elevation not in grids:
+        return None
+    words = np.array(grids[elevation], np.uint32).reshape(100, 100)
+    return (words >> 16 if layer == "roof" else words) & 0xFFF
+
+
+def map_region(name: str, elevation: int, row: int, col: int, size: int, layer: str = "floor",
+               names: list[str] | None = None) -> dict:
+    """A region dict like the manifest's (tile names; roofs: "" = none)."""
+    names = names or tile_names()
+    grid = map_grid(name, elevation, layer)
+    first = 2 if layer == "roof" else 1
+    tiles = [[names[n] if n >= first else "" for n in grid[row + r, col:col + size]] for r in range(size)]
+    return {"map": name, "elevation": elevation, "row": row, "col": col, "size": size, "tiles": tiles,
+            "layer": layer}
+
+
+def pick_region(name: str, size: int = 6, names: list[str] | None = None) -> dict | None:
+    """The size x size floor patch of a map (any elevation) with the most
+    different tiles and no placeholder (grid000) or blank squares."""
+    names = names or tile_names()
+    best, best_score = None, 0
+    for elevation in range(3):
+        grid = map_grid(name, elevation)
+        if grid is None:
+            continue
+        for row in range(0, 100 - size, 2):
+            for col in range(0, 100 - size, 2):
+                patch = grid[row:row + size, col:col + size]
+                if (patch <= 1).any():
+                    continue
+                stems = {names[n] for n in patch.flat}
+                if any(s.startswith(("grid", "bld", "shut", "reserv")) for s in stems):
+                    continue
+                if len(stems) > best_score:
+                    best, best_score = (elevation, row, col), len(stems)
+    if best is None:
+        return None
+    return map_region(name, *best, size, names=names)
+
+
 def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--maps", nargs="*", default=[], help="also a patch picked from each of these maps")
+    ap.add_argument("--only-maps", action="store_true", help="skip the manifest regions")
+    args = ap.parse_args()
     data = json.loads(hdlib.MANIFEST.read_text())
+    regions = [] if args.only_maps else list(data["regions"])
+    for name in args.maps:
+        region = pick_region(name)
+        if region is None:
+            print(f"{name}: no clean 6x6 patch")
+            continue
+        regions.append(region)
     for pack, fn in enhancers().items():
-        for region in data["regions"]:
+        for region in regions:
             m = evaluate(region, pack, fn)
-            print(f"{pack:9} {region['map']:9}", json.dumps({k: round(v, 3) for k, v in m.items()}))
+            where = f"{region['map']}:{region['elevation']}:{region['row']},{region['col']}"
+            print(f"{pack:9} {where:18}", json.dumps({k: round(v, 3) for k, v in m.items()}), flush=True)
 
 
 if __name__ == "__main__":

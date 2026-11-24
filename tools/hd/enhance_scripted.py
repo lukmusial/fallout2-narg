@@ -231,10 +231,10 @@ def restore_gradients(rgb: np.ndarray, sigma2x: np.ndarray, valid: np.ndarray) -
 # --- driver -------------------------------------------------------------------
 
 def enhance_indices(indices: np.ndarray, palette: np.ndarray, tile: bool = False,
-                    dedither_strength: float = 0.55) -> np.ndarray:
+                    dedither_strength: float = 0.55, context: dict | None = None) -> np.ndarray:
     """Return the enhanced 2x RGB (float) for an index image."""
     if tile:
-        work, _own = hdlib.wrap_pad_tile(indices, TILE_PAD)
+        work, _own = hdlib.wrap_pad_tile(indices, TILE_PAD, context)
     else:
         work = indices
     transparent, cycling = hdlib.masks(work)
@@ -265,7 +265,8 @@ def main() -> None:
     for asset in assets:
         t0 = time.perf_counter()
         idx, pal = hdlib.load_indexed(hdlib.source_path(asset))
-        big = enhance_indices(idx, pal, tile=hdlib.is_tile(asset))
+        big = enhance_indices(idx, pal, tile=hdlib.is_tile(asset),
+                              context=hdlib.tile_context(asset["name"]) if hdlib.is_tile(asset) else None)
         rgba = hdlib.compose_rgba(big, idx)
         dst = hdlib.save_outputs(PACK, asset, rgba, idx)
         dt = time.perf_counter() - t0

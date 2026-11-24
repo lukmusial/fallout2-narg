@@ -172,9 +172,9 @@ def colour_correct(ai2x: np.ndarray, src: np.ndarray, sigma: float = 1.5, detail
 
 
 def enhance_indices(net, scale, indices: np.ndarray, palette: np.ndarray, tile: bool = False,
-                    correct: bool = True, detail: float = 0.3) -> np.ndarray:
+                    correct: bool = True, detail: float = 0.3, context: dict | None = None) -> np.ndarray:
     if tile:
-        work, _ = hdlib.wrap_pad_tile(indices, TILE_PAD)
+        work, _ = hdlib.wrap_pad_tile(indices, TILE_PAD, context)
     else:
         work = indices
     transparent, cycling = hdlib.masks(work)
@@ -211,6 +211,7 @@ def main() -> None:
         t0 = time.perf_counter()
         idx, pal = hdlib.load_indexed(hdlib.source_path(asset))
         big = enhance_indices(net, scale, idx, pal, tile=hdlib.is_tile(asset),
+                              context=hdlib.tile_context(asset["name"]) if hdlib.is_tile(asset) else None,
                               correct=not args.no_colour_correct,
                               detail=args.tile_detail if hdlib.is_tile(asset) else args.detail)
         rgba = hdlib.compose_rgba(big, idx)

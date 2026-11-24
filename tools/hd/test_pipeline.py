@@ -197,6 +197,46 @@ class RealArt(unittest.TestCase):
             missing = sorted(a["key"] for a in assets if not hdlib.out_path(pack, a).exists())
             self.assertEqual(missing, [], pack)
 
+    def test_all_tiles_complete(self):
+        """Phase 2.17: every tile of tiles.lst (all maps, scripts) in both packs."""
+        tiles = [a for a in hdlib.load_manifest() if a["type"] == "tiles"]
+        if len(tiles) < 3000:
+            self.skipTest("run extract.py --all-tiles first")
+        for pack in PACKS:
+            missing = sorted(a["key"] for a in tiles if not hdlib.out_path(pack, a).exists())
+            self.assertEqual(missing, [], pack)
+
+    def test_picture_tiles_seams(self):
+        """Pieces of a larger picture are padded with their real neighbours:
+        the Gecko reactor shows no added seams (it did with self-padding)."""
+        if not hdlib.NEIGHBOURS.exists():
+            self.skipTest("run extract.py --all-tiles first")
+        context = hdlib.tile_context("geka020")
+        self.assertEqual(len(context), 24)
+        self.assertIn((-48, 12), context)        # map column +1: geka019
+        region = tilemap.map_region("geckpwpl", 0, 36, 34, 6)
+        m = tilemap.evaluate(region, "scripted", lambda i, p: enhance_scripted.enhance_indices(i, p))
+        self.assertLess(m["grad_excess"], 1.1, m)
+
+    def test_ground_lattice_field(self):
+        """Phase 2.17: the edge field of seamless ground variants is periodic
+        on the floor lattice, so neighbouring squares join whatever variant
+        each shows."""
+        try:
+            import ground_variants
+        except ImportError:
+            self.skipTest("scipy missing (ground_variants.py runs in the SDXL venv)")
+        material = ground_variants.MATERIALS["asphalt"]
+        if not (ground_variants.WORK / material.exemplar).exists():
+            self.skipTest("no exemplar")
+        h, w = 200, 300
+        p = ground_variants.lattice_field(material, (h, w))
+        self.assertGreater(p.std(), 0.3)
+        for dx, dy in ((96, -24), (64, 48), (-32, 72)):
+            a = p[max(0, -dy):h - max(0, dy), max(0, -dx):w - max(0, dx)]
+            b = p[max(0, dy):h - max(0, -dy), max(0, dx):w - max(0, -dx)]
+            self.assertLess(float(np.abs(a - b).max()), 0.05, (dx, dy))
+
     def test_tile_seams(self):
         regions = json.loads(hdlib.MANIFEST.read_text())["regions"]
         self.assertTrue(regions)

@@ -57,6 +57,10 @@ namespace fallout {
 //   pick <name>               the object and hex under the cursor to <name>.json
 //   worldmap                  open the world map (in a game)
 //   die                       the player dies (in a game): the death scene
+//   gotomap <map> [<elevation> <tile>]
+//                             the party moves to another map (a map
+//                             transition; without a tile the player keeps
+//                             its hex)
 //   shoot <pid> nearest|party <n> [secondary]
 //                             the player gets weapon <pid> (loaded) in the
 //                             active hand and attacks the nearest critter
