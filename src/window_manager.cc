@@ -1099,6 +1099,45 @@ void windowHdClearRect(int win, int x, int y, int width, int height)
     }
 }
 
+void windowHdShadeRect(int win, int x, int y, int width, int height, const unsigned char* before, int intensity)
+{
+    Window* window = windowGetWindow(win);
+    if (window == nullptr || window->hdLayer == nullptr || before == nullptr) {
+        return;
+    }
+
+    HdLayer* layer = window->hdLayer;
+    hdLayerClearTextRect(layer, x, y, width, height);
+
+    const int pitch = layer->width * kHdScale;
+    for (int row = 0; row < height; row++) {
+        int ly = y + row;
+        if (ly < 0 || ly >= layer->height) {
+            continue;
+        }
+        for (int column = 0; column < width; column++) {
+            int lx = x + column;
+            if (lx < 0 || lx >= layer->width) {
+                continue;
+            }
+            size_t offset = static_cast<size_t>(ly) * layer->width + lx;
+            unsigned char index = window->buffer[static_cast<size_t>(ly) * window->width + lx];
+            unsigned char old = before[static_cast<size_t>(row) * width + column];
+            if (layer->valid[offset] == 0 || layer->shadow[offset] != old || hdIsCyclingIndex(index)) {
+                layer->valid[offset] = 0;
+                continue;
+            }
+            uint32_t* dest = layer->pixels.data() + static_cast<size_t>(ly) * kHdScale * pitch + lx * kHdScale;
+            for (int sy = 0; sy < kHdScale; sy++) {
+                for (int sx = 0; sx < kHdScale; sx++) {
+                    dest[sy * pitch + sx] = hdLight(dest[sy * pitch + sx], intensity);
+                }
+            }
+            layer->shadow[offset] = index;
+        }
+    }
+}
+
 void windowHdCopyRect(int srcWin, int srcX, int srcY, int width, int height, int destWin, int destX, int destY)
 {
     if (!windowHdIsActive()) {

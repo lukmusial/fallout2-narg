@@ -18,4 +18,10 @@ key left 6
 wait 1200
 fbshot s3
 legacyshot l3
+# Phase 2.14: the town map of the current area (Klamath), the frame and the
+# terrain in HD.
+key T
+wait 2000
+fbshot town
+legacyshot town_legacy
 quit 0

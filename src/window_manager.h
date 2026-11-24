@@ -311,6 +311,14 @@ void windowHdInvalidateRect(int win, int x, int y, int width, int height);
 // Same, and removes HD text there too (legacy code redrew the rectangle
 // completely, text included).
 void windowHdClearRect(int win, int x, int y, int width, int height);
+
+// After legacy code darkened (x, y, width, height) of the window buffer
+// through an intensity table (e.g. intensityColorTable[index][level]),
+// `before` being a copy of the buffer there (row pitch `width`): the HD
+// pixels that showed there are darkened the same way in RGB (`intensity`
+// on the engine's light scale, 0x10000 = unchanged) and follow the new
+// indices; the rest of the rectangle and its HD text become legacy.
+void windowHdShadeRect(int win, int x, int y, int width, int height, const unsigned char* before, int intensity);
 // The HD side of copying a rectangle of one window's buffer into another's
 // (inventory panes cut from the barter window): the layer's pixels and
 // shadows are copied along, so they stay valid exactly where they were.

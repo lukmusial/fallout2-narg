@@ -31,6 +31,8 @@
 #include "game_mouse.h"
 #include "game_movie.h"
 #include "game_sound.h"
+#include "hd_art.h"
+#include "hd_layer.h"
 #include "input.h"
 #include "interface.h"
 #include "item.h"
@@ -5073,6 +5075,7 @@ static int wmInterfaceInit()
         _backgroundFrmImage.getWidth(),
         wmBkWinBuf,
         WM_WINDOW_WIDTH);
+    hdArtDrawImage(wmBkWin, _backgroundFrmImage, 0, 0);
 
     for (CitySize citySize = CITY_SIZE_FIRST; citySize < CITY_SIZE_COUNT; citySize++) {
         CitySizeDescription* citySizeDescription = &(wmSphereData[citySize]);
@@ -5157,6 +5160,7 @@ static int wmInterfaceInit()
         wmGenData.redButtonPressedFrmImage.getData(),
         nullptr,
         BUTTON_FLAG_TRANSPARENT);
+    hdArtSetButtonArt(switchBtn, &wmGenData.redButtonNormalFrmImage, &wmGenData.redButtonPressedFrmImage);
 
     // SFALL: Add missing button sounds.
     if (switchBtn != -1) {
@@ -5177,6 +5181,7 @@ static int wmInterfaceInit()
             wmGenData.redButtonPressedFrmImage.getData(),
             nullptr,
             BUTTON_FLAG_TRANSPARENT);
+        hdArtSetButtonArt(wmTownMapSubButtonIds[index], &wmGenData.redButtonNormalFrmImage, &wmGenData.redButtonPressedFrmImage);
 
         // SFALL: Add missing button sounds.
         if (wmTownMapSubButtonIds[index] != -1) {
@@ -5220,6 +5225,7 @@ static int wmInterfaceInit()
         wmGenData.scrollUpButtonFrmImages[WORLDMAP_ARROW_FRM_PRESSED].getData(),
         nullptr,
         BUTTON_FLAG_TRANSPARENT);
+    hdArtSetButtonArt(scrollUpBtn, &wmGenData.scrollUpButtonFrmImages[WORLDMAP_ARROW_FRM_NORMAL], &wmGenData.scrollUpButtonFrmImages[WORLDMAP_ARROW_FRM_PRESSED]);
 
     // SFALL: Add missing button sounds.
     if (scrollUpBtn != -1) {
@@ -5240,6 +5246,7 @@ static int wmInterfaceInit()
         wmGenData.scrollDownButtonFrmImages[WORLDMAP_ARROW_FRM_PRESSED].getData(),
         nullptr,
         BUTTON_FLAG_TRANSPARENT);
+    hdArtSetButtonArt(scrollDownBtn, &wmGenData.scrollDownButtonFrmImages[WORLDMAP_ARROW_FRM_NORMAL], &wmGenData.scrollDownButtonFrmImages[WORLDMAP_ARROW_FRM_PRESSED]);
 
     // SFALL: Add missing button sounds.
     if (scrollDownBtn != -1) {
@@ -5815,6 +5822,9 @@ static int wmInterfaceRefresh()
                 WM_TILE_WIDTH,
                 wmBkWinBuf + WM_WINDOW_WIDTH * (y + WM_VIEW_Y) + WM_VIEW_X + x,
                 WM_WINDOW_WIDTH);
+            // CE: the terrain tile's HD art (same part of the tile).
+            hdArtDrawFrameRegion(wmBkWin, FrmId(tileInfo->fid), 0, tileInfo->data, WM_TILE_WIDTH, WM_TILE_HEIGHT,
+                x == 0 ? v17 : 0, y == 0 ? v18 : 0, width, height, WM_VIEW_X + x, WM_VIEW_Y + y);
             v0++;
 
             x += width;
@@ -5926,25 +5936,34 @@ static void wmInterfaceRefreshDate(bool shouldRefreshWindow)
     int numbersFrmHeight = wmGenData.numbersFrmImage.getHeight();
     unsigned char* numbersFrmData = wmGenData.numbersFrmImage.getData();
 
+    // CE: each digit and the month in HD (the same part of the strips).
+    auto digit = [&](int value, unsigned char* to) {
+        blitBufferToBuffer(numbersFrmData + 9 * value, 9, numbersFrmHeight, numbersFrmWidth, to, WM_WINDOW_WIDTH);
+        int offset = static_cast<int>(to - wmBkWinBuf);
+        hdArtDrawImageRegion(wmBkWin, wmGenData.numbersFrmImage, 9 * value, 0, 9, numbersFrmHeight,
+            offset % WM_WINDOW_WIDTH, offset / WM_WINDOW_WIDTH);
+    };
+
     dest += WM_WINDOW_WIDTH * 12 + 487;
-    blitBufferToBuffer(numbersFrmData + 9 * (day / 10), 9, numbersFrmHeight, numbersFrmWidth, dest, WM_WINDOW_WIDTH);
-    blitBufferToBuffer(numbersFrmData + 9 * (day % 10), 9, numbersFrmHeight, numbersFrmWidth, dest + 9, WM_WINDOW_WIDTH);
+    digit(day / 10, dest);
+    digit(day % 10, dest + 9);
 
     int monthsFrmWidth = wmGenData.monthsFrmImage.getWidth();
     unsigned char* monthsFrmData = wmGenData.monthsFrmImage.getData();
     blitBufferToBuffer(monthsFrmData + monthsFrmWidth * 15 * month, 29, 14, 29, dest + WM_WINDOW_WIDTH + 26, WM_WINDOW_WIDTH);
+    hdArtDrawImageRegion(wmBkWin, wmGenData.monthsFrmImage, 0, 15 * month, 29, 14, 487 + 26, 12 + 1);
 
     dest += 98;
     for (int index = 0; index < 4; index++) {
         dest -= 9;
-        blitBufferToBuffer(numbersFrmData + 9 * (year % 10), 9, numbersFrmHeight, numbersFrmWidth, dest, WM_WINDOW_WIDTH);
+        digit(year % 10, dest);
         year /= 10;
     }
 
     int gameTimeHour = gameTimeGetHour();
     dest += 72;
     for (int index = 0; index < 4; index++) {
-        blitBufferToBuffer(numbersFrmData + 9 * (gameTimeHour % 10), 9, numbersFrmHeight, numbersFrmWidth, dest, WM_WINDOW_WIDTH);
+        digit(gameTimeHour % 10, dest);
         dest -= 9;
         gameTimeHour /= 10;
     }
@@ -6006,6 +6025,85 @@ static int wmMatchWorldPosToArea(int x, int y, City* areaIdxPtr)
 }
 
 // CE: Safe city overlay drawing with proper bounds checking
+// CE: darkening of known but unvisited land (intensityColorTable level).
+#define WM_FOG_INTENSITY_LEVEL (75)
+
+namespace {
+
+// The translucent town circle in HD: what the HD layer shows under the circle
+// is captured before the legacy blend, then the circle is blended over it in
+// RGB with the legacy formula (grey level of the circle art -> share of
+// green), so the terrain under it stays HD.
+class WorldmapHdCircle {
+public:
+    WorldmapHdCircle(CitySizeDescription* description, int x, int y, int viewLeft, int viewTop, int viewRight, int viewBottom)
+        : description_(description)
+        , x_(x)
+        , y_(y)
+    {
+        if (!windowHdIsActive()) {
+            return;
+        }
+        int width = description->frmImage.getWidth();
+        int height = description->frmImage.getHeight();
+        left_ = std::max(x, viewLeft);
+        top_ = std::max(y, viewTop);
+        right_ = std::min(x + width, viewRight);
+        bottom_ = std::min(y + height, viewBottom);
+        layer_ = windowHdGetLayer(wmBkWin);
+        if (layer_ == nullptr || left_ >= right_ || top_ >= bottom_) {
+            layer_ = nullptr;
+            return;
+        }
+        windowHdGetBasePalette(basePalette8_);
+        hdLayerCapture(layer_, wmBkWinBuf, WM_WINDOW_WIDTH, left_, top_, right_ - left_, bottom_ - top_, basePalette8_, &under_);
+    }
+
+    void draw()
+    {
+        if (layer_ == nullptr) {
+            return;
+        }
+        FrmImage& frm = description_->frmImage;
+        std::shared_ptr<const HdImage> image = hdArtGetFrame(FrmId(description_->fid).filePath(), 0, 0,
+            frm.getData(), frm.getWidth(), frm.getHeight(), frm.getWidth());
+        if (image == nullptr) {
+            windowHdInvalidateRect(wmBkWin, left_, top_, right_ - left_, bottom_ - top_);
+            return;
+        }
+        HdBlendDraw blend;
+        blend.mode = HdBlendMode::Tint;
+        blend.frame = frm.getData();
+        blend.framePitch = frm.getWidth();
+        blend.image = image.get();
+        blend.frameX = left_ - x_;
+        blend.frameY = top_ - y_;
+        blend.x = left_;
+        blend.y = top_;
+        blend.width = right_ - left_;
+        blend.height = bottom_ - top_;
+        blend.under = under_.data();
+        blend.tint = (static_cast<uint32_t>(basePalette8_[COLOR_GREEN * 3]) << 16)
+            | (static_cast<uint32_t>(basePalette8_[COLOR_GREEN * 3 + 1]) << 8)
+            | basePalette8_[COLOR_GREEN * 3 + 2];
+        hdLayerDrawBlended(layer_, wmBkWinBuf, WM_WINDOW_WIDTH, blend);
+    }
+
+private:
+    CitySizeDescription* description_;
+    int x_;
+    int y_;
+    int left_ = 0;
+    int top_ = 0;
+    int right_ = 0;
+    int bottom_ = 0;
+    HdLayer* layer_ = nullptr;
+    unsigned char basePalette8_[256 * 3];
+    std::vector<uint32_t> under_;
+};
+
+} // namespace
+
 static int wmInterfaceDrawCircleOverlaySafe(CityInfo* city, CitySizeDescription* citySizeDescription, unsigned char* dest, int xArg, int yArg)
 {
     MessageListItem messageListItem;
@@ -6141,12 +6239,15 @@ static int wmInterfaceDrawCircleOverlaySafe(CityInfo* city, CitySizeDescription*
     int blitHeight = std::min(finalBlitDstYScreen + contentActualHeight, viewportBottom) - clippedFinalDstYScreen;
 
     if (blitWidth > 0 && blitHeight > 0 && clippedFinalSrcXOffscreen >= 0 && clippedFinalSrcYOffscreen >= 0 && clippedFinalSrcXOffscreen + blitWidth <= WM_OVERLAY_BUFFER_SIZE && clippedFinalSrcYOffscreen + blitHeight <= WM_OVERLAY_BUFFER_SIZE && clippedFinalDstXScreen >= 0 && clippedFinalDstYScreen >= 0 && clippedFinalDstXScreen + blitWidth <= WM_WINDOW_WIDTH && clippedFinalDstYScreen + blitHeight <= WM_WINDOW_HEIGHT) {
+        // CE: the circle in HD: the same blend over the HD terrain.
+        WorldmapHdCircle hdCircle(citySizeDescription, xArg, yArg, viewportLeft, viewportTop, viewportRight, viewportBottom);
         blitBufferToBuffer(
             wmOverlayOffscreenBuf + clippedFinalSrcYOffscreen * WM_OVERLAY_BUFFER_SIZE + clippedFinalSrcXOffscreen,
             blitWidth, blitHeight,
             WM_OVERLAY_BUFFER_SIZE,
             dest + clippedFinalDstYScreen * WM_WINDOW_WIDTH + clippedFinalDstXScreen,
             WM_WINDOW_WIDTH);
+        hdCircle.draw();
     }
     return 0;
 }
@@ -6196,14 +6297,30 @@ static int wmInterfaceDrawCircleOverlay(CityInfo* city, CitySizeDescription* cit
 // 0x4C40A8 wmInterfaceDrawSubTileRectFogged
 static void wmInterfaceDrawSubTileRectFogged(unsigned char* dest, int width, int height, int pitch)
 {
+    // CE: HD terrain under the fog is darkened the same way in RGB.
+    unsigned char before[WM_SUBTILE_SIZE * WM_SUBTILE_SIZE];
+    bool hd = windowHdIsActive() && width <= WM_SUBTILE_SIZE && height <= WM_SUBTILE_SIZE;
+    if (hd) {
+        for (int y = 0; y < height; y++) {
+            memcpy(before + y * width, dest + y * pitch, width);
+        }
+    }
+    unsigned char* start = dest;
+
     int skipY = pitch - width;
 
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
             unsigned char color = *dest;
-            *dest++ = intensityColorTable[color][75];
+            *dest++ = intensityColorTable[color][WM_FOG_INTENSITY_LEVEL];
         }
         dest += skipY;
+    }
+
+    if (hd) {
+        int offset = static_cast<int>(start - wmBkWinBuf);
+        windowHdShadeRect(wmBkWin, offset % WM_WINDOW_WIDTH, offset / WM_WINDOW_WIDTH, width, height, before,
+            WM_FOG_INTENSITY_LEVEL * 512);
     }
 }
 
@@ -6255,8 +6372,9 @@ static int wmInterfaceDrawSubTileList(TileInfo* tileInfo, int column, int row, i
         // CE: unknown land is filled black and known land is darkened over
         // what was drawn there before (town labels). HD pixels of those
         // labels, such as glyph edges over pixels that were already black,
-        // would otherwise survive the fill.
-        if (subtileInfo->state == SUBTILE_STATE_UNKNOWN || subtileInfo->state == SUBTILE_STATE_KNOWN) {
+        // would otherwise survive the fill. Known land keeps its HD terrain,
+        // darkened (wmInterfaceDrawSubTileRectFogged), without the HD text.
+        if (subtileInfo->state == SUBTILE_STATE_UNKNOWN) {
             windowHdClearRect(wmBkWin, destX, destY, width, height);
         }
     }
@@ -6275,20 +6393,24 @@ static int wmDrawCursorStopped()
 
     if (isWalkingNow) {
         // moving cursor
+        const FrmImage* image;
         if (wmGenData.encounterIconIsVisible) {
             src = wmGenData.encounterCursorFrmImages[wmGenData.encounterCursorId].getData();
             width = wmGenData.encounterCursorFrmImages[wmGenData.encounterCursorId].getWidth();
             height = wmGenData.encounterCursorFrmImages[wmGenData.encounterCursorId].getHeight();
+            image = &wmGenData.encounterCursorFrmImages[wmGenData.encounterCursorId];
         } else {
             // current location (+)
             src = wmGenData.locationMarkerFrmImage.getData();
             width = wmGenData.locationMarkerFrmImage.getWidth();
             height = wmGenData.locationMarkerFrmImage.getHeight();
+            image = &wmGenData.locationMarkerFrmImage;
         }
 
         if (wmGenData.worldPosX >= wmWorldOffsetX && wmGenData.worldPosX < wmWorldOffsetX + WM_VIEW_WIDTH
             && wmGenData.worldPosY >= wmWorldOffsetY && wmGenData.worldPosY < wmWorldOffsetY + WM_VIEW_HEIGHT) {
             blitBufferToBufferTrans(src, width, height, width, wmBkWinBuf + WM_WINDOW_WIDTH * (WM_VIEW_Y - wmWorldOffsetY + wmGenData.worldPosY - height / 2) + WM_VIEW_X - wmWorldOffsetX + wmGenData.worldPosX - width / 2, WM_WINDOW_WIDTH);
+            hdArtDrawImage(wmBkWin, *image, WM_VIEW_X - wmWorldOffsetX + wmGenData.worldPosX - width / 2, WM_VIEW_Y - wmWorldOffsetY + wmGenData.worldPosY - height / 2);
         }
 
         if (wmGenData.walkDestinationX >= wmWorldOffsetX && wmGenData.walkDestinationX < wmWorldOffsetX + WM_VIEW_WIDTH
@@ -6299,21 +6421,28 @@ static int wmDrawCursorStopped()
                 wmGenData.destinationMarkerFrmImage.getWidth(),
                 wmBkWinBuf + WM_WINDOW_WIDTH * (WM_VIEW_Y - wmWorldOffsetY + wmGenData.walkDestinationY - wmGenData.destinationMarkerFrmImage.getHeight() / 2) + WM_VIEW_X - wmWorldOffsetX + wmGenData.walkDestinationX - wmGenData.destinationMarkerFrmImage.getWidth() / 2,
                 WM_WINDOW_WIDTH);
+            hdArtDrawImage(wmBkWin, wmGenData.destinationMarkerFrmImage,
+                WM_VIEW_X - wmWorldOffsetX + wmGenData.walkDestinationX - wmGenData.destinationMarkerFrmImage.getWidth() / 2,
+                WM_VIEW_Y - wmWorldOffsetY + wmGenData.walkDestinationY - wmGenData.destinationMarkerFrmImage.getHeight() / 2);
         }
     } else {
+        const FrmImage* image;
         if (wmGenData.encounterIconIsVisible) {
             src = wmGenData.encounterCursorFrmImages[wmGenData.encounterCursorId].getData();
             width = wmGenData.encounterCursorFrmImages[wmGenData.encounterCursorId].getWidth();
             height = wmGenData.encounterCursorFrmImages[wmGenData.encounterCursorId].getHeight();
+            image = &wmGenData.encounterCursorFrmImages[wmGenData.encounterCursorId];
         } else {
             src = mousePressed ? wmGenData.hotspotPressedFrmImage.getData() : wmGenData.hotspotNormalFrmImage.getData();
             width = wmGenData.hotspotNormalFrmImage.getWidth();
             height = wmGenData.hotspotNormalFrmImage.getHeight();
+            image = mousePressed ? &wmGenData.hotspotPressedFrmImage : &wmGenData.hotspotNormalFrmImage;
         }
 
         if (wmGenData.worldPosX >= wmWorldOffsetX && wmGenData.worldPosX < wmWorldOffsetX + WM_VIEW_WIDTH
             && wmGenData.worldPosY >= wmWorldOffsetY && wmGenData.worldPosY < wmWorldOffsetY + WM_VIEW_HEIGHT) {
             blitBufferToBufferTrans(src, width, height, width, wmBkWinBuf + WM_WINDOW_WIDTH * (WM_VIEW_Y - wmWorldOffsetY + wmGenData.worldPosY - height / 2) + WM_VIEW_X - wmWorldOffsetX + wmGenData.worldPosX - width / 2, WM_WINDOW_WIDTH);
+            hdArtDrawImage(wmBkWin, *image, WM_VIEW_X - wmWorldOffsetX + wmGenData.worldPosX - width / 2, WM_VIEW_Y - wmWorldOffsetY + wmGenData.worldPosY - height / 2);
         }
     }
 
@@ -6772,6 +6901,7 @@ static int wmTownMapInit()
             wmGenData.hotspotPressedFrmImage.getData(),
             nullptr,
             BUTTON_FLAG_TRANSPARENT);
+        hdArtSetButtonArt(wmTownMapButtonId[index], &wmGenData.hotspotNormalFrmImage, &wmGenData.hotspotPressedFrmImage);
 
         if (wmTownMapButtonId[index] == -1) {
             return -1;
@@ -6796,6 +6926,8 @@ static int wmTownMapRefresh()
         _townFrmImage.getWidth(),
         wmBkWinBuf + WM_WINDOW_WIDTH * WM_VIEW_Y + WM_VIEW_X,
         WM_WINDOW_WIDTH);
+    hdArtDrawImageRegion(wmBkWin, _townFrmImage, 0, 0, std::min(_townFrmImage.getWidth(), WM_VIEW_WIDTH),
+        std::min(_townFrmImage.getHeight(), WM_VIEW_HEIGHT), WM_VIEW_X, WM_VIEW_Y);
 
     wmRefreshInterfaceOverlay(false);
 
@@ -7102,6 +7234,7 @@ static int wmRefreshInterfaceOverlay(bool shouldRefreshWindow)
         _backgroundFrmImage.getWidth(),
         wmBkWinBuf,
         WM_WINDOW_WIDTH);
+    hdArtDrawImage(wmBkWin, _backgroundFrmImage, 0, 0);
 
     wmRefreshTabs();
 
@@ -7122,6 +7255,9 @@ static int wmRefreshInterfaceOverlay(bool shouldRefreshWindow)
             wmGenData.carImageFrmWidth,
             wmBkWinBuf + WM_WINDOW_WIDTH * WM_WINDOW_CAR_Y + WM_WINDOW_CAR_X,
             WM_WINDOW_WIDTH);
+        hdArtDrawFrameRegion(wmBkWin, InterfaceFrmId(carInterfaceArtFrmId), wmGenData.carImageCurrentFrameIndex,
+            data, wmGenData.carImageFrmWidth, wmGenData.carImageFrmHeight, 0, 0, wmGenData.carImageFrmWidth, wmGenData.carImageFrmHeight,
+            WM_WINDOW_CAR_X, WM_WINDOW_CAR_Y);
 
         blitBufferToBufferTrans(wmGenData.carOverlayFrmImage.getData(),
             wmGenData.carOverlayFrmImage.getWidth(),
@@ -7129,6 +7265,7 @@ static int wmRefreshInterfaceOverlay(bool shouldRefreshWindow)
             wmGenData.carOverlayFrmImage.getWidth(),
             wmBkWinBuf + WM_WINDOW_WIDTH * WM_WINDOW_CAR_OVERLAY_Y + WM_WINDOW_CAR_OVERLAY_X,
             WM_WINDOW_WIDTH);
+        hdArtDrawImage(wmBkWin, wmGenData.carOverlayFrmImage, WM_WINDOW_CAR_OVERLAY_X, WM_WINDOW_CAR_OVERLAY_Y);
 
         wmInterfaceRefreshCarFuel();
     } else {
@@ -7138,6 +7275,7 @@ static int wmRefreshInterfaceOverlay(bool shouldRefreshWindow)
             wmGenData.globeOverlayFrmImage.getWidth(),
             wmBkWinBuf + WM_WINDOW_WIDTH * WM_WINDOW_GLOBE_OVERLAY_Y + WM_WINDOW_GLOBE_OVERLAY_X,
             WM_WINDOW_WIDTH);
+        hdArtDrawImage(wmBkWin, wmGenData.globeOverlayFrmImage, WM_WINDOW_GLOBE_OVERLAY_X, WM_WINDOW_GLOBE_OVERLAY_Y);
     }
 
     wmInterfaceRefreshDate(false);
@@ -7198,6 +7336,8 @@ static int wmRefreshTabs()
         wmGenData.tabsBackgroundFrmImage.getWidth(),
         wmBkWinBuf + WM_WINDOW_WIDTH * WM_TOWN_LIST_Y + WM_TOWN_LIST_X,
         WM_WINDOW_WIDTH);
+    hdArtDrawImageRegion(wmBkWin, wmGenData.tabsBackgroundFrmImage, 9, WM_TOWN_LIST_SLOT_HEIGHT + wmGenData.tabsOffsetY,
+        WM_TOWN_LIST_WIDTH, WM_TOWN_LIST_HEIGHT, WM_TOWN_LIST_X, WM_TOWN_LIST_Y);
 
     int tabsOffsetWithinSlot = wmGenData.tabsOffsetY % WM_TOWN_LIST_SLOT_HEIGHT;
     firstTabBottomDest = wmBkWinBuf + WM_WINDOW_WIDTH * 138 + 530;
@@ -7226,6 +7366,11 @@ static int wmRefreshTabs()
                 labelFrm.getWidth(),
                 firstTabClampedDest,
                 WM_WINDOW_WIDTH);
+            {
+                int offset = static_cast<int>(firstTabClampedDest - wmBkWinBuf);
+                hdArtDrawImageRegion(wmBkWin, labelFrm, 0, tabsOffsetWithinSlot, labelFrm.getWidth(), firstTabVisibleHeight,
+                    offset % WM_WINDOW_WIDTH, offset / WM_WINDOW_WIDTH);
+            }
 
             labelFrm.unlock();
         }
@@ -7249,6 +7394,10 @@ static int wmRefreshTabs()
                     labelFrm.getWidth(),
                     nextTabDest,
                     WM_WINDOW_WIDTH);
+                {
+                    int offset = static_cast<int>(nextTabDest - wmBkWinBuf);
+                    hdArtDrawImage(wmBkWin, labelFrm, offset % WM_WINDOW_WIDTH, offset / WM_WINDOW_WIDTH);
+                }
 
                 labelFrm.unlock();
             }
@@ -7270,6 +7419,11 @@ static int wmRefreshTabs()
                 labelFrm.getWidth(),
                 nextTabDest,
                 WM_WINDOW_WIDTH);
+            {
+                int offset = static_cast<int>(nextTabDest - wmBkWinBuf);
+                hdArtDrawImageRegion(wmBkWin, labelFrm, 0, 0, labelFrm.getWidth(), labelFrm.getHeight() - 5,
+                    offset % WM_WINDOW_WIDTH, offset / WM_WINDOW_WIDTH);
+            }
 
             labelFrm.unlock();
         }
@@ -7281,6 +7435,8 @@ static int wmRefreshTabs()
         WM_TOWN_LIST_WIDTH,
         wmBkWinBuf + WM_WINDOW_WIDTH * WM_TOWN_LIST_Y + WM_TOWN_LIST_X,
         WM_WINDOW_WIDTH);
+    hdArtDrawImageRegion(wmBkWin, wmGenData.tabsBorderFrmImage, 0, 0, WM_TOWN_LIST_WIDTH, WM_TOWN_LIST_HEIGHT,
+        WM_TOWN_LIST_X, WM_TOWN_LIST_Y);
 
     return 0;
 }
@@ -7367,6 +7523,9 @@ static void wmRefreshInterfaceDial(bool shouldRefreshWindow)
         wmGenData.dialFrmWidth,
         wmBkWinBuf + WM_WINDOW_WIDTH * WM_WINDOW_DIAL_Y + WM_WINDOW_DIAL_X,
         WM_WINDOW_WIDTH);
+    hdArtDrawFrameRegion(wmBkWin, InterfaceFrmId(InterfaceFrameId::WorldMapNightDayDial), wmGenData.dialFrmCurrentFrameIndex,
+        data, wmGenData.dialFrmWidth, wmGenData.dialFrmHeight, 0, 0, wmGenData.dialFrmWidth, wmGenData.dialFrmHeight,
+        WM_WINDOW_DIAL_X, WM_WINDOW_DIAL_Y);
 
     if (shouldRefreshWindow) {
         Rect rect;

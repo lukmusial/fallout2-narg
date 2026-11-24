@@ -396,6 +396,36 @@ bool hdArtDrawImageRegion(int win, const FrmImage& image, int srcX, int srcY, in
     return hdArtDrawRegion(win, *hd, image.getData(), image.getWidth(), image.getHeight(), srcX, srcY, width, height, destX, destY);
 }
 
+bool hdArtDrawImageOffset(int win, const FrmImage& image, int srcOffset, int width, int height, int destOffset, int destPitch)
+{
+    if (!windowHdIsActive() || !image.isLocked() || image.getWidth() <= 0 || destPitch <= 0) {
+        return false;
+    }
+
+    return hdArtDrawImageRegion(win, image, srcOffset % image.getWidth(), srcOffset / image.getWidth(), width, height,
+        destOffset % destPitch, destOffset / destPitch);
+}
+
+bool hdArtDrawFrameRegion(int win, const FrmId& frmId, int frame, const unsigned char* legacyData, int legacyWidth,
+    int legacyHeight, int srcX, int srcY, int width, int height, int destX, int destY)
+{
+    if (!windowHdIsActive() || !frmId.valid()) {
+        return false;
+    }
+
+    const char* path = frmId.filePath();
+    if (path == nullptr) {
+        return false;
+    }
+
+    std::shared_ptr<const HdImage> hd = hdArtFindFrame(path, frame, 0);
+    if (hd == nullptr) {
+        return false;
+    }
+
+    return hdArtDrawRegion(win, *hd, legacyData, legacyWidth, legacyHeight, srcX, srcY, width, height, destX, destY);
+}
+
 bool hdArtDrawRegion(int win, const HdImage& hd, const unsigned char* source, int sourceWidth, int sourceHeight,
     int srcX, int srcY, int width, int height, int destX, int destY)
 {

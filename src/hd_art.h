@@ -72,6 +72,19 @@ bool hdArtDrawImage(int win, const FrmImage& image, int x, int y);
 // The rectangle (srcX, srcY, width, height) of the image, drawn at (destX, destY).
 bool hdArtDrawImageRegion(int win, const FrmImage& image, int srcX, int srcY, int width, int height, int destX, int destY);
 
+// The same with the legacy blit's arguments: `srcOffset` into the image's
+// data (row pitch = the image's width) and `destOffset` into the window
+// buffer (row pitch `destPitch`), as in `blitBufferToBuffer(image.getData()
+// + srcOffset, width, height, image.getWidth(), buffer + destOffset,
+// destPitch)`.
+bool hdArtDrawImageOffset(int win, const FrmImage& image, int srcOffset, int width, int height, int destOffset, int destPitch);
+
+// Same for a frame of any art id whose legacy pixels (`legacyData`,
+// `legacyWidth` x `legacyHeight`, pitch `legacyWidth`) the caller blitted
+// itself, e.g. from cached art data (world map terrain, animated dials).
+bool hdArtDrawFrameRegion(int win, const FrmId& frmId, int frame, const unsigned char* legacyData, int legacyWidth,
+    int legacyHeight, int srcX, int srcY, int width, int height, int destX, int destY);
+
 // Same for an HD image the caller made itself (e.g. a composite of two
 // screens), with `source` (sourceWidth x sourceHeight, 1x) the legacy pixels
 // it stands for.
