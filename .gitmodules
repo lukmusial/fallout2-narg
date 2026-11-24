@@ -1,3 +1,3 @@
-[submodule "external/stimpack"]
-	path = external/stimpack
-	url = /Users/you/dev/stimpack
+[submodule "external/stimpak"]
+	path = external/stimpak
+	url = https://github.com/lukmusial/fallout2-stimpak.git

@@ -352,7 +352,7 @@ def hd_screens_legacy_reference():
 
 def make_hd_screens_test(pack):
     def test(update):
-        """Main menu, load screen, Stimpack hub and editor, perk dialog, creation
+        """Main menu, load screen, Stimpak hub and editor, perk dialog, creation
         screen with a real HD pack: HD detail on the art, legacy text intact,
         fade, named-PNG lookup, F12 full-resolution screenshot, goldens."""
         if not pack_installed(pack):
@@ -549,7 +549,7 @@ def text_detail(fb, legacy, region):
 
 def make_hd_text_screens_test(style):
     def test(update):
-        """Main menu, load screen, Stimpack hub and editor with 2x text over
+        """Main menu, load screen, Stimpak hub and editor with 2x text over
         the scripted pack: text regions show 2x detail, the 8-bit frames are
         exactly the hd=0 frames, fades dim the text, goldens."""
         if not pack_installed("scripted"):
@@ -961,14 +961,14 @@ def slot_description(slot):
     return header[0x3D:0x5B].split(b"\0")[0].decode("latin-1")
 
 
-def test_stimpack_save_unchanged(update):
-    """Stimpack: open slot 3, Save As without edits; the new slot must equal slot 3."""
+def test_stimpak_save_unchanged(update):
+    """Stimpak: open slot 3, Save As without edits; the new slot must equal slot 3."""
     reset_saves()
-    out, seconds = run_game("stimpack_save_as", "stimpack_save_as.txt")
-    notes = [compare_image(out / "hub.png", "stimpack_hub.png", update, LIVE_VIEW_MAX_DIFF)]
-    if slot_description(11) != "stimpack test":
+    out, seconds = run_game("stimpak_save_as", "stimpak_save_as.txt")
+    notes = [compare_image(out / "hub.png", "stimpak_hub.png", update, LIVE_VIEW_MAX_DIFF)]
+    if slot_description(11) != "stimpak test":
         raise TestFailure(f"slot 11 description is {slot_description(11)!r}")
-    out11, _ = run_game("stimpack_load11", "load_slot.txt", ["--dev-load-game=11"])
+    out11, _ = run_game("stimpak_load11", "load_slot.txt", ["--dev-load-game=11"])
     # Same golden as slot 3: the re-save must not change any state.
     notes.append(compare_state(out11 / "state.json", "slot03_state.json", False))
     # The interface bar must be back: the hub hides it while editing.
@@ -976,12 +976,12 @@ def test_stimpack_save_unchanged(update):
     golden_bar = load_png(GOLDEN / "slot03_game.png")[-99:]
     bar_diff = float(np.any(bar != golden_bar, axis=2).mean())
     if bar_diff > 0.2:
-        raise TestFailure(f"interface bar missing after a Stimpack save ({bar_diff:.0%} of bar pixels differ)")
+        raise TestFailure(f"interface bar missing after a Stimpak save ({bar_diff:.0%} of bar pixels differ)")
     return ", ".join(notes) + f" ({seconds:.0f}s)"
 
 
 def test_character_screens(update):
-    """The normal level-up and creation screens must look as before Stimpack."""
+    """The normal level-up and creation screens must look as before Stimpak."""
     reset_saves()
     out, _ = run_game("char_levelup", "char_screens.txt", ["--dev-load-game=1"])
     notes = [compare_image(out / "levelup.png", "character_levelup.png", update)]
@@ -990,15 +990,15 @@ def test_character_screens(update):
     return ", ".join(notes)
 
 
-def test_stimpack_edit_player(update):
-    """Stimpack: ST 7->10, Small Guns +10 clicks, one perk, level 12 on slot 1, saved as slot 11."""
+def test_stimpak_edit_player(update):
+    """Stimpak: ST 7->10, Small Guns +10 clicks, one perk, level 12 on slot 1, saved as slot 11."""
     reset_saves()
-    out, seconds = run_game("stimpack_edit_player", "stimpack_edit_player.txt")
-    notes = [compare_image(out / "editor_final.png", "stimpack_editor_final.png", update, 0.01)]
-    if slot_description(11) != "stimpack edit":
+    out, seconds = run_game("stimpak_edit_player", "stimpak_edit_player.txt")
+    notes = [compare_image(out / "editor_final.png", "stimpak_editor_final.png", update, 0.01)]
+    if slot_description(11) != "stimpak edit":
         raise TestFailure(f"slot 11 description is {slot_description(11)!r}")
-    out11, _ = run_game("stimpack_edit_load11", "load_slot.txt", ["--dev-load-game=11"])
-    notes.append(compare_state(out11 / "state.json", "stimpack_edit_player_state.json", update))
+    out11, _ = run_game("stimpak_edit_load11", "load_slot.txt", ["--dev-load-game=11"])
+    notes.append(compare_state(out11 / "state.json", "stimpak_edit_player_state.json", update))
     caps = json.loads((out11 / "state.json").read_text())["player"]["caps"]
     if caps != 5000:
         raise TestFailure(f"saved caps {caps}, expected 5000")
@@ -1008,18 +1008,18 @@ def test_stimpack_edit_player(update):
     edited = stable_state(json.loads((out11 / "state.json").read_text()))
     for key in ("party", "world", "gvars"):
         if original[key] != edited[key]:
-            raise TestFailure(f"Stimpack changed {key}")
+            raise TestFailure(f"Stimpak changed {key}")
     for key in ("name", "tagged_skills", "traits"):
         if original["player"][key] != edited["player"][key]:
-            raise TestFailure(f"Stimpack changed player {key}")
+            raise TestFailure(f"Stimpak changed player {key}")
     return ", ".join(notes) + f" ({seconds:.0f}s)"
 
 
-def test_stimpack_cancel(update):
-    """Stimpack: Cancel in the player editor reverts stats and perks."""
+def test_stimpak_cancel(update):
+    """Stimpak: Cancel in the player editor reverts stats and perks."""
     reset_saves()
-    run_game("stimpack_cancel", "stimpack_cancel.txt")
-    out11, _ = run_game("stimpack_cancel_load11", "load_slot.txt", ["--dev-load-game=11"])
+    run_game("stimpak_cancel", "stimpak_cancel.txt")
+    out11, _ = run_game("stimpak_cancel_load11", "load_slot.txt", ["--dev-load-game=11"])
     return compare_state(out11 / "state.json", "slot01_state.json", False)
 
 
@@ -1050,18 +1050,18 @@ def test_menu_fades(update):
     return f"framebuffer matches, fades captured ({seconds:.0f}s)"
 
 
-def test_stimpack_edit_companion(update):
-    """Stimpack: level Sulik (slot 1) up once, then edit ST, Melee, HP; saved as slot 11."""
+def test_stimpak_edit_companion(update):
+    """Stimpak: level Sulik (slot 1) up once, then edit ST, Melee, HP; saved as slot 11."""
     reset_saves()
-    out, seconds = run_game("stimpack_edit_companion", "stimpack_edit_companion.txt")
-    notes = [compare_image(out / "companion_final.png", "stimpack_companion_final.png", update, 0.01)]
-    out11, _ = run_game("stimpack_companion_load11", "load_slot.txt", ["--dev-load-game=11"])
+    out, seconds = run_game("stimpak_edit_companion", "stimpak_edit_companion.txt")
+    notes = [compare_image(out / "companion_final.png", "stimpak_companion_final.png", update, 0.01)]
+    out11, _ = run_game("stimpak_companion_load11", "load_slot.txt", ["--dev-load-game=11"])
     state = json.loads((out11 / "state.json").read_text())
     sulik = state["party"][0]
     if (sulik["name"], sulik["level"], sulik["hp"], sulik["base_stats"][0], sulik["stats"][7]) != ("Sulik", 1, 70, 8, 90):
         raise TestFailure(f"companion not saved as edited: {sulik['name']} level {sulik['level']} hp {sulik['hp']} "
                           f"ST {sulik['base_stats'][0]} max hp {sulik['stats'][7]}")
-    notes.append(compare_state(out11 / "state.json", "stimpack_edit_companion_state.json", update))
+    notes.append(compare_state(out11 / "state.json", "stimpak_edit_companion_state.json", update))
     original = json.loads((GOLDEN / "slot01_state.json").read_text())
     edited = stable_state(state)
     for key in ("player", "world", "gvars"):
@@ -1070,13 +1070,13 @@ def test_stimpack_edit_companion(update):
     return ", ".join(notes) + f" ({seconds:.0f}s)"
 
 
-def test_stimpack_lists(update):
-    """Stimpack on slot 1: Goris joins, Sulik leaves, a quest becomes ACTIVE,
+def test_stimpak_lists(update):
+    """Stimpak on slot 1: Goris joins, Sulik leaves, a quest becomes ACTIVE,
     the Den becomes VISITED and the party travels there; saved as slot 11."""
     reset_saves()
-    out, seconds = run_game("stimpack_lists", "stimpack_lists.txt")
-    notes = [compare_image(out / "location_den.png", "stimpack_location.png", update, LIVE_VIEW_MAX_DIFF)]
-    out11, _ = run_game("stimpack_lists_load11", "load_slot.txt", ["--dev-load-game=11"])
+    out, seconds = run_game("stimpak_lists", "stimpak_lists.txt")
+    notes = [compare_image(out / "location_den.png", "stimpak_location.png", update, LIVE_VIEW_MAX_DIFF)]
+    out11, _ = run_game("stimpak_lists_load11", "load_slot.txt", ["--dev-load-game=11"])
     state = json.loads((out11 / "state.json").read_text())
     party = [member["name"] for member in state["party"]]
     if party != ["Goris"]:
@@ -1085,7 +1085,7 @@ def test_stimpack_lists(update):
         raise TestFailure(f"saved in {state['world']}, expected the Den")
     # Entering the Den runs its map scripts, which set their own variables too;
     # the whole result is deterministic, so it is compared with a golden.
-    notes.append(compare_state(out11 / "state.json", "stimpack_lists_state.json", update))
+    notes.append(compare_state(out11 / "state.json", "stimpak_lists_state.json", update))
     original = json.loads((GOLDEN / "slot01_state.json").read_text())
     if stable_state(state)["player"] != original["player"]:
         raise TestFailure("the player changed")
@@ -1122,10 +1122,10 @@ def test_hd_mixed_pack(update):
     return f"arrow, digits and metal roof from scripted, menu and terrain from ai ({seconds:.0f}s)"
 
 
-def test_stimpack_perk_scan(update):
-    """Every perk's card in the Stimpack perk editor can be shown (no crash)."""
+def test_stimpak_perk_scan(update):
+    """Every perk's card in the Stimpak perk editor can be shown (no crash)."""
     reset_saves()
-    out, seconds = run_game("stimpack_perk_scan", "stimpack_perk_scan.txt")
+    out, seconds = run_game("stimpak_perk_scan", "stimpak_perk_scan.txt")
     return f"all perk cards shown ({seconds:.0f}s)"
 
 
@@ -1149,7 +1149,7 @@ def test_english_interface_bar(update):
 
 
 def test_load_save_with_hidden_bar(update):
-    """Slot 12 was saved by an early Stimpack build with the interface bar
+    """Slot 12 was saved by an early Stimpak build with the interface bar
     flagged hidden; loading it must still show the bar."""
     reset_saves()
     out, seconds = run_game("hidden_bar_save", "load_slot.txt", ["--dev-load-game=12"])
@@ -1669,8 +1669,8 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
           test_hd_art_lookup]
          + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
          + [make_slot_test(slot, hd=True) for slot in HD_SLOTS]
-         + [test_stimpack_save_unchanged, test_character_screens, test_stimpack_edit_player, test_stimpack_cancel,
-            test_stimpack_edit_companion, test_stimpack_lists, test_stimpack_perk_scan,
+         + [test_stimpak_save_unchanged, test_character_screens, test_stimpak_edit_player, test_stimpak_cancel,
+            test_stimpak_edit_companion, test_stimpak_lists, test_stimpak_perk_scan,
             test_english_interface_bar, test_load_save_with_hidden_bar]
          + [make_hd_screens_test(pack) for pack in ("scripted", "ai")]
          + [make_hd_map_test(pack, slot) for pack in HD_MAP_PACKS for slot in range(1, SLOT_COUNT + 1)]
@@ -1772,7 +1772,7 @@ def main():
         results[test.__name__] = outcome[0]
 
     # Longest tests first so the pool finishes together.
-    order = sorted(selected, key=lambda t: 0 if any(k in t.__name__ for k in ("hd_screens", "hd_text", "hd_inventory", "hd_static", "hd_bar", "stimpack", "lists")) else 1)
+    order = sorted(selected, key=lambda t: 0 if any(k in t.__name__ for k in ("hd_screens", "hd_text", "hd_inventory", "hd_static", "hd_bar", "stimpak", "lists")) else 1)
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         list(pool.map(run_one, order))
 

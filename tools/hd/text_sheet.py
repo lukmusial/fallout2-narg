@@ -4,7 +4,7 @@
 Runs the game unattended (hidden window, no audio) at 3440x1440 (scale 2,
 logical 1720x720) with the `mixed` pack and HD text off, `sharp` and
 `smooth` (tests/scripts/hd_text_screens.txt: main menu, load screen,
-Stimpack hub and character editor; tests/scripts/hd_text_game.txt: a game
+Stimpak hub and character editor; tests/scripts/hd_text_game.txt: a game
 view with interface bar messages and floating text), then writes to
 docs/screens/phase2.9_text/:
 
@@ -57,8 +57,8 @@ CROPS = {
 TITLES = {
     "menu": "Main menu: button labels (font 104 over the HD background), copyright line; 3440x1440",
     "load": "Load screen: title, slot list (font 101), save details, button labels",
-    "hub": "Stimpack hub: name, button labels (drawn into the button images)",
-    "editor": "Stimpack character editor: name/age/sex, SPECIAL, derived stats, skills, info card",
+    "hub": "Stimpak hub: name, button labels (drawn into the button images)",
+    "editor": "Stimpak character editor: name/age/sex, SPECIAL, derived stats, skills, info card",
     "game": "Game view: interface bar messages (font 101), AP / HP / AC labels",
 }
 # Zoomed crops (logical x, y, w, h), output pixels shown at 3x.

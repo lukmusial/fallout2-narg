@@ -1,5 +1,5 @@
 # Phase 2.6 interface screens in HD (run with [graphics]hd=1 and an hd_pack):
-# main menu, load screen, Stimpack hub, Stimpack character editor (with the
+# main menu, load screen, Stimpak hub, Stimpak character editor (with the
 # skill slider and the perk dialog), creation screen. fbshot writes the
 # presented framebuffer: output resolution with hd=1, the plain 640x480 legacy
 # frame with hd=0 (the reference the tests compare legacy text against).
@@ -21,7 +21,7 @@ key s
 wait 1500
 key home
 key enter
-until stimpack 30000
+until stimpak 30000
 wait 1000
 fbshot hub
 key c

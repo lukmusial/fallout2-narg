@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Writes the menu images Stimpack makes at run time, for the HD art tools.
+"""Writes the menu images Stimpak makes at run time, for the HD art tools.
 
-Stimpack (external/stimpack, src/stimpack_art.cc) builds mainmenu_sp.png,
+Stimpak (external/stimpak, src/stimpak_art.cc) builds mainmenu_sp.png,
 hr_menu_bg_sp.png and opbase_sp.png in memory from the game's own images; they
 are no longer files in ce.dat. The HD pipeline (tools/hd/extract.py) and the
 test art (make_test_hd_art.py) need them as indexed PNGs, so this script makes
 the same images with tools/dev/menu_art.py (same algorithm) into
-out/stimpack-art/art/intrface/.
+out/stimpak-art/art/intrface/.
 
-  stimpack_menu_art.py            make them if missing; print the directory
+  stimpak_menu_art.py            make them if missing; print the directory
 """
 
 import os
@@ -19,14 +19,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN_DIR = Path(os.environ.get("RUN_DIR", ROOT / "out/build/macos"))
-OUT_DIR = ROOT / "out/stimpack-art"
+OUT_DIR = ROOT / "out/stimpak-art"
 NAMES = ["mainmenu_sp.png", "hr_menu_bg_sp.png", "opbase_sp.png"]
 SOURCES = {"vanilla": "art/intrface/mainmenu.frm", "hires": "art/intrface/hr_menu_bg.frm", "opbase": "art/intrface/opbase.frm"}
 ARCHIVES = ["patch000.dat", "f2_res.dat", "master.dat"]
 
 
 def art_dir() -> Path:
-    """The folder with art/intrface/<name> for every Stimpack menu image (made once)."""
+    """The folder with art/intrface/<name> for every Stimpak menu image (made once)."""
     target = OUT_DIR / "art" / "intrface"
     if all((target / name).is_file() for name in NAMES):
         return OUT_DIR

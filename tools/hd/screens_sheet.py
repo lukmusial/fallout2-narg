@@ -52,8 +52,8 @@ TITLES = {
     "menu": "Main menu (mainmenu_sp.png, menuup/menudown), 1280x960",
     "menu_wide": "Main menu hi-res (HR_MAINMENU.FRM + hr_menu_bg_sp.png), 3440x1440",
     "load": "Load/save screen (lsgame, lscover, lilred*, arrows)",
-    "hub": "Stimpack hub (opbase_sp.png, opbtnoff/opbtnon)",
-    "editor": "Stimpack character editor (edtrcrte + edtredt level box, buttons, slider)",
+    "hub": "Stimpak hub (opbase_sp.png, opbtnoff/opbtnon)",
+    "editor": "Stimpak character editor (edtrcrte + edtredt level box, buttons, slider)",
     "perks": "Perk dialog (perkwin + editor buttons)",
     "creation": "Character creation (edtrcrte, trait buttons)",
 }

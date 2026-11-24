@@ -17,22 +17,22 @@ CE has broad (though not total) compatibility with [Sfall](https://github.com/sf
 
 This local copy adds two mods on top of Fallout 2 CE. Nothing here is published.
 
-### Stimpack: savegame editor
+### Stimpak: savegame editor
 
-Stimpack lives in its own repository and is included here as the git submodule
-`external/stimpack` (clone with `--recurse-submodules`, or run
-`git submodule update --init external/stimpack`). CMakeLists.txt attaches it with
-`stimpack_attach()`: its patches are applied to a copy of `src/` at build time, so
-this tree keeps only the HD changes. `src/character_editor.cc` carries Stimpack's
+Stimpak lives in its own repository and is included here as the git submodule
+`external/stimpak` (clone with `--recurse-submodules`, or run
+`git submodule update --init external/stimpak`). CMakeLists.txt attaches it with
+`stimpak_attach()`: its patches are applied to a copy of `src/` at build time, so
+this tree keeps only the HD changes. `src/character_editor.cc` carries Stimpak's
 patch merged in, because the HD screen code is interwoven with its editor mode
-(`stimpack-merged.txt` pins the patch it merged; a newer Stimpack that changes it
-stops the build until it is merged again). HD hooks into Stimpack's screens
-through `stimpackSetRenderHooks` (`hdArtAttachStimpack` in `src/hd_art.cc`) and
+(`stimpak-merged.txt` pins the patch it merged; a newer Stimpak that changes it
+stops the build until it is merged again). HD hooks into Stimpak's screens
+through `stimpakSetRenderHooks` (`hdArtAttachStimpak` in `src/hd_art.cc`) and
 adds its test commands through the harness's extension API
-(`src/hd_dev_automation.cc`). See `external/stimpack/README.md` and
+(`src/hd_dev_automation.cc`). See `external/stimpak/README.md` and
 `docs/INTEGRATING.md` there.
 
-A **STIMPACK** button on the main menu (hotkey **S**, above EXIT) opens a save without starting the game and shows a hub:
+A **STIMPAK** button on the main menu (hotkey **S**, above EXIT) opens a save without starting the game and shows a hub:
 
 - **CHARACTER**: the character screen in an edit mode: SPECIAL 1–10 with no point pool, any skill 0–300% at no cost, tag skills, traits, name/age/sex, a **PERKS** editor (every perk, add/remove ranks), and click-to-type Level, Exp, Hit Points (`cur` or `cur/max`) and Skill Points. Cancel reverts everything.
 - **COMPANIONS**: the same screen for a party member (stats, skills, hit points, perks) and **LEVEL UP** with the game's own companion level-up.
@@ -43,7 +43,7 @@ A **STIMPACK** button on the main menu (hotkey **S**, above EXIT) opens a save w
 
 ### HD: true colour and 2x art
 
-With `[graphics] hd=1` (and `[screen] scale=2`) the game renders in true colour at twice its logical resolution. HD art comes from packs under `data/hd/<pack>/` made by `tools/hd` (scripted or local-AI enhancement of the original art; they are derived from the game's art and stay local). `hd_pack=mixed` (the default in `files/fallout2.cfg`) takes the AI pack except where the AI does poorly (`ce.dat` `hd/mixed/manifest.txt`). In HD so far: main menu, load/save, character editor, Stimpack screens, and floors and roofs of Arroyo, Klamath and the Den with smooth RGB lighting. Objects, critters and text are still the original art (work in progress). `hd=0` gives the original 256-colour look.
+With `[graphics] hd=1` (and `[screen] scale=2`) the game renders in true colour at twice its logical resolution. HD art comes from packs under `data/hd/<pack>/` made by `tools/hd` (scripted or local-AI enhancement of the original art; they are derived from the game's art and stay local). `hd_pack=mixed` (the default in `files/fallout2.cfg`) takes the AI pack except where the AI does poorly (`ce.dat` `hd/mixed/manifest.txt`). In HD so far: main menu, load/save, character editor, Stimpak screens, and floors and roofs of Arroyo, Klamath and the Den with smooth RGB lighting. Objects, critters and text are still the original art (work in progress). `hd=0` gives the original 256-colour look.
 
 Map motion (Phase 2.13, `[graphics]` in `fallout2.cfg`): `hd_lights_follow=1` makes the light a walking critter carries (the player's light circle at night) follow the drawn sprite instead of jumping hex by hex (HD lights only); `smooth_scroll=1` pans the map smoothly every frame (arrow keys, mouse at the screen edge, Home; `scroll_speed` in % of the original); `zoom=1` zooms the map view 0.5x–2x with the mouse wheel over the map or Ctrl+= / Ctrl+- (Ctrl+0 resets). The interface bar keeps its size, the zoom lasts for the session and is not saved, dialogue pictures of the map are taken at 1x. The map is then drawn into a larger off-screen surface that the map window shows through a pan/zoom transform (`src/map_view.h`); game logic, saves and scroll limits are unchanged.
 

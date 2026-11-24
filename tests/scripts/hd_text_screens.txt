@@ -18,7 +18,7 @@ key s
 wait 1500
 key home
 key enter
-until stimpack 30000
+until stimpak 30000
 wait 1000
 fbshot hub
 legacyshot hub_legacy

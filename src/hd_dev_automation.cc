@@ -1348,6 +1348,11 @@ void hdDevAutomationOnFadeStep(int step, int steps, bool toBlack)
     }
 }
 
+void hdDevAutomationMark(const char* state)
+{
+    devAutomationSetState(state);
+}
+
 void hdDevAutomationOnPresent()
 {
     if (devAutomationIsActive() && !gHd.frameCaptures.empty()) {

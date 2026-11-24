@@ -505,9 +505,9 @@ int directDrawInit(int width, int height, int bpp)
 {
     (void)bpp;
 
-    // HD commands for scripted test runs, HD art on Stimpack's screens.
+    // HD commands for scripted test runs, HD art on Stimpak's screens.
     hdDevAutomationInit();
-    hdArtAttachStimpack();
+    hdArtAttachStimpak();
 
     if (!gScreenIndex.empty()) {
         directDrawFree();

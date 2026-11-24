@@ -52,7 +52,7 @@ INTERFACE = [
 ]
 
 # Phase 2.6: everything the main menu, load/save screen, character editor and
-# Stimpack hub draw as art (text and the big numbers stay legacy).
+# Stimpak hub draw as art (text and the big numbers stay legacy).
 SCREENS = [
     # main menu (hi-res variants from f2_res.dat)
     "art/intrface/hr_mainmenu.frm", "art/intrface/hr_menu_bg.frm",
@@ -74,7 +74,7 @@ SCREENS = [
     "art/intrface/karmafdr.frm", "art/intrface/killsfdr.frm", "art/intrface/perksfdr.frm",
     "art/intrface/tgskloff.frm", "art/intrface/tgsklon.frm",
     "art/intrface/perkwin.frm",
-    # options panel (character editor) and Stimpack hub buttons
+    # options panel (character editor) and Stimpak hub buttons
     "art/intrface/opbase.frm", "art/intrface/opbtnoff.frm", "art/intrface/opbtnon.frm",
 ]
 
@@ -91,7 +91,7 @@ INVENTORY_SCREENS = [
     "art/intrface/sattkbup.frm", "art/intrface/sattkbdn.frm", "art/intrface/saturbup.frm",
 ]
 
-# Named indexed PNGs (Stimpack's menu art from tools/dev/stimpack_menu_art.py,
+# Named indexed PNGs (Stimpak's menu art from tools/dev/stimpak_menu_art.py,
 # expanded inventory/loot/barter windows from ce.dat), same palette indices.
 CE_DAT_PNG = [
     "art/intrface/mainmenu_sp.png",
@@ -547,13 +547,13 @@ def main() -> None:
             "source": "ce.dat", "sample": False,
         })
         print(f"{'ce.dat':>12}  {key}  {idx.shape[1]}x{idx.shape[0]}")
-    # Stimpack's menu images are made at run time (no files in ce.dat);
-    # stimpack_menu_art.py writes the same images.
+    # Stimpak's menu images are made at run time (no files in ce.dat);
+    # stimpak_menu_art.py writes the same images.
     sys.path.insert(0, str(hdlib.REPO_ROOT / "tools" / "dev"))
-    import stimpack_menu_art
-    stimpack_art = stimpack_menu_art.art_dir()
+    import stimpak_menu_art
+    stimpak_art = stimpak_menu_art.art_dir()
     for path in CE_DAT_PNG + (CE_DAT_PNG_INVEN if args.inven else []) + (CE_DAT_PNG_ALL if args.interface else []):
-        src = (stimpack_art if path in CE_DAT_PNG else hdlib.REPO_ROOT / "files" / "ce.dat") / path
+        src = (stimpak_art if path in CE_DAT_PNG else hdlib.REPO_ROOT / "files" / "ce.dat") / path
         if not src.exists() or palette_ref is None:
             print(f"warning: {src} missing", file=sys.stderr)
             continue

@@ -5,7 +5,7 @@
 until game 30000
 wait 1500
 monitor HD text: the quick brown fox jumps over the lazy dog.
-monitor Stimpack applied. You gain 12 hit points.
+monitor Stimpak applied. You gain 12 hit points.
 floattext Ouch! That really hurt.
 wait 300
 fbshot game

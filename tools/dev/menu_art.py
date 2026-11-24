@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate main-menu art with one extra button plate (for the Stimpack button).
+"""Generate main-menu art with one extra button plate (for the Stimpak button).
 
 Both inputs are palette-indexed PNGs as written by `ce-frm2png --opaque`; pixel
 indices are copied, never re-quantised, so the output uses the game palette exactly.
@@ -9,7 +9,7 @@ indices are copied, never re-quantised, so the output uses the game palette exac
 Outputs:
   DIR/mainmenu_sp.png   640x480 background with seven plates (vanilla layout)
   DIR/hr_menu_bg_sp.png button panel with seven plates (hi-res layout)
-  DIR/opbase_sp.png     options-style panel with eight slots (Stimpack hub), when
+  DIR/opbase_sp.png     options-style panel with eight slots (Stimpak hub), when
                         --opbase is given
 
 --tint-plate N recolours plate N (0-based, after extension) towards a medical
@@ -37,11 +37,11 @@ TINT_RGB = np.array([70, 140, 90])
 
 # OPBASE.FRM (164x217): five 34-row button slots on a 37-row pitch starting at
 # y=17. The fork's opbase_help.png adds a slot by repeating one 37-row band; the
-# Stimpack hub needs eight (a header slot and seven buttons).
+# Stimpak hub needs eight (a header slot and seven buttons).
 OPBASE_FIRST_SLOT = 17
 OPBASE_PITCH = 37
 OPBASE_SLOTS = 5
-STIMPACK_HUB_SLOTS = 8
+STIMPAK_HUB_SLOTS = 8
 
 
 def load_indexed(path):
@@ -100,7 +100,7 @@ def extend_hires(pixels):
 def extend_opbase(pixels):
     end = OPBASE_FIRST_SLOT + OPBASE_SLOTS * OPBASE_PITCH
     band = pixels[end - OPBASE_PITCH:end]
-    extra = [band] * (STIMPACK_HUB_SLOTS - OPBASE_SLOTS)
+    extra = [band] * (STIMPAK_HUB_SLOTS - OPBASE_SLOTS)
     return np.vstack([pixels[:end], *extra, pixels[end:]])
 
 

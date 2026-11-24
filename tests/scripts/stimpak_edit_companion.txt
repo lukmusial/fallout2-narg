@@ -1,11 +1,11 @@
-# Stimpack: level Sulik (slot 1) up once, then edit him, save as slot 11.
+# Stimpak: level Sulik (slot 1) up once, then edit him, save as slot 11.
 until mainmenu 20000
 wait 300
 key s
 wait 1200
 key home
 key enter
-until stimpack 30000
+until stimpak 30000
 wait 500
 key o
 wait 800
@@ -51,7 +51,7 @@ key s
 wait 1200
 key enter
 wait 800
-text stimpack companion
+text stimpak companion
 key enter
 until mainmenu 30000
 quit 0

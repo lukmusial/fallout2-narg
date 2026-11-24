@@ -4,7 +4,7 @@
   make_test_hd_art.py [--force] [ART_PATH ...]
 
 Each ART_PATH (default: the main menu backgrounds: vanilla, hi-res and the
-Stimpack seven-plate mainmenu_sp.png the menu actually shows) is read from the
+Stimpak seven-plate mainmenu_sp.png the menu actually shows) is read from the
 game archives (patch000.dat, f2_res.dat, master.dat, then ce.dat for named
 indexed PNGs) with ce-dat-tool, converted to colours exactly as the engine presents them (6-bit
 palette expanded by bit replication), upscaled 2x with a Lanczos filter and
@@ -32,7 +32,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import stimpack_menu_art  # noqa: E402
+import stimpak_menu_art  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN_DIR = Path(os.environ.get("RUN_DIR", ROOT / "out/build/macos"))
@@ -57,12 +57,12 @@ def palette8():
 
 def frm_indices(entry, workdir):
     if entry.lower().endswith(".png"):
-        # Named art: already an indexed PNG with the game's indices. Stimpack's
-        # menu images are made at run time; stimpack_menu_art.py writes them.
+        # Named art: already an indexed PNG with the game's indices. Stimpak's
+        # menu images are made at run time; stimpak_menu_art.py writes them.
         png = workdir / "in.png"
         name = entry.replace("\\", "/")
-        if Path(name).name in stimpack_menu_art.NAMES:
-            png.write_bytes((stimpack_menu_art.art_dir() / name).read_bytes())
+        if Path(name).name in stimpak_menu_art.NAMES:
+            png.write_bytes((stimpak_menu_art.art_dir() / name).read_bytes())
         else:
             png.write_bytes(dat_cat(entry))
         image = Image.open(png)

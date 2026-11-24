@@ -845,10 +845,10 @@ if(CMAKE_SYSTEM_NAME MATCHES "Emscripten")
     set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
 endif()
 
-# Stimpack (savegame editor) from the external/stimpack submodule: its patches
+# Stimpak (savegame editor) from the external/stimpak submodule: its patches
 # are applied to a copy of src/ at build time (see its docs/INTEGRATING.md).
-if(NOT EXISTS "${CMAKE_SOURCE_DIR}/external/stimpack/cmake/Stimpack.cmake")
-    message(FATAL_ERROR "external/stimpack is missing: git submodule update --init external/stimpack")
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/external/stimpak/cmake/Stimpak.cmake")
+    message(FATAL_ERROR "external/stimpak is missing: git submodule update --init external/stimpak")
 endif()
-include("${CMAKE_SOURCE_DIR}/external/stimpack/cmake/Stimpack.cmake")
-stimpack_attach(${EXECUTABLE_NAME})
+include("${CMAKE_SOURCE_DIR}/external/stimpak/cmake/Stimpak.cmake")
+stimpak_attach(${EXECUTABLE_NAME})

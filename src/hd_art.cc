@@ -14,7 +14,7 @@
 #include "debug.h"
 #include "hd_format.h"
 #include "settings.h"
-#include "stimpack.h"
+#include "stimpak.h"
 #include "window_manager.h"
 
 namespace fallout {
@@ -561,18 +561,18 @@ void hdArtGetStats(HdArtStats* stats)
     stats->misses = gHdArt.misses;
 }
 
-// Stimpack's screens (hub, pickers, lists): HD art for the images and
+// Stimpak's screens (hub, pickers, lists): HD art for the images and
 // buttons they draw, as for the game's own screens.
-void hdArtAttachStimpack()
+void hdArtAttachStimpak()
 {
-    StimpackRenderHooks hooks;
+    StimpakRenderHooks hooks;
     hooks.imageDrawn = [](int window, const FrmImage& image, int srcX, int srcY, int width, int height, int destX, int destY) {
         hdArtDrawImageRegion(window, image, srcX, srcY, width, height, destX, destY);
     };
     hooks.buttonArt = [](int button, const FrmImage* normal, const FrmImage* pressed) {
         hdArtSetButtonArt(button, normal, pressed);
     };
-    stimpackSetRenderHooks(hooks);
+    stimpakSetRenderHooks(hooks);
 }
 
 } // namespace fallout

@@ -123,13 +123,13 @@ per row, as in `squareTileToScreenXY`). The result is cropped back.
 
 Main menu (vanilla `mainmenu_sp.png`, hi-res `HR_MAINMENU.FRM` +
 `hr_menu_bg_sp.png`, `menuup`/`menudown`), load/save screen, character
-editor (with its dialogs and the perk dialog) and the Stimpack hub draw the
+editor (with its dialogs and the perk dialog) and the Stimpak hub draw the
 pack's HD image right after each legacy blit of the same art
 (`hdArtDrawImage`, `hdArtDrawImageRegion`, button HD art via
 `buttonSetHdArt` / `hdArtAttachButtonArt`). An HD pixel is only drawn where
 the window buffer still equals the legacy art, so text and numbers drawn into
 or over the art (button labels, stats) stay legacy whatever the draw order.
-The Stimpack editor's background is the same composite in HD as in 8 bits:
+The Stimpak editor's background is the same composite in HD as in 8 bits:
 `edtrcrte` with the level box of `edtredt`.
 
 Named PNG art from `ce.dat` (`mainmenu_sp.png`, `opbase_sp.png`, ...) is

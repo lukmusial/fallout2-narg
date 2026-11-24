@@ -3,7 +3,7 @@
 
 namespace fallout {
 
-// HD commands for the scripted test mode (Stimpack's dev_automation.h), added
+// HD commands for the scripted test mode (Stimpak's dev_automation.h), added
 // through its extension API:
 //   fbshot <name>             write the presented framebuffer (output resolution)
 //   legacyshot <name>         write the 8-bit window composition (logical
@@ -77,6 +77,9 @@ namespace fallout {
 
 // Registers the commands; called once at start-up (directDrawInit).
 void hdDevAutomationInit();
+
+// Engine state marks for `until` from HD-tree code (devAutomationSetState).
+void hdDevAutomationMark(const char* state);
 
 // Called after every present, for `frames` captures.
 void hdDevAutomationOnPresent();

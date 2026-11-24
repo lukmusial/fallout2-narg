@@ -1,3 +1,0 @@
-# Files this project carries with Stimpack's patch already merged in
-# (see external/stimpack/docs/INTEGRATING.md). <file> <patch hash>
-src/character_editor.cc 5244acd3691b6fb1

@@ -1,11 +1,11 @@
-# Stimpack perk editor: show the card of every perk (some have no texts).
+# Stimpak perk editor: show the card of every perk (some have no texts).
 until mainmenu 20000
 wait 300
 key s
 wait 1200
 key home
 key enter
-until stimpack 30000
+until stimpak 30000
 wait 500
 key c
 wait 1500

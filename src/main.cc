@@ -21,6 +21,7 @@
 #include "game_movie.h"
 #include "game_sound.h"
 #include "hd_art.h"
+#include "hd_dev_automation.h"
 #include "game_speed.h"
 #include "input.h"
 #include "kb.h"
@@ -477,6 +478,9 @@ static void mainRunGameLoopAndCleanup()
 // 0x48118C
 static void showDeath()
 {
+    // Test harness: scripts wait for `death` before capturing the scene.
+    hdDevAutomationMark("death");
+
     artCacheFlush();
     colorCycleDisable();
     gameMouseSetCursor(MOUSE_CURSOR_NONE);
@@ -619,6 +623,7 @@ static void showDeath()
     gameMouseSetCursor(MOUSE_CURSOR_ARROW);
 
     colorCycleEnable();
+    hdDevAutomationMark("");
 }
 
 // 0x4814A8

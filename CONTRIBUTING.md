@@ -14,13 +14,13 @@ The project uses CMake, so building mostly comes down to picking the right prese
 - `--dev-load-game=1` - load the given save game automatically (useful for LLM automation)
 - `--dev-endgame` - after a new or loaded game starts, trigger the normal `endgame_slideshow` request
 - `--dev-endgame-movie` - after a new or loaded game starts, run the `endgame_movie` sequence directly
-- `--dev-script=<file>` - drive the game from a script of input commands, screenshots and state dumps (Stimpack's harness, see `external/stimpack/src/dev_automation.h`; HD commands in `src/hd_dev_automation.h`). The game then runs unattended: hidden window, no audio, never takes focus, ignores real keyboard and mouse input
+- `--dev-script=<file>` - drive the game from a script of input commands, screenshots and state dumps (Stimpak's harness, see `external/stimpak/src/dev_automation.h`; HD commands in `src/hd_dev_automation.h`). The game then runs unattended: hidden window, no audio, never takes focus, ignores real keyboard and mouse input
 - `--dev-out=<dir>` - where `--dev-script` writes screenshots and state dumps (default `devout`)
 
 ### Local test setup (mods branch)
 
 - `tools/dev/setup-run-dir.sh` links an installed copy of Fallout 2 (`FALLOUT2_DATA_DIR`, default `~/Games/Fallout 2`) into the build folder and writes a test `fallout2.cfg`. The installation itself is never modified.
-- `tools/dev/run-tests.sh` builds, then runs `tests/run_tests.py`: every reference save in `testdata/SAVEGAME` is loaded and its state dump and screenshot are compared with `testdata/golden/`. Pass `--update-golden` after an intended visual or state change, `-k <name>` to run a subset. Afterwards it runs Stimpack's own suite (`external/stimpack/tests/run_tests.py`) against this build; `SKIP_STIMPACK_TESTS=1` skips it.
+- `tools/dev/run-tests.sh` builds, then runs `tests/run_tests.py`: every reference save in `testdata/SAVEGAME` is loaded and its state dump and screenshot are compared with `testdata/golden/`. Pass `--update-golden` after an intended visual or state change, `-k <name>` to run a subset. Afterwards it runs Stimpak's own suite (`external/stimpak/tests/run_tests.py`) against this build; `SKIP_STIMPAK_TESTS=1` skips it.
 - `tools/dev/contact_sheet.py` tiles screenshots into one review image (`docs/screens/<phase>/`).
 - `tools/dev/setup-play-dir.sh` prepares `out/play` for actually playing the modded build: its own copy of your saves (made once), HD on with the `mixed` pack, your display size. Re-run it after a build to update the app; open `out/play/Fallout II Community Edition.app`. The installed game is only read.
 - `test_hd_screens_scripted` / `test_hd_screens_ai` need the HD packs in the run directory (`tools/hd/README.md`: enhance, then `install.py`); without them they are reported as SKIP. In HD mode (`[graphics] hd=1`) F12 saves a full-resolution PNG.
