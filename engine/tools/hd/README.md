@@ -496,6 +496,67 @@ on|off`, `hdfx dump`, `hdfx waitshot <n>`, `hdfx shotclock hold|run`,
 x4plus takes about 1.6x as long as x2plus. anime6b is the fastest but
 flattens the art.
 
+## Runtime scripted upscale (Phase 2.22)
+
+The engine upscales at runtime, with the scripted pack's algorithm
+(`src/hd_upscale.{h,cc}`, a C++ port of `enhance_scripted.py`), every frame
+no pack has an image of, so `hd_pack=scripted` and manifest entries naming
+`scripted` work without the 293 MB pack. Lookup order per frame:
+
+1. the first pack (manifest order) whose image was made from the frame the
+   game draws (`legacy.txt`, `hd_verify`): an installed scripted pack still
+   wins, its images had the tiles' and walls' real neighbours;
+2. the runtime upscale (`[graphics] hd_upscale=scripted`, default), also for
+   frames whose pack image was rejected (art a mod replaced);
+3. `hd_upscale=double`: the callers' fallback (pixels doubled, or legacy).
+
+Critters (no pack has them) now take the HD object path when
+`hd_upscale_critters=1` (default). Settings: `hd_upscale`,
+`hd_upscale_critters`, `hd_upscale_precision` (16 default, 8 = exactly the
+Python), `hd_upscale_preload`, `hd_upscale_cache`, `hd_upscale_threads`.
+
+Palette boost (`hd_upscale_precision=16`): the 6-bit palette expanded at
+full precision (v * 255 / 63) into a float pipeline, a de-banding pass where
+the picture is smooth (range-limited tent filter of radius 8 at 2x, ~1.6
+palette steps; local activity decides where), 4x4 ordered dither to 8 bits.
+The HD layer and compositor stay 8 bits per channel (`HdImage` is
+0xAARRGGBB); a 10/16-bit layer would mean wider compositing buffers
+throughout `hd_layer.cc`, not done here.
+
+Pre-upscaling in background threads: the early interface art at game start
+(`kEarlyInterfaceArt` in `hd_art.cc`) and every frame of the art a map uses,
+queued while `_obj_preload_art_cache` holds it locked (first frames ahead of
+the others). A frame not ready when first drawn is upscaled right then on
+the main thread (queued) or waited for (running); large ones are split into
+strips over the cores with identical results. Never drawn doubled first:
+the map's image tables keep the first image they get. The CE main menu
+background is made by Stimpak in memory, so it cannot be queued at start
+(upscaled on first draw, ~25-45 ms).
+
+Disk cache (`hd_upscale_cache=1`, off by default): `data/hd/cache/xx/<key>.rgba`,
+raw RGBA keyed by FNV-1a of pixels, palette, flags and algorithm version;
+about 70-115 MB per town.
+
+Timings (Apple M5 Pro, busy machine, Debug build with hd_upscale.cc at -O2;
+`tests/unit/hd_upscale_test.cc`, `tools/dev/runtime_upscale_perf.py`):
+
+| | |
+|---|---|
+| single thread, precision 8 / 16 | ~50 / ~86 ns per output pixel |
+| 8 pool threads, precision 16 | ~15 ns per output pixel |
+| start: 49 interface frames (11.3 Mpx) | queued in 25-35 ms (main thread), done 183 ms; 1 thread 1041 ms; warm disk cache 25 ms |
+
+| map (slot) | frames queued | queueing (main) | done in background | main-thread stall at first draw | no preload | 1 thread | warm cache |
+|---|---|---|---|---|---|---|---|
+| Arroyo (3) | 754 | 9 ms | 181 ms | 83 ms | 526 ms | 868 ms / 449 ms | 64 ms / 4 ms |
+| Klamath (1) | 2150 | 20 ms | 403 ms | 137 ms | 554 ms | 2335 ms / 548 ms | 87 ms / 4 ms |
+| Den (8) | 2225 | 21 ms | 423 ms | 121 ms | 386 ms | 2616 ms / 422 ms | 82 ms / 4 ms |
+
+Frame time is unchanged (presents 1.3-3.5 ms and whole-map redraws 9-12 ms in
+every configuration, within run-to-run noise). The HD art cache holds 72-115
+MB after a town's frames are upscaled (offline pack: 20-26 MB; under the
+256 MB `hd_cache_mb`).
+
 ## Seam quality (`tilemap.py`, map patches)
 
 Each 6x6 floor patch is taken from a real map grid: `arvillag`, `kladwtwn`,
