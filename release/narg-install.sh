@@ -193,6 +193,13 @@ if [[ "$PACK" == "scripted" ]]; then
 else
     remove_mod narg_hd_scripted.dat
 fi
+# RPU add-on (narg_v*_rpu.zip): HD art of the Restoration Project's own
+# images, loaded only on RPU.
+if [[ $rpu -eq 1 && -f mods/narg_hd_rpu.dat ]]; then
+    add_mod narg_hd_rpu.dat
+else
+    remove_mod narg_hd_rpu.dat
+fi
 
 # --- settings --------------------------------------------------------------
 detect_resolution() {
@@ -302,4 +309,7 @@ echo "Fallout 2: Narg Edition installed (HD pack $PACK, screen ${width}x${height
 echo "Start the game with: $launcher"
 if [[ $rpu -eq 1 ]]; then
     echo "Restoration Project: start a new game, as after installing it (docs: narg/docs/rpu.md)."
+    if [[ ! -f mods/narg_hd_rpu.dat ]]; then
+        echo "Restoration Project art stays in standard resolution: extract narg_v*_rpu.zip here and run the installer again for its HD art."
+    fi
 fi

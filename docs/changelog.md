@@ -1,6 +1,18 @@
 ## Changelog
 
+- [Version 1.1.0](#version-110)
 - [Version 1.0.0](#version-100)
+
+### Version 1.1.0
+
+#### HD art
+
+- `narg_v1.1.0_rpu.zip` (add-on, all platforms): `mods/narg_hd_rpu.dat`, HD art for the Restoration Project's own images: the 1876 it adds (new locations' tiles, walls and scenery, inventory items, interface, endgame slides) and the 309 it changes (world map, elevator panels, dialogue frame, skilldex cards, tiles). The installer loads it only on RPU.
+- A manifest line may name several packs, tried in order for each frame: the default `mixed` pack is `ai`, then `rpu`. Each frame comes from the first pack made from the picture the game draws, so the same install suits vanilla and RPU.
+
+#### Engine
+
+- Fixed: "Heap Error: Attempt to unlock a previously unlocked block" in `debug.log` after skipping the intro movie with HD lights on.
 
 ### Version 1.0.0
 

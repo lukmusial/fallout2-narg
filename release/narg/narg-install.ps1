@@ -114,6 +114,9 @@ foreach ($line in Get-Content mods_order.txt) {
 }
 Remove-Item mods_order.txt
 if ($Pack -eq "scripted") { Add-Mod narg_hd_scripted.dat } else { Remove-Mod narg_hd_scripted.dat }
+# RPU add-on (narg_v*_rpu.zip): HD art of the Restoration Project's own
+# images, loaded only on RPU.
+if ($rpu -and (Test-Path mods\narg_hd_rpu.dat)) { Add-Mod narg_hd_rpu.dat } else { Remove-Mod narg_hd_rpu.dat }
 
 # --- settings
 if (-not $Resolution) {
@@ -152,4 +155,7 @@ Remove-Item -ErrorAction SilentlyContinue narg-install.sh, narg-install.command,
 
 Write-Host "Fallout 2: Narg Edition installed (HD pack $Pack, screen ${width}x${height}). Backup is in $bdir."
 Write-Host "Start the game with fallout2-ce.exe."
-if ($rpu) { Write-Host "Restoration Project: start a new game, as after installing it (docs: narg\docs\rpu.md)." }
+if ($rpu) {
+    Write-Host "Restoration Project: start a new game, as after installing it (docs: narg\docs\rpu.md)."
+    if (-not (Test-Path mods\narg_hd_rpu.dat)) { Write-Host "Restoration Project art stays in standard resolution: extract narg_v*_rpu.zip here and run the installer again for its HD art." }
+}
