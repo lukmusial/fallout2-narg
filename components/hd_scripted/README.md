@@ -7,3 +7,5 @@ holds; this pack is for `--pack scripted` (`[graphics] hd_pack=scripted`).
 
 The images are derived from the game's art and are not kept in this
 repository: `extra/package.sh` packs them from the locally generated packs.
+
+Not in the release archives: `NARG_WITH_SCRIPTED=1 extra/package.sh ...` builds it.

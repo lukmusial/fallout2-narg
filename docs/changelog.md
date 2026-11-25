@@ -10,6 +10,10 @@
 - `narg_v1.1.0_rpu.zip` (add-on, all platforms): `mods/narg_hd_rpu.dat`, HD art for the Restoration Project's own images: the 1876 it adds (new locations' tiles, walls and scenery, inventory items, interface, endgame slides) and the 309 it changes (world map, elevator panels, dialogue frame, skilldex cards, tiles). The installer loads it only on RPU.
 - A manifest line may name several packs, tried in order for each frame: the default `mixed` pack is `ai`, then `rpu`. Each frame comes from the first pack made from the picture the game draws, so the same install suits vanilla and RPU.
 
+#### Packaging
+
+- The archives hold only the art the default `mixed` pack draws: `mods/narg_hd.dat` no longer has the AI images `mixed` takes from the scripted pack, and the scripted pack (`mods/narg_hd_scripted.dat`, `--pack scripted`) is not in the release archives.
+
 #### Tools
 
 - `narg/rpu-save-convert.py`: saves from the unmodded game load on the Restoration Project (new global variables and party members added; `--restore` brings back the saves RPU's installer moved to `backup/`). See [RPU notes](rpu.md).

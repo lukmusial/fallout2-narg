@@ -68,10 +68,11 @@ windows)
     ;;
 esac
 
-# HD art: mods/narg_hd.dat holds the AI pack (hd/ai) and the images of the
-# scripted pack that the "mixed" manifest (ce.dat hd/mixed/manifest.txt)
-# takes from it, so hd_pack=mixed and hd_pack=ai work. The whole scripted
-# pack is the optional component mods/narg_hd_scripted.dat.
+# HD art: mods/narg_hd.dat holds what the default "mixed" pack draws (the
+# manifest is ce.dat hd/mixed/manifest.txt): the AI pack (hd/ai) without the
+# images the manifest takes from another pack, and those images of the
+# scripted pack. The whole scripted pack (mods/narg_hd_scripted.dat, for
+# hd_pack=scripted) is built only with NARG_WITH_SCRIPTED=1.
 #
 # The Restoration Project's own art (hd/rpu, engine/tools/hd/mod_pack.py),
 # when <hd packs dir>/rpu exists, goes into a separate archive
@@ -93,6 +94,16 @@ if [[ -n "$PACKS" ]]; then
     mkdir -p "$tree/main/hd/scripted"
     cp "$PACKS/scripted/legacy.txt" "$tree/main/hd/scripted/"
     manifest="$ROOT/engine/files/ce.dat/hd/mixed/manifest.txt"
+    # AI images mixed does not use: art whose manifest line names no ai.
+    awk -F= '!/^[[:space:]]*#/ && NF == 2 {
+            k = $1; v = $2; gsub(/[[:space:]]|#.*/, "", k); sub(/#.*/, "", v)
+            if (k == "*") next
+            n = split(v, packs, /[[:space:],]+/); ai = 0
+            for (i = 1; i <= n; i++) if (packs[i] == "ai") ai = 1
+            if (!ai) { sub(/\.[^.\/]*$/, "", k); print k }
+        }' "$manifest" | while read -r stem; do
+        rm -f "$tree/main/hd/ai/$stem.png" "$tree/main/hd/ai/$stem.fhd"
+    done
     awk -F= '!/^[[:space:]]*#/ && NF == 2 {
             k = $1; v = $2; gsub(/[[:space:]]|#.*/, "", k); sub(/#.*/, "", v)
             n = split(v, packs, /[[:space:],]+/)
@@ -107,9 +118,11 @@ if [[ -n "$PACKS" ]]; then
             fi
         done
     done
-    cp -cR "$PACKS/scripted" "$tree/scripted/hd/scripted" 2>/dev/null || cp -R "$PACKS/scripted" "$tree/scripted/hd/scripted"
     "$DAT_TOOL" create "$tree/main" "$STAGE/mods/narg_hd.dat"
-    "$DAT_TOOL" create "$tree/scripted" "$STAGE/mods/narg_hd_scripted.dat"
+    if [[ "${NARG_WITH_SCRIPTED:-0}" == "1" ]]; then
+        cp -cR "$PACKS/scripted" "$tree/scripted/hd/scripted" 2>/dev/null || cp -R "$PACKS/scripted" "$tree/scripted/hd/scripted"
+        "$DAT_TOOL" create "$tree/scripted" "$STAGE/mods/narg_hd_scripted.dat"
+    fi
     if [[ -d "$PACKS/rpu" ]]; then
         if [[ ! -f "$PACKS/rpu/legacy.txt" ]]; then
             echo "$PACKS/rpu/legacy.txt missing: run engine/tools/hd/mod_pack.py install" >&2

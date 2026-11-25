@@ -49,8 +49,7 @@ Releases are archives per platform: `narg_v<version>_macos.zip`, `narg_v<version
 | File | What it is |
 |---|---|
 | `Fallout 2 Narg Edition.app` (macOS), `narg/linux/fallout2-ce`, `narg/windows/fallout2-ce.exe` | the engine |
-| `mods/narg_hd.dat` | the HD art: AI-upscaled pack, plus the scripted images the default `mixed` pack uses |
-| `mods/narg_hd_scripted.dat` | optional: the whole scripted pack (`--pack scripted`) |
+| `mods/narg_hd.dat` | the HD art the default `mixed` pack draws: AI-upscaled images, and scripted (deterministic) ones where the AI does poorly |
 | `mods/narg_hd_rpu.dat` | separate archive `narg_v<version>_rpu.zip`: HD art for the Restoration Project's own images, loaded only on RPU |
 | `narg/rpu-save-convert.py` | converts saves from the unmodded game for the Restoration Project ([RPU notes](docs/rpu.md)) |
 | `mods_order.txt` | the mods the installer adds to `mods/mods_order.txt` |
@@ -75,7 +74,8 @@ In short: extract the archive into the game folder, run `narg-install.command` (
 | Option | Effect |
 |---|---|
 | `--pack mixed` (default) | AI-upscaled art, scripted (deterministic) upscale where the AI does poorly |
-| `--pack ai` / `--pack scripted` | one pack only (`scripted` needs `mods/narg_hd_scripted.dat`) |
+| `--pack ai` | AI images only; the 141 images `mixed` takes from the scripted upscale are drawn doubled |
+| `--pack scripted` | the whole scripted pack, `mods/narg_hd_scripted.dat`; not in the release archives (`NARG_WITH_SCRIPTED=1 extra/package.sh` builds it) |
 | `--with no_wind` | trees and bushes stand still |
 | `--with no_shot_light` | no light from gunshots and explosions |
 | `--with no_lights` | no coloured lights, glow or soft shadows (for slow machines) |
