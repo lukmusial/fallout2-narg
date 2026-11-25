@@ -11,7 +11,9 @@ still has that hash (else the legacy frame is drawn doubled).
   legacy_art.py hashes <pack dir> [<pack dir> ...] [--game DIR] [--f2-res DAT]
       Writes <pack dir>/legacy.txt for the installed pack, from the art the
       pack was made from (the vanilla game's layering: master.dat <
-      critter.dat < f2_res.dat < ce.dat < patch000.dat < data/).
+      critter.dat < f2_res.dat < ce.dat < patch000.dat < data/). With
+      --mod DIR (a pack made by mod_pack.py) from that installed game's
+      whole chain, mods/mods_order.txt included.
 
   legacy_art.py compare --base DIR --mod DIR <pack dir> [--json OUT] [--md OUT]
       Resolves every art path of the pack in both installed games (the
@@ -171,7 +173,17 @@ def native(game: Path, path: str) -> Path:
 def engine_layers(game: Path, ce_dat: Path, f2_res: Path | None = None) -> list[Layer]:
     """The engine's chain for an installed game, lowest priority first:
     master.dat < critter.dat < f2_res.dat < ce.dat < patchNNN.dat < mods
-    (mods_order.txt) < critter_patches < master_patches (data/)."""
+    (mods_order.txt) < critter_patches < master_patches (data/).
+
+    mods_order.txt is opened from the top line down and every archive opened
+    goes to the front of the chain (src/sfall_ext.cc, dbOpen), so a later line
+    wins over an earlier one. That is sfall's order too (the RPU install's
+    ddraw.ini: "Mods will be loaded line by line from top to bottom",
+    "master_patches > critter_patches > mods_order.txt > PatchFileXX >
+    patchXXX.dat > sfall.dat > critter_dat > f2_res_patches > f2_res_dat >
+    master_dat"); RPU lists rpu.dat first and its optional parts (enhanced
+    world map, ...) after it. CE does not open sfall.dat (sfall's own
+    scripts), and keeps f2_res above critter.dat; the two hold no common art."""
     layers = [Layer("master.dat", game / "master.dat"), Layer("critter.dat", game / "critter.dat")]
     if f2_res is None:
         name = (read_ini_value(game / "fallout2.cfg", "system", "f2_res_dat")
@@ -281,8 +293,14 @@ def vanilla_game(game_dir: Path, f2_res: Path | None) -> Game:
                               f2_res or REPO_ROOT / "files/f2_res.dat"))
 
 
+def mod_game(game_dir: Path) -> Game:
+    """An installed game with its mods: its own f2_res (fallout2.cfg,
+    f2_res.ini) and mods/mods_order.txt."""
+    return Game(engine_layers(game_dir, REPO_ROOT / "files/ce.dat"))
+
+
 def cmd_hashes(args) -> int:
-    game = vanilla_game(args.game, args.f2_res)
+    game = mod_game(args.mod) if getattr(args, "mod", None) else vanilla_game(args.game, args.f2_res)
     for pack in args.packs:
         assets = pack_assets(pack)
         paths = resolve(assets, game)
@@ -308,7 +326,7 @@ def cmd_hashes(args) -> int:
 
 def cmd_compare(args) -> int:
     base = vanilla_game(args.base, args.f2_res)
-    mod = Game(engine_layers(args.mod, REPO_ROOT / "files/ce.dat"))
+    mod = mod_game(args.mod)
     assets = {}
     for pack in args.packs:
         for stem, frames in pack_assets(pack).items():
@@ -415,6 +433,8 @@ def main() -> int:
     h.add_argument("packs", nargs="+", type=Path)
     h.add_argument("--game", type=Path, default=DEFAULT_GAME)
     h.add_argument("--f2-res", type=Path)
+    h.add_argument("--mod", type=Path, help="the pack was made from this installed, modded game "
+                                            "(mod_pack.py): hash through its whole chain instead")
     c = sub.add_parser("compare")
     c.add_argument("packs", nargs="+", type=Path)
     c.add_argument("--base", type=Path, default=DEFAULT_GAME)

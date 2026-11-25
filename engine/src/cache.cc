@@ -262,16 +262,21 @@ static bool cacheFetchEntryForKey(Cache* cache, int key, int* indexPtr)
             break;
         }
 
+        // CE: whether the block is still locked when leaving on failure (the
+        // original unlocked it twice when the key could not be inserted).
+        bool locked = false;
         do {
             if (!heapLock(&(cache->heap), cacheEntry->heapHandleIndex, &(cacheEntry->data))) {
                 break;
             }
+            locked = true;
 
             if (cache->readProc(key, &size, cacheEntry->data) != 0) {
                 break;
             }
 
             heapUnlock(&(cache->heap), cacheEntry->heapHandleIndex);
+            locked = false;
 
             cacheEntry->size = size;
             cacheEntry->key = key;
@@ -298,7 +303,9 @@ static bool cacheFetchEntryForKey(Cache* cache, int key, int* indexPtr)
             return true;
         } while (0);
 
-        heapUnlock(&(cache->heap), cacheEntry->heapHandleIndex);
+        if (locked) {
+            heapUnlock(&(cache->heap), cacheEntry->heapHandleIndex);
+        }
     } while (0);
 
     // NOTE: Uninline.

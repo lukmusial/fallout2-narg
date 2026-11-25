@@ -32,6 +32,13 @@ class FrmImage;
 // doubled, instead of as the pack's picture of the original. `[graphics]
 // hd_verify=0` turns the check off.
 //
+// A manifest value may name several packs, tried in order for each frame:
+// the first with an image made from the frame the game draws is used. A pack
+// made from a mod's art then follows the normal pack, and one install serves
+// both the original game and the mod:
+//
+//   * = ai rpu                         # RPU's art where RPU changed or added it
+//
 // Decoded frames are kept in an LRU cache bounded by `[graphics]
 // hd_cache_mb`. When an asset has no HD image, callers can ask for an
 // automatic 2x expansion of the legacy frame instead, so later RGB effects
@@ -46,6 +53,9 @@ unsigned int hdArtGeneration();
 
 // The pack's HD image for a frame of a legacy art file, or null.
 std::shared_ptr<const HdImage> hdArtFindFrame(const char* artPath, int frame, int direction);
+
+// The pack a frame was taken from by the last lookup (empty: none).
+std::string hdArtFramePack(const char* artPath, int frame, int direction);
 
 // As hdArtFindFrame; without a pack image, the legacy frame (`legacyData`,
 // `width` x `height`, index 0 transparent) expanded 2x through the base
@@ -126,7 +136,7 @@ struct HdArtStats {
     unsigned long long hits;
     unsigned long long misses;
     int legacyChecked; // frames whose legacy source was checked (legacy.txt)
-    int legacyRejected; // of those, frames the running game draws differently
+    int legacyRejected; // frames no pack has an image of as the running game draws them
 };
 
 void hdArtGetStats(HdArtStats* stats);

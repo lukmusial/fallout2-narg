@@ -48,11 +48,17 @@ namespace {
         std::string pack;
         unsigned int generation = 0;
 
-        // Manifest of the active pack: art path -> pack ("*" = default).
-        std::unordered_map<std::string, std::string> manifest;
-        std::string manifestDefault;
+        // Manifest of the active pack: art path -> packs to try in order
+        // ("*" = default).
+        std::unordered_map<std::string, std::vector<std::string>> manifest;
+        std::vector<std::string> manifestDefault;
+        std::vector<std::string> activePack;
 
+        // By "<pack>:<art path>".
         std::unordered_map<std::string, Asset> assets;
+        // The pack each frame is drawn from (frameKey without prefix), empty
+        // when none has a usable image.
+        std::unordered_map<std::string, std::string> framePacks;
 
         std::list<CachedFrame> lru; // most recently used first
         std::unordered_map<std::string, std::list<CachedFrame>::iterator> frames;
@@ -102,9 +108,11 @@ namespace {
     {
         gHdArt.manifest.clear();
         gHdArt.manifestDefault.clear();
+        gHdArt.activePack.clear();
         if (gHdArt.pack.empty()) {
             return;
         }
+        gHdArt.activePack.push_back(gHdArt.pack);
 
         std::vector<unsigned char> data;
         if (!readWholeFile("hd/" + gHdArt.pack + "/manifest.txt", data)) {
@@ -112,14 +120,21 @@ namespace {
         }
 
         std::string text(data.begin(), data.end());
-        hdManifestParse(text, &gHdArt.manifest, &gHdArt.manifestDefault);
+        std::unordered_map<std::string, std::string> entries;
+        std::string defaultPack;
+        hdManifestParse(text, &entries, &defaultPack);
+        for (const auto& entry : entries) {
+            gHdArt.manifest[entry.first] = hdPackList(entry.second);
+        }
+        gHdArt.manifestDefault = hdPackList(defaultPack);
 
-        debugPrint("HD: pack %s manifest: %zu entries, default %s\n", gHdArt.pack.c_str(), gHdArt.manifest.size(), gHdArt.manifestDefault.c_str());
+        debugPrint("HD: pack %s manifest: %zu entries, default %s\n", gHdArt.pack.c_str(), gHdArt.manifest.size(), defaultPack.c_str());
     }
 
     void clearCache()
     {
         gHdArt.assets.clear();
+        gHdArt.framePacks.clear();
         gHdArt.lru.clear();
         gHdArt.frames.clear();
         gHdArt.bytes = 0;
@@ -138,7 +153,10 @@ namespace {
         }
     }
 
-    const std::string& packForAsset(const std::string& key)
+    // The packs to look in for an asset, in order. A manifest may list several
+    // (`* = ai rpu`): a pack made from a mod's art then follows the normal one
+    // and is used where the running game shows the mod's frame (legacy.txt).
+    const std::vector<std::string>& packsForAsset(const std::string& key)
     {
         auto it = gHdArt.manifest.find(key);
         if (it != gHdArt.manifest.end()) {
@@ -147,19 +165,20 @@ namespace {
         if (!gHdArt.manifestDefault.empty()) {
             return gHdArt.manifestDefault;
         }
-        return gHdArt.pack;
+        return gHdArt.activePack;
     }
 
-    Asset& resolveAsset(const std::string& key)
+    Asset& resolveAsset(const std::string& pack, const std::string& key)
     {
-        auto found = gHdArt.assets.find(key);
+        std::string id = pack + ":" + key;
+        auto found = gHdArt.assets.find(id);
         if (found != gHdArt.assets.end()) {
             return found->second;
         }
 
         Asset asset;
-        if (!gHdArt.pack.empty()) {
-            std::string base = "hd/" + packForAsset(key) + "/" + key;
+        if (!pack.empty()) {
+            std::string base = "hd/" + pack + "/" + key;
             size_t dot = base.find_last_of('.');
             if (dot != std::string::npos && base.find('/', dot) == std::string::npos) {
                 base.resize(dot);
@@ -183,7 +202,15 @@ namespace {
             }
         }
 
-        return gHdArt.assets.emplace(key, std::move(asset)).first->second;
+        return gHdArt.assets.emplace(id, std::move(asset)).first->second;
+    }
+
+    bool assetHasFrame(const Asset& asset, int frame, int direction)
+    {
+        if (asset.kind == AssetKind::Png) {
+            return frame == 0 && direction == 0;
+        }
+        return asset.kind == AssetKind::Fhd && asset.fhd.find(frame, direction) != nullptr;
     }
 
     std::shared_ptr<const HdImage> cacheGet(const std::string& key)
@@ -364,8 +391,7 @@ namespace {
                 auto actual = running.find(key);
                 ok = actual != running.end() && actual->second == expected->second;
                 if (!ok) {
-                    gHdArt.legacyRejected++;
-                    debugPrint("HD: %s (direction %d, frame %d) is not the art pack %s was made from; drawing the game's own frame\n",
+                    debugPrint("HD: %s (direction %d, frame %d) is not the art pack %s was made from\n",
                         source.c_str(), sourceDirection, sourceFrame, pack.c_str());
                 }
             }
@@ -411,27 +437,65 @@ std::shared_ptr<const HdImage> hdArtFindFrame(const char* artPath, int frame, in
     }
 
     std::string path = hdArtNormalizePath(artPath);
-    Asset& asset = resolveAsset(path);
-    if (asset.kind == AssetKind::None) {
-        return nullptr;
+    const std::vector<std::string>& packs = packsForAsset(path);
+    bool inPack = false;
+    for (const std::string& pack : packs) {
+        if (resolveAsset(pack, path).kind != AssetKind::None) {
+            inPack = true;
+            break;
+        }
     }
-    if (!legacyFrameMatches(asset, packForAsset(path), path, frame, direction)) {
+    if (!inPack) {
         return nullptr;
     }
 
+    // The first pack with an image of this frame made from the running
+    // game's frame; decided once per frame.
     std::string key = frameKey("hd:", path, frame, direction);
+    auto chosen = gHdArt.framePacks.find(key);
+    if (chosen == gHdArt.framePacks.end()) {
+        std::string pick;
+        bool rejected = false;
+        for (const std::string& pack : packs) {
+            Asset& candidate = resolveAsset(pack, path);
+            if (!assetHasFrame(candidate, frame, direction)) {
+                continue;
+            }
+            if (legacyFrameMatches(candidate, pack, path, frame, direction)) {
+                pick = pack;
+                break;
+            }
+            rejected = true;
+        }
+        if (pick.empty() && rejected) {
+            gHdArt.legacyRejected++;
+            debugPrint("HD: no pack has an image of %s (direction %d, frame %d) as the game draws it; drawing the game's own frame\n",
+                path.c_str(), direction, frame);
+        }
+        chosen = gHdArt.framePacks.emplace(key, pick).first;
+    }
+    if (chosen->second.empty()) {
+        return nullptr;
+    }
+
     std::shared_ptr<const HdImage> image = cacheGet(key);
     if (image != nullptr) {
         return image;
     }
 
     auto loaded = std::make_shared<HdImage>();
-    if (!loadAssetFrame(asset, frame, direction, loaded.get())) {
+    if (!loadAssetFrame(resolveAsset(chosen->second, path), frame, direction, loaded.get())) {
         return nullptr;
     }
 
     cachePut(key, loaded);
     return loaded;
+}
+
+std::string hdArtFramePack(const char* artPath, int frame, int direction)
+{
+    auto found = gHdArt.framePacks.find(frameKey("hd:", hdArtNormalizePath(artPath), frame, direction));
+    return found != gHdArt.framePacks.end() ? found->second : std::string();
 }
 
 std::shared_ptr<const HdImage> hdArtGetFrame(const char* artPath, int frame, int direction,

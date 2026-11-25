@@ -278,6 +278,52 @@ def test_hd_legacy_verify(update):
     return f"match used, mismatch rejected, off unchecked ({seconds + more:.0f}s)"
 
 
+def test_hd_new_game_log(update):
+    """New game with HD lights (mixed pack): no heap errors in debug.log. A
+    present during an art file read (mouse refresh) used to rebuild the light
+    field, locking art inside the art cache's fetch; the frame was cached twice
+    and the block unlocked twice ("Heap Error: Attempt to unlock ...")."""
+    if not pack_installed("ai"):
+        raise TestSkipped("pack 'ai' not installed (tools/hd: enhance_*.py, install.py)")
+    args = ["[debug]mode=log", "[graphics]hd=1", "[graphics]hd_pack=mixed", "[graphics]hd_lights=1",
+            "[graphics]hd_text=1", "[screen]resolution_x=2560", "[screen]resolution_y=1440", "[screen]scale=2"]
+    log = run_dir() / "debug.log"
+    log.unlink(missing_ok=True)
+    _, seconds = run_game("hd_new_game_log", "hd_new_game_log.txt", args)
+    errors = sorted({line for line in log.read_text(errors="replace").splitlines() if "Heap Error" in line})
+    if errors:
+        raise TestFailure(f"debug.log: {errors}")
+    return f"no heap errors ({seconds:.0f}s)"
+
+
+def test_hd_pack_chain(update):
+    """Several packs per manifest line (`* = ai rpu`): each frame comes from the
+    first pack whose image was made from the frame the game draws; a frame no
+    pack has a matching image of is drawn from the game (one rejection)."""
+    out, seconds = run_game("hd_pack_chain", "hd_pack_chain.txt", [*HD_ARGS, "[graphics]hd_pack=testchain"])
+    hd = run_dir() / "data/hd"
+
+    def pixels(path):
+        return np.asarray(Image.open(path).convert("RGBA"))
+
+    probe = {name: json.loads((out / f"{name}.json").read_text()) for name in ("first", "second", "none")}
+    expected = {"first": hd / "testlegacy/art/intrface/mainmenu.png",   # testalt rejected, testlegacy used
+                "second": hd / "testalt/art/intrface/hr_mainmenu.png"}  # testlegacy rejected, testalt used
+    for name, image in expected.items():
+        if not probe[name]["found"] or probe[name]["from_legacy"]:
+            raise TestFailure(f"{name}: no pack image used: {probe[name]}")
+        if not np.array_equal(pixels(out / f"{name}.png"), pixels(image)):
+            raise TestFailure(f"{name}: not the image of {image.parent.parent.parent.name}")
+    if [probe[name]["from_pack"] for name in ("first", "second", "none")] != ["testlegacy", "testalt", ""]:
+        raise TestFailure(f"packs reported: {probe}")
+    if not probe["none"]["from_legacy"]:
+        raise TestFailure(f"none: a rejected image was used: {probe['none']}")
+    stats = json.loads((out / "stats.json").read_text())
+    if (stats["legacy_checked"], stats["legacy_rejected"]) != (5, 1):
+        raise TestFailure(f"legacy counters: {stats}")
+    return f"first and second pack used per frame, none rejected once ({seconds:.0f}s)"
+
+
 # --- Phase 2.6: interface screens with the real HD packs --------------------
 #
 # The packs come from tools/hd (enhance_scripted.py, enhance_ai.py, then
@@ -1894,7 +1940,7 @@ def make_hd_wind_test(slot):
 
 
 TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_art, test_main_menu_hd_fhd,
-          test_hd_legacy_verify,
+          test_hd_legacy_verify, test_hd_new_game_log, test_hd_pack_chain,
           test_hd_art_lookup]
          + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
          + [make_slot_test(slot, hd=True) for slot in HD_SLOTS]

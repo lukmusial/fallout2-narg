@@ -469,6 +469,8 @@ namespace {
             << ", \"legacy_height\": " << (haveLegacy ? legacy.getHeight() : 0)
             << ", \"pack\": ";
         jsonString(out, hdArtGetPack().c_str());
+        out << ", \"from_pack\": ";
+        jsonString(out, hdArtFramePack(args[0].c_str(), 0, 0).c_str());
         out << "}\n";
         return true;
     }

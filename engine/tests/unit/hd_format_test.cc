@@ -156,6 +156,16 @@ static void testManifest()
     CHECK(entries.size() == 2);
     CHECK(entries["art/intrface/mainmenu.frm"] == "ai");
     CHECK(entries["art/tiles/a.frm"] == "ai");
+
+    // Several packs, tried in order (a mod's pack after the normal one).
+    entries.clear();
+    hdManifestParse("* = ai rpu\nart/tiles/b.frm = scripted, rpu # roof\n", &entries, &fallback);
+    CHECK(fallback == "ai rpu");
+    CHECK(hdPackList(fallback) == std::vector<std::string>({ "ai", "rpu" }));
+    CHECK(hdPackList(entries["art/tiles/b.frm"]) == std::vector<std::string>({ "scripted", "rpu" }));
+    CHECK(hdPackList("ai") == std::vector<std::string>({ "ai" }));
+    CHECK(hdPackList(" , \t").empty());
+    CHECK(hdPackList("").empty());
 }
 
 static void testLegacy()
@@ -185,10 +195,13 @@ static void testLegacy()
                                  "art/x.frm 0 0 123\n" // short hash
                                  "art/x.frm 7 0 0123456789abcdef\n" // bad direction
                                  "art/x.frm 0 0 0123456789abcdeg\n" // not hex
+                                 "art/x.frm 0 x 0123456789abcdef\n" // bad frame
+                                 "art/items/rifle bb.frm 1 2 0123456789abcdef\n" // space in the name (RPU)
                                  "broken\n",
         &entries);
-    CHECK(count == 2);
-    CHECK(entries.size() == 2);
+    CHECK(count == 3);
+    CHECK(entries.size() == 3);
+    CHECK(entries["art/items/rifle bb.frm#1/2"] == 0x0123456789abcdefULL);
     CHECK(entries["art/tiles/edg5000.frm#0/0"] == 0x9ee5a5d615aca5fdULL);
     CHECK(entries["art/items/chest1.frm#0/3"] == 0xffULL);
 }

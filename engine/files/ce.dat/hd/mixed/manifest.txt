@@ -1,8 +1,13 @@
 # HD art pack "mixed": the AI pack, except where the AI upscale does poorly.
-# Each line: <art path> = <pack>; "*" is the default for everything else.
-# The packs themselves (data/hd/ai, data/hd/scripted) are generated locally by
-# tools/hd (derived from the game's own art, never distributed).
-* = ai
+# Each line: <art path> = <packs>; "*" is the default for everything else.
+# Several packs are tried in order, per frame (src/hd_art.h): the first whose
+# image was made from the frame the game draws (its legacy.txt) is used.
+# The packs themselves (data/hd/ai, data/hd/scripted, data/hd/rpu) are
+# generated locally by tools/hd (derived from the game's own art, never
+# distributed). rpu (tools/hd/mod_pack.py) holds the Restoration Project's
+# own art; it follows ai, so the original game keeps the ai images and RPU
+# gets its art where it changed or added it.
+* = ai rpu
 
 # 11x14 scroll arrows: the AI model turns them into blobs.
 art/intrface/uparwoff.frm = scripted
@@ -96,7 +101,9 @@ art/intrface/invbutdn.frm = scripted
 # Phase 2.17, roofs of the other towns. Navarro corrugated metal (vrof*): the
 # AI turns parts of it into brick and the tiles look patchy; scripted stays
 # consistent. New Reno fine-striped roofs (salbr*): the AI smooths the
-# stripes away and shows the tile diamonds.
+# stripes away and shows the tile diamonds. The Restoration Project redraws
+# vrof001-042 as a flat concrete roof (EPA); the rpu pack's AI images of
+# those are used there (docs/screens/phase2.21_rpu_pack/vrof_ai_vs_scripted.png).
 art/tiles/salbr01.frm = scripted
 art/tiles/salbr02.frm = scripted
 art/tiles/salbr03.frm = scripted
@@ -119,48 +126,48 @@ art/tiles/salbr19.frm = scripted
 art/tiles/salbr20.frm = scripted
 art/tiles/salbr21.frm = scripted
 art/tiles/salbr22.frm = scripted
-art/tiles/vrof001.frm = scripted
-art/tiles/vrof002.frm = scripted
-art/tiles/vrof003.frm = scripted
-art/tiles/vrof004.frm = scripted
-art/tiles/vrof005.frm = scripted
-art/tiles/vrof006.frm = scripted
-art/tiles/vrof007.frm = scripted
-art/tiles/vrof008.frm = scripted
-art/tiles/vrof009.frm = scripted
-art/tiles/vrof010.frm = scripted
-art/tiles/vrof011.frm = scripted
-art/tiles/vrof012.frm = scripted
-art/tiles/vrof013.frm = scripted
-art/tiles/vrof014.frm = scripted
-art/tiles/vrof015.frm = scripted
-art/tiles/vrof016.frm = scripted
-art/tiles/vrof017.frm = scripted
-art/tiles/vrof018.frm = scripted
-art/tiles/vrof019.frm = scripted
-art/tiles/vrof020.frm = scripted
-art/tiles/vrof021.frm = scripted
-art/tiles/vrof022.frm = scripted
-art/tiles/vrof023.frm = scripted
-art/tiles/vrof024.frm = scripted
-art/tiles/vrof025.frm = scripted
-art/tiles/vrof026.frm = scripted
-art/tiles/vrof027.frm = scripted
-art/tiles/vrof028.frm = scripted
-art/tiles/vrof029.frm = scripted
-art/tiles/vrof030.frm = scripted
-art/tiles/vrof031.frm = scripted
-art/tiles/vrof032.frm = scripted
-art/tiles/vrof033.frm = scripted
-art/tiles/vrof034.frm = scripted
-art/tiles/vrof035.frm = scripted
-art/tiles/vrof036.frm = scripted
-art/tiles/vrof037.frm = scripted
-art/tiles/vrof038.frm = scripted
-art/tiles/vrof039.frm = scripted
-art/tiles/vrof040.frm = scripted
-art/tiles/vrof041.frm = scripted
-art/tiles/vrof042.frm = scripted
+art/tiles/vrof001.frm = scripted rpu
+art/tiles/vrof002.frm = scripted rpu
+art/tiles/vrof003.frm = scripted rpu
+art/tiles/vrof004.frm = scripted rpu
+art/tiles/vrof005.frm = scripted rpu
+art/tiles/vrof006.frm = scripted rpu
+art/tiles/vrof007.frm = scripted rpu
+art/tiles/vrof008.frm = scripted rpu
+art/tiles/vrof009.frm = scripted rpu
+art/tiles/vrof010.frm = scripted rpu
+art/tiles/vrof011.frm = scripted rpu
+art/tiles/vrof012.frm = scripted rpu
+art/tiles/vrof013.frm = scripted rpu
+art/tiles/vrof014.frm = scripted rpu
+art/tiles/vrof015.frm = scripted rpu
+art/tiles/vrof016.frm = scripted rpu
+art/tiles/vrof017.frm = scripted rpu
+art/tiles/vrof018.frm = scripted rpu
+art/tiles/vrof019.frm = scripted rpu
+art/tiles/vrof020.frm = scripted rpu
+art/tiles/vrof021.frm = scripted rpu
+art/tiles/vrof022.frm = scripted rpu
+art/tiles/vrof023.frm = scripted rpu
+art/tiles/vrof024.frm = scripted rpu
+art/tiles/vrof025.frm = scripted rpu
+art/tiles/vrof026.frm = scripted rpu
+art/tiles/vrof027.frm = scripted rpu
+art/tiles/vrof028.frm = scripted rpu
+art/tiles/vrof029.frm = scripted rpu
+art/tiles/vrof030.frm = scripted rpu
+art/tiles/vrof031.frm = scripted rpu
+art/tiles/vrof032.frm = scripted rpu
+art/tiles/vrof033.frm = scripted rpu
+art/tiles/vrof034.frm = scripted rpu
+art/tiles/vrof035.frm = scripted rpu
+art/tiles/vrof036.frm = scripted rpu
+art/tiles/vrof037.frm = scripted rpu
+art/tiles/vrof038.frm = scripted rpu
+art/tiles/vrof039.frm = scripted rpu
+art/tiles/vrof040.frm = scripted rpu
+art/tiles/vrof041.frm = scripted rpu
+art/tiles/vrof042.frm = scripted rpu
 art/tiles/vrof043.frm = scripted
 
 # Phase 2.18, objects of the other towns. Round grilles (Enclave vents,

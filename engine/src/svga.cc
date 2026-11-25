@@ -10,6 +10,7 @@
 
 #include <SDL.h>
 
+#include "art.h"
 #include "color.h"
 #include "config.h"
 #include "dinput.h"
@@ -842,9 +843,11 @@ static void presenterUpdateLights()
     }
 
     // Building the field may load art, and file reads refresh the mouse,
-    // which presents again.
+    // which presents again. A present from inside an art read keeps the
+    // previous field: locking art there would enter the art cache while it
+    // is fetching (the same frame would be cached twice).
     static bool busy = false;
-    if (busy) {
+    if (busy || artIsLoading()) {
         return;
     }
     busy = true;

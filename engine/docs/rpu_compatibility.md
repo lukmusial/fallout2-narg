@@ -163,10 +163,58 @@ HD buttons), `worldmap_off_on.png`, `towns_rpu_hd.png`.
 Cost: one extra file read and hash per asset on first use (cached); no
 change on vanilla pictures.
 
+### RPU's own art in HD (Phase 2.21, `hd/rpu`)
+
+- **Pack:** `tools/hd/mod_pack.py` (see `tools/hd/README.md`) reads RPU
+  through the installed game's chain (`mods_order.txt`, bottom line wins, as
+  in sfall; verified against RPU's `ddraw.ini` and `src/sfall_ext.cc`) and
+  makes AI (x2plus) images of every frame RPU adds or draws differently in
+  the HD types: 2185 FRMs (1876 new, 309 changed), 3379 images, 160 MB,
+  `legacy.txt` hashed from RPU's frames. Critters stay legacy; intro
+  sequences are left out. Endgame slides are in the pack (own palettes) but
+  the engine does not draw endgame slides in HD yet.
+- **Engine:** a manifest line may list several packs, tried per frame in
+  order (`src/hd_art.h`); the first whose image was made from the frame the
+  game draws is used. `hd/mixed/manifest.txt`: `* = ai rpu` (and `scripted
+  rpu` for `vrof001-042`). `legacy_rejected` now counts frames no pack has a
+  matching image of. `hdprobe` reports the pack used (`from_pack`).
+  `legacy.txt` paths may contain spaces (RPU's `art/items/rifle bb.frm`).
+- **Tests:** unit `hd_format_test` (pack lists, a path with a space);
+  integration `test_hd_pack_chain` (packs `testalt`/`testchain` from
+  `make_test_hd_art.py`: first pack rejected and second used, and the
+  reverse, none matching drawn from the game, counters).
+- **Packaging:** Narg Edition's `extra/package.sh` puts `hd/rpu` into
+  `mods/narg_hd.dat` when the packs folder has it, and reads lists in the
+  manifest (change not committed in that repository).
+
+Hidden runs (`~/dev/rpu-test/run3`, 2560x1440, `hd_pack=mixed`, before =
+this tree at 8c83a82b, after = with `hd/rpu`):
+
+| Run | before checked / rejected | after checked / rejected |
+|---|---|---|
+| RPU: menu / new game / world map | 11 / 1, 613 / 12, 629 / 19 | 12 / 0, 622 / 0, 645 / 0 |
+| RPU: 8 towns (Abbey, EPA, Village, Slaver Camp, Umbra Tribe, Vault City, Navarro, San Francisco) | 12 frames drawn from the game | 0 |
+| vanilla: menu / new game / world map | 8 / 0, 563 / 0, 579 / 0 | same |
+
+`hdprobe` on RPU: elevator panels (`el_bos`, `el_vault`), world map
+(`wrldmp00`, `wmtabs`), dialogue frame, hi-res menu, inventory, skilldex,
+`shut001`, `vrof001`, `bvs21`, and the new town map, endgame slide, items,
+scenery, tile and wall all come from `rpu`; `mainmenu`, `lsgame`, `edg5000`
+from `ai`. On vanilla the same probes give `ai` (or `scripted` for
+`vrof001`), and RPU-only art has no frame to draw.
+
+Vanilla unchanged: the world map shots are identical before and after; the
+menu differs only in the build-hash text; the new-game and town shots differ
+less than two runs of the same build do (critters, wind). Offline, none of
+the 3379 rpu frames hashes like the original game's frame (two vanilla
+installs), all 3379 like RPU's. Screens: `docs/screens/phase2.21_rpu_pack/`
+(`ingame_*_before_after.jpg`, sheets 1-6, `vrof_ai_vs_scripted.png`).
+
 ### Possible next steps
 
-- HD images for RPU's 254 changed and 1876 added files: run the pipeline
-  (`extract.py` with the RPU game as `FALLOUT2_DIR`) and ship them as a
-  separate pack/dat for RPU; `legacy.txt` then selects per frame.
+- Endgame slides in HD (a hook like the death screen's in
+  `endgameEndingRenderStaticScene`; panning slides need a region draw).
+- Narg Edition: optionally ship `hd/rpu` as its own dat, installed only next
+  to `mods/rpu.dat` (it adds 160 MB to `narg_hd.dat`).
 - CE: implement `fs_seek`/`fs_read_short`/`fs_write_short` and
   `set_fake_perk` (upstream CE work).

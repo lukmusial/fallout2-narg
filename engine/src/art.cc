@@ -1014,10 +1014,19 @@ static int artCacheGetFileSize(const FrmId& frmId, int* sizePtr)
     return result;
 }
 
+// CE: nesting depth of artCacheReadData (see artIsLoading).
+static int gArtLoadingDepth = 0;
+
+bool artIsLoading()
+{
+    return gArtLoadingDepth > 0;
+}
+
 // 0x419B78
 static int artCacheReadData(const FrmId& frmId, int* sizePtr, unsigned char* data)
 {
     int result = -1;
+    gArtLoadingDepth++;
 
     const char* artFileName = frmId.filePath();
     if (artFileName != nullptr) {
@@ -1046,6 +1055,7 @@ static int artCacheReadData(const FrmId& frmId, int* sizePtr, unsigned char* dat
         }
     }
 
+    gArtLoadingDepth--;
     return result;
 }
 

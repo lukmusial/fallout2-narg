@@ -546,6 +546,10 @@ public:
 int artInit();
 void artReset();
 void artExit();
+
+// CE: true while the art cache reads a file. File reads refresh the mouse
+// and present a frame; code run from a present must not lock art then.
+bool artIsLoading();
 char* artGetObjectTypeName(ObjectType objectType);
 int artIsObjectTypeHidden(ObjectType objectType);
 void artToggleObjectTypeHidden(ObjectType objectType);

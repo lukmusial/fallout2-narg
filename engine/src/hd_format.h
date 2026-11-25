@@ -67,8 +67,13 @@ bool hdFhdParse(const unsigned char* data, size_t size, HdFhdInfo* info, std::st
 std::string hdArtNormalizePath(const char* artPath);
 
 // Parses a pack manifest: `<art path> = <pack>` lines, `* = <pack>` for the
-// default, `#` comments. Paths are normalised.
+// default, `#` comments. Paths are normalised. A value may name several
+// packs, tried in order (hdPackList).
 void hdManifestParse(const std::string& text, std::unordered_map<std::string, std::string>* entries, std::string* defaultPack);
+
+// The packs of a manifest value in lookup order: names separated by spaces
+// or commas ("ai rpu" -> ai, rpu).
+std::vector<std::string> hdPackList(const std::string& value);
 
 // Decodes a PNG stream to 0xAARRGGBB.
 bool hdImageDecodePng(const unsigned char* data, size_t size, HdImage* image, std::string* error = nullptr);

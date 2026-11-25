@@ -1,0 +1,34 @@
+# Compatibility (HD, Phase 2.21): which pack each probed frame is drawn from
+# (hdprobe "from_pack": ai on the original game, rpu where the Restoration
+# Project's art differs or is its own, "" for art no pack has as the game
+# draws it). Run with [graphics]hd_pack=mixed (* = ai rpu).
+until mainmenu 30000
+wait 1500
+# changed by RPU: elevator panels, world map, dialogue frame, hi-res menu,
+# inventory, skilldex, a placeholder tile RPU made real, scenery
+hdprobe art/intrface/el_bos.frm el_bos
+hdprobe art/intrface/el_vault.frm el_vault
+hdprobe art/intrface/wrldmp00.frm wrldmp00
+hdprobe art/intrface/wmtabs.frm wmtabs
+hdprobe art/intrface/alltlk.frm alltlk
+hdprobe art/intrface/hr_mainmenu.frm hr_mainmenu
+hdprobe art/inven/phazer.frm phazer
+hdprobe art/skilldex/firstaid.frm firstaid
+hdprobe art/tiles/shut001.frm shut001
+hdprobe art/tiles/vrof001.frm vrof001
+hdprobe art/scenery/bvs21.frm bvs21
+# new in RPU: town maps, an endgame slide, items, scenery, tiles, walls
+hdprobe art/intrface/twnabbey.frm twnabbey
+hdprobe art/intrface/eg_elder.frm eg_elder
+hdprobe art/skilldex/savior.frm savior
+hdprobe art/inven/blaster.frm blaster
+hdprobe art/items/toaster.frm toaster
+hdprobe art/scenery/thronenw.frm thronenw
+hdprobe art/tiles/epagh079.frm epagh079
+hdprobe art/walls/epaww003.frm epaww003
+# unchanged by RPU: the original pack
+hdprobe art/intrface/mainmenu.frm mainmenu
+hdprobe art/intrface/lsgame.frm lsgame
+hdprobe art/tiles/edg5000.frm edg5000
+hdstats stats
+quit 0

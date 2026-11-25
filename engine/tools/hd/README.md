@@ -790,3 +790,87 @@ from the game, doubled. Ground variants follow their tile.
 
 See `docs/rpu_compatibility.md` for the Restoration Project results. Hashing
 both packs takes about 10 minutes, most of it `ce-dat-tool extract`.
+
+## A pack for a mod's own art (`mod_pack.py`, Phase 2.21: the Restoration Project)
+
+`legacy.txt` keeps the packs' images off art a mod replaced; `mod_pack.py`
+makes a second pack from the mod's own art, so it gets HD images too.
+
+```sh
+cd tools/hd
+export HD_MODELS_DIR=...                   # weights as in MODELS.md
+.venv/bin/python mod_pack.py extract --mod ~/dev/rpu-test/game   # ~10 min
+.venv/bin/python mod_pack.py enhance                             # AI x2plus, ~5 min
+.venv/bin/python mod_pack.py install --mod ~/dev/rpu-test/game   # -> out/build/macos/data/hd/rpu, ~2.5 min
+```
+
+(`--pack NAME`, default `rpu`; work files in `work/<pack>/`, images in
+`work/<pack>/assets/<pack>/`; `--base` is the original game, default
+`FALLOUT2_DIR`.)
+
+- **File chain.** The mod's art is read as the engine opens the installed
+  game (`legacy_art.engine_layers`): master.dat < critter.dat < f2_res (the
+  game's own, from `fallout2.cfg`/`f2_res.ini`) < ce.dat < patchNNN.dat <
+  `mods/mods_order.txt` < data/. `mods_order.txt` is opened top to bottom
+  and each archive goes in front of the chain (`src/sfall_ext.cc`), so the
+  **last line wins**. That is sfall's order too (the RPU install's
+  `ddraw.ini`: "loaded line by line from top to bottom", "master_patches >
+  critter_patches > mods_order.txt > PatchFileXX > patchXXX.dat > sfall.dat >
+  critter_dat > f2_res_patches > f2_res_dat > master_dat"), and it is what
+  RPU needs: the enhanced world map (`rpu_enhanced_worldmap.dat`) comes after
+  `rpu.dat` and replaces its world map tiles. CE does not open `sfall.dat`
+  (sfall's scripts only).
+- **What goes in.** Every FRM of the HD types (`legacy_art.HD_TYPES`;
+  critters stay legacy) the mod adds, and of the art it changes only the
+  frames whose size or palette indices differ from the original game's.
+  Frames the mod left alone stay empty in `.fhd` files, so the pack can never
+  match a frame of the original game. Intro sequences (`seq*`, `arroyo01`,
+  `dp`) are left out; endgame slides are in.
+- **Own palettes.** `art/intrface/<name>.frm` with an `art/intrface/<name>.pal`
+  next to it (endgame slides `eg_*`, `death`, `helpscrn`) is converted
+  through that palette.
+- **Neighbours from the mod's maps.** Floor/roof kind, the fixed tile
+  neighbours (`extract.tile_neighbours`) and the wall runs
+  (`wallmap.wall_neighbours`) come from the mod's `tiles.lst`, maps and
+  protos; neighbours outside the pack are converted as context only.
+  `extract.read_map_grids` now reads gzipped maps too.
+- **Colour cycling** (229-254) stays transparent as everywhere; multi-frame
+  art is converted per frame and direction and packed into `.fhd` by
+  `install.py`.
+- **legacy.txt** is hashed through the mod's chain (`install.py --mod`,
+  `legacy_art.py hashes --mod DIR`), so the engine uses an image only while
+  the game draws exactly the mod's frame.
+
+The engine tries the packs of a manifest line in order (`src/hd_art.h`):
+`hd/mixed/manifest.txt` has `* = ai rpu`, and `scripted rpu` for the Vault
+City roofs RPU redraws. On the original game the ai image of every frame
+matches and is used; on RPU, where the mod's frame differs, ai's is skipped
+and rpu's matches. One install serves both. Checked offline: none of the
+3379 rpu frames hashes like the original game's frame (two vanilla
+installs), all 3379 like RPU's.
+
+RPU v2.4.34 (`~/dev/rpu-test/game`): 2185 FRMs (1876 new, 309 changed),
+3379 images, 160 MB:
+
+| type | FRMs new / changed | images (.png / .fhd) | size |
+|---|---|---|---|
+| intrface | 11 / 32 | 43 / 0 | 41 MB |
+| inven | 39 / 7 | 46 / 0 | 1.0 MB |
+| items | 24 / 1 | 21 / 4 (24 frames) | 0.9 MB |
+| scenery | 472 / 85 | 426 / 131 (1277 frames) | 89 MB |
+| skilldex | 2 / 7 | 9 / 0 | 1.1 MB |
+| tiles | 971 / 166 | 1137 / 0 | 16 MB |
+| walls | 357 / 11 | 361 / 7 (35 frames) | 12 MB |
+
+The changed set is larger than the 254 of `docs/rpu_compatibility.md`, which
+only counted art the vanilla packs have. RPU moves `patch000.dat` away, so
+art the original game takes from it falls back to master.dat's older version
+unless `rpu.dat` has its own; those frames differ too.
+
+Times (M5 Pro): extract 575 s (mostly reading 176 maps and the walls on
+them), AI 260 s of model time for 3379 images, install with hashes 153 s.
+Review sheets: `docs/screens/phase2.21_rpu_pack/` (untracked).
+
+The engine does not draw endgame slides through the HD layer yet (neither
+the original game's nor RPU's), so the `eg_*` images are only used once
+that is added; `death.frm` is (`src/main.cc`).

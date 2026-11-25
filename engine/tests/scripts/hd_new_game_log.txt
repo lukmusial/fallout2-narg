@@ -1,0 +1,12 @@
+# New game with HD lights on, intro movie skipped (see test_hd_new_game_log):
+# the town's art loads while presents rebuild the light field.
+until mainmenu 30000
+wait 300
+key n
+wait 2000
+key t
+wait 2500
+key esc
+until game 90000
+wait 3000
+quit 0
