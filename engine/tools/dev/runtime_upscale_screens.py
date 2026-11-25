@@ -44,8 +44,11 @@ SHEETS = {
     "den": [("slot8/game", (400, 200, 880, 560), 1), ("slot8/game", (760, 60, 1240, 420), 1)],
     "main_menu": [("menu/menu", (600, 60, 1240, 540), 1), ("menu/load", (660, 60, 1240, 420), 1)],
     "inventory_character": [("slot1/inventory", (160, 40, 1120, 560), 1), ("slot1/character", (0, 40, 560, 600), 1)],
-    "critters": [("slot3/game", (600, 360, 720, 480), 3), ("slot1/game", (580, 380, 700, 500), 3),
-                 ("slot8/game", (580, 380, 700, 500), 3)],
+    "critters": [("slot3/game", (360, 440, 480, 620), 2), ("slot3/game", (100, 220, 220, 400), 2),
+                 ("slot1/game", (580, 600, 700, 780), 2), ("slot8/game", (580, 220, 700, 400), 2)],
+    # The palette boost: smooth shading of the menu's power armour and the
+    # load screen's frame, enlarged; (b8)/(c) keep the 256-colour bands.
+    "banding": [("menu/menu", (720, 140, 900, 290), 3), ("menu/menu", (1000, 380, 1180, 530), 3)],
 }
 
 
@@ -100,9 +103,10 @@ def sheet(name: str, crops: list) -> Path:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--skip-runs", action="store_true", help="only rebuild the sheets from earlier captures")
+    ap.add_argument("--columns", default=",".join(COLUMNS), help="columns to capture again")
     args = ap.parse_args()
     if not args.skip_runs:
-        for column in COLUMNS:
+        for column in args.columns.split(","):
             capture(column, "menu", "hd_upscale_review_menu.txt", None)
             for slot in SLOTS:
                 capture(column, f"slot{slot}", "hd_upscale_review.txt", slot)

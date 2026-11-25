@@ -656,6 +656,52 @@ namespace {
             float t = 1.6f * steps[i];
             invT[i] = 1.0f / (t * t);
         }
+        // Where it applies: banded areas are flat between isolated one-step
+        // edges, textured ones change at nearly every pixel. Activity = mean
+        // luma gradient over 7x7 pixels, in palette steps; full effect below
+        // kFlat, none above kTextured.
+        constexpr float kFlat = 0.10f;
+        constexpr float kTextured = 0.22f;
+        std::vector<float> amount(n);
+        {
+            std::vector<float> luma(n);
+            for (size_t i = 0; i < n; i++) {
+                luma[i] = big.r[i] * kLumaR + big.g[i] * kLumaG + big.b[i] * kLumaB;
+            }
+            std::vector<float> grad(n);
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    size_t i = static_cast<size_t>(y) * w + x;
+                    float gx = luma[static_cast<size_t>(y) * w + clampi(x + 1, 0, w - 1)] - luma[static_cast<size_t>(y) * w + clampi(x - 1, 0, w - 1)];
+                    float gy = luma[static_cast<size_t>(clampi(y + 1, 0, h - 1)) * w + x] - luma[static_cast<size_t>(clampi(y - 1, 0, h - 1)) * w + x];
+                    grad[i] = 0.5f * (std::fabs(gx) + std::fabs(gy));
+                }
+            }
+            // 7x7 box mean, separable.
+            std::vector<float> rows(n);
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    float sum = 0.0f;
+                    for (int d = -3; d <= 3; d++) {
+                        sum += grad[static_cast<size_t>(y) * w + clampi(x + d, 0, w - 1)];
+                    }
+                    rows[static_cast<size_t>(y) * w + x] = sum;
+                }
+            }
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    float sum = 0.0f;
+                    for (int d = -3; d <= 3; d++) {
+                        sum += rows[static_cast<size_t>(clampi(y + d, 0, h - 1)) * w + x];
+                    }
+                    size_t i = static_cast<size_t>(y) * w + x;
+                    float activity = sum / 49.0f / std::max(steps[i], 1.0f);
+                    amount[i] = std::min(std::max((kTextured - activity) / (kTextured - kFlat), 0.0f), 1.0f);
+                }
+            }
+        }
+        Planes original = big;
+
         std::vector<float> accR(w);
         std::vector<float> accG(w);
         std::vector<float> accB(w);
@@ -739,6 +785,12 @@ namespace {
                 std::swap(big.g, tmp.g);
                 std::swap(big.b, tmp.b);
             }
+        }
+        for (size_t i = 0; i < n; i++) {
+            float a = amount[i];
+            big.r[i] = original.r[i] + a * (big.r[i] - original.r[i]);
+            big.g[i] = original.g[i] + a * (big.g[i] - original.g[i]);
+            big.b[i] = original.b[i] + a * (big.b[i] - original.b[i]);
         }
     }
 
