@@ -138,6 +138,26 @@ struct GraphicsSettings {
     // With hd=1: trees, bushes, grass and cacti sway in the wind; their base
     // stays put (Phase 2.15, see hd_wind.h).
     bool hd_wind = false;
+    // With hd=1 and a pack set: frames no pack has an image of (or whose
+    // image was made from other art than the game draws, hd_verify) are
+    // upscaled at runtime: `scripted` (the offline scripted pack's
+    // algorithm, src/hd_upscale.h) or `double` (pixels doubled).
+    std::string hd_upscale = "scripted";
+    // With hd_upscale=scripted: critters (characters) are drawn upscaled in
+    // the HD layer too; 0 keeps them doubled (legacy).
+    bool hd_upscale_critters = true;
+    // Upscale the art a map uses (and the early interface art at start) in
+    // background threads when it loads; 0 upscales each frame when it is
+    // first drawn.
+    bool hd_upscale_preload = true;
+    // Keep upscaled frames on disk (data/hd/cache) for later sessions.
+    bool hd_upscale_cache = false;
+    // Background threads (0 = processor threads - 1, at most 8).
+    int hd_upscale_threads = 0;
+    // 16: the palette boost (6-bit palette expanded at full precision,
+    // float pipeline, de-banding of smooth areas, ordered dither to 8 bits);
+    // 8: exactly the offline scripted pack's algorithm (8-bit palette).
+    int hd_upscale_precision = 16;
     // Map view (Phase 2.13, see map_view.h): smooth, per-frame map panning
     // (scroll_speed in percent of the original speed) and zooming the map
     // (mouse wheel, Ctrl+= / Ctrl+- / Ctrl+0).

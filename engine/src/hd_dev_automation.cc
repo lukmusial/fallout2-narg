@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -1128,6 +1129,8 @@ namespace {
             << ", \"object_pixels_hd\": " << check.objectPixelsHd
             << ", \"scenery_pixels\": " << check.sceneryPixels
             << ", \"scenery_pixels_hd\": " << check.sceneryPixelsHd
+            << ", \"critter_pixels\": " << check.critterPixels
+            << ", \"critter_pixels_hd\": " << check.critterPixelsHd
             << ", \"legacy_object_pixels\": " << check.legacyObjectPixels
             << ", \"legacy_object_pixels_hd\": " << check.legacyObjectPixelsHd
             << ", \"tile_pixels\": " << check.tilePixels
@@ -1135,7 +1138,7 @@ namespace {
             << ", \"cycling_hd\": " << check.cyclingHd
             << ", \"cut_out_draws\": " << cutOuts << "}\n";
         if (ok) {
-            static const unsigned char kColors[7][3] = { { 0, 0, 0 }, { 128, 128, 128 }, { 0, 0, 255 }, { 255, 0, 0 }, { 255, 255, 0 }, { 0, 255, 255 }, { 0, 200, 0 } };
+            static const unsigned char kColors[8][3] = { { 0, 0, 0 }, { 128, 128, 128 }, { 0, 0, 255 }, { 255, 0, 0 }, { 255, 255, 0 }, { 0, 255, 255 }, { 0, 200, 0 }, { 255, 0, 255 } };
             int width = mapViewIsActive() ? mapViewSurfaceWidth() : windowGetWidth(gIsoWindow);
             int height = static_cast<int>(check.mask.size()) / std::max(width, 1);
             std::vector<unsigned char> rgb(check.mask.size() * 3);
@@ -1170,8 +1173,39 @@ namespace {
             << ", \"hits\": " << stats.hits
             << ", \"misses\": " << stats.misses
             << ", \"legacy_checked\": " << stats.legacyChecked
-            << ", \"legacy_rejected\": " << stats.legacyRejected << "}\n";
+            << ", \"legacy_rejected\": " << stats.legacyRejected
+            << ", \"runtime_served\": " << stats.runtimeServed
+            << ", \"runtime_inline\": " << stats.runtimeInline
+            << ", \"runtime_inline_ms\": " << stats.runtimeInlineMs
+            << ", \"runtime_inline_max_ms\": " << stats.runtimeInlineMaxMs
+            << ", \"runtime_from_pool\": " << stats.runtimeFromPool
+            << ", \"runtime_take_ms\": " << stats.runtimeTakeMs
+            << ", \"preupscale_queued\": " << stats.preupscaleQueued
+            << ", \"upscale_threads\": " << stats.upscaleThreads
+            << ", \"upscale_pending\": " << stats.upscalePending
+            << ", \"upscale_computed\": " << stats.upscaleComputed
+            << ", \"upscale_computed_inline\": " << stats.upscaleComputedInline
+            << ", \"upscale_disk_hits\": " << stats.upscaleDiskHits
+            << ", \"upscale_disk_writes\": " << stats.upscaleDiskWrites
+            << ", \"upscale_compute_ms\": " << stats.upscaleComputeMs
+            << ", \"upscale_output_pixels\": " << stats.upscaleOutputPixels
+            << ", \"batch\": \"" << stats.batchName << "\""
+            << ", \"batch_queued\": " << stats.batchQueued
+            << ", \"batch_queue_ms\": " << stats.batchQueueMs
+            << ", \"batch_done_ms\": " << stats.batchDoneMs << "}\n";
         return true;
+    }
+
+    // upscalewait <name>: blocks until the runtime upscale's background
+    // threads are idle (Phase 2.22 timings), then writes hdstats as <name>.
+    bool commandUpscalewait(const DevAutomationCommand& command, bool first)
+    {
+        (void)first;
+        auto started = std::chrono::steady_clock::now();
+        hdArtUpscaleWaitIdle();
+        double waited = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+        debugPrint("AUTOMATION: upscalewait %.1f ms\n", waited);
+        return commandHdstats(command, true);
     }
 
     bool commandFadeshot(const DevAutomationCommand& command, bool first)
@@ -1358,6 +1392,7 @@ void hdDevAutomationInit()
     devAutomationRegisterCommand("benchrefresh", commandBenchrefresh);
     devAutomationRegisterCommand("hdcheck", commandHdcheck);
     devAutomationRegisterCommand("hdstats", commandHdstats);
+    devAutomationRegisterCommand("upscalewait", commandUpscalewait);
     devAutomationRegisterCommand("fadeshot", commandFadeshot);
     devAutomationRegisterCommand("perf", commandPerf);
     devAutomationRegisterCommand("worldmap", commandWorldmap);

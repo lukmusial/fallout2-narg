@@ -566,7 +566,9 @@ target_link_libraries(${EXECUTABLE_NAME} ${SDL2_MAIN_LIBRARIES})
 find_package(Threads REQUIRED)
 target_link_libraries(${EXECUTABLE_NAME} Threads::Threads)
 if(NOT MSVC)
-    set_source_files_properties("src/hd_upscale.cc" PROPERTIES COMPILE_OPTIONS "-O2")
+    # (Also the copy the game compiles with Stimpak, see stimpak_attach.)
+    set_source_files_properties("src/hd_upscale.cc" "${CMAKE_BINARY_DIR}/stimpak-tree/src/hd_upscale.cc"
+        PROPERTIES COMPILE_OPTIONS "-O2")
 endif()
 target_include_directories(${EXECUTABLE_NAME} PRIVATE ${SDL2_INCLUDE_DIRS})
 

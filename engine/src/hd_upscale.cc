@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -121,7 +122,7 @@ namespace {
     }
 
     // Per palette index: distance to the nearest different usable entry.
-    void paletteSteps(const unsigned char* palette8, float* steps)
+    void paletteSteps(const float* palette8, float* steps)
     {
         for (int i = 0; i < 256; i++) {
             float best = std::numeric_limits<float>::infinity();
@@ -129,9 +130,9 @@ namespace {
                 if (j >= kCycleFirst && j <= kCycleLast) {
                     continue;
                 }
-                float dr = static_cast<float>(palette8[i * 3]) - palette8[j * 3];
-                float dg = static_cast<float>(palette8[i * 3 + 1]) - palette8[j * 3 + 1];
-                float db = static_cast<float>(palette8[i * 3 + 2]) - palette8[j * 3 + 2];
+                float dr = palette8[i * 3] - palette8[j * 3];
+                float dg = palette8[i * 3 + 1] - palette8[j * 3 + 1];
+                float db = palette8[i * 3 + 2] - palette8[j * 3 + 2];
                 float d = std::sqrt(dr * dr + dg * dg + db * db);
                 if (d > 0.0f && d < best) {
                     best = d;
@@ -628,10 +629,172 @@ namespace {
         (void)n;
     }
 
+    // Ordered dither thresholds (4x4 Bayer), in levels, mean 0.
+    constexpr float kBayer4[16] = {
+        -0.46875f, 0.03125f, -0.34375f, 0.15625f,
+        0.28125f, -0.21875f, 0.40625f, -0.09375f,
+        -0.28125f, 0.21875f, -0.40625f, 0.09375f,
+        0.46875f, -0.03125f, 0.34375f, -0.15625f,
+    };
+
+    // De-banding (precise mode): the 256-colour quantisation leaves smooth
+    // areas as bands one palette step apart. A separable, range-limited
+    // tent filter (radius 8 at 2x, horizontal then vertical, twice) averages
+    // only neighbours within about one palette step of the pixel, so each
+    // band boundary becomes a ramp while edges (jumps of several steps) and
+    // texture stay. `steps`: the palette step per pixel; `valid`: 0 on holes.
+    void deband(Planes& big, const float* steps, const float* valid)
+    {
+        constexpr int R = 8;
+        int w = big.width;
+        int h = big.height;
+        size_t n = static_cast<size_t>(w) * h;
+        Planes tmp;
+        tmp.init(w, h);
+        std::vector<float> invT(n);
+        for (size_t i = 0; i < n; i++) {
+            float t = 1.6f * steps[i];
+            invT[i] = 1.0f / (t * t);
+        }
+        std::vector<float> accR(w);
+        std::vector<float> accG(w);
+        std::vector<float> accB(w);
+        std::vector<float> wsum(w);
+        for (int iteration = 0; iteration < 2; iteration++) {
+            for (int axis = 0; axis < 2; axis++) {
+                const Planes& in = big;
+                for (int y = 0; y < h; y++) {
+                    size_t row = static_cast<size_t>(y) * w;
+                    const float* cr = in.r.data() + row;
+                    const float* cg = in.g.data() + row;
+                    const float* cb = in.b.data() + row;
+                    const float* k = invT.data() + row;
+                    float* ar = accR.data();
+                    float* ag = accG.data();
+                    float* ab = accB.data();
+                    float* ws = wsum.data();
+                    std::fill(accR.begin(), accR.end(), 0.0f);
+                    std::fill(accG.begin(), accG.end(), 0.0f);
+                    std::fill(accB.begin(), accB.end(), 0.0f);
+                    std::fill(wsum.begin(), wsum.end(), 0.0f);
+                    // Tap by tap over the row (vectorises); horizontal taps
+                    // clamp at the row ends, vertical ones at the image's.
+                    for (int d = -R; d <= R; d++) {
+                        float tent = static_cast<float>(R + 1 - (d < 0 ? -d : d));
+                        int dx = axis == 0 ? d : 0;
+                        size_t nrow = axis == 0 ? row : static_cast<size_t>(clampi(y + d, 0, h - 1)) * w;
+                        const float* nr = in.r.data() + nrow;
+                        const float* ng = in.g.data() + nrow;
+                        const float* nb = in.b.data() + nrow;
+                        const float* nv = valid + nrow;
+                        auto tap = [&](int x, int xi) {
+                            float dr = nr[xi] - cr[x];
+                            float dg = ng[xi] - cg[x];
+                            float db = nb[xi] - cb[x];
+                            float range = 1.0f - (dr * dr + dg * dg + db * db) * k[x];
+                            range = range > 0.0f ? range * range : 0.0f;
+                            float wt = tent * range * nv[xi];
+                            ar[x] += wt * nr[xi];
+                            ag[x] += wt * ng[xi];
+                            ab[x] += wt * nb[xi];
+                            ws[x] += wt;
+                        };
+                        int lo = std::min(std::max(0, -dx), w);
+                        int hi = std::max(std::min(w, w - dx), lo);
+                        for (int x = 0; x < lo; x++) {
+                            tap(x, clampi(x + dx, 0, w - 1));
+                        }
+                        for (int x = lo; x < hi; x++) {
+                            float dr = nr[x + dx] - cr[x];
+                            float dg = ng[x + dx] - cg[x];
+                            float db = nb[x + dx] - cb[x];
+                            float range = 1.0f - (dr * dr + dg * dg + db * db) * k[x];
+                            range = range > 0.0f ? range * range : 0.0f;
+                            float wt = tent * range * nv[x + dx];
+                            ar[x] += wt * nr[x + dx];
+                            ag[x] += wt * ng[x + dx];
+                            ab[x] += wt * nb[x + dx];
+                            ws[x] += wt;
+                        }
+                        for (int x = hi; x < w; x++) {
+                            tap(x, clampi(x + dx, 0, w - 1));
+                        }
+                    }
+                    const float* cv = valid + row;
+                    for (int x = 0; x < w; x++) {
+                        size_t c = row + x;
+                        if (ws[x] > 1e-6f && cv[x] != 0.0f) {
+                            float inverse = 1.0f / ws[x];
+                            tmp.r[c] = ar[x] * inverse;
+                            tmp.g[c] = ag[x] * inverse;
+                            tmp.b[c] = ab[x] * inverse;
+                        } else {
+                            tmp.r[c] = cr[x];
+                            tmp.g[c] = cg[x];
+                            tmp.b[c] = cb[x];
+                        }
+                    }
+                }
+                std::swap(big.r, tmp.r);
+                std::swap(big.g, tmp.g);
+                std::swap(big.b, tmp.b);
+            }
+        }
+    }
+
+} // namespace
+
+namespace {
+
+    void upscaleWhole(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8,
+        bool tile, bool precise, HdImage* dest);
+
+    // Rows of source context each strip gets above and below: more than
+    // every stage reaches (de-dither 3, DCCI 2 + 3/2, restoration and
+    // unsharp 3/2, grain 1, de-banding 2 x 8/2; hole filling near opaque
+    // pixels likewise), so the strips' own rows come out exactly as in one
+    // piece. Even, so the ordered dither's phase is kept.
+    constexpr int kStripMargin = 32;
+
 } // namespace
 
 void hdUpscaleScripted(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8,
-    bool tile, HdImage* dest)
+    bool tile, HdImage* dest, int threads, bool precise)
+{
+    if (threads <= 1 || tile || static_cast<long long>(width) * height < 40000 || height < 4 * kStripMargin) {
+        upscaleWhole(indices, width, height, pitch, palette8, tile, precise, dest);
+        return;
+    }
+
+    // Horizontal strips with margins, one thread each.
+    int strips = std::min(threads, std::max(1, height / (2 * kStripMargin)));
+    dest->width = width * kHdScale;
+    dest->height = height * kHdScale;
+    dest->pixels.assign(static_cast<size_t>(dest->width) * dest->height, 0);
+    std::vector<std::thread> workers;
+    for (int strip = 0; strip < strips; strip++) {
+        int y0 = (height * strip / strips) & ~1;
+        int y1 = strip == strips - 1 ? height : (height * (strip + 1) / strips) & ~1;
+        workers.emplace_back([=]() {
+            int top = std::max(0, y0 - kStripMargin);
+            int bottom = std::min(height, y1 + kStripMargin);
+            HdImage part;
+            upscaleWhole(indices + static_cast<size_t>(top) * pitch, width, bottom - top, pitch, palette8, false, precise, &part);
+            size_t rowPixels = static_cast<size_t>(dest->width);
+            memcpy(dest->pixels.data() + static_cast<size_t>(y0) * kHdScale * rowPixels,
+                part.pixels.data() + static_cast<size_t>(y0 - top) * kHdScale * rowPixels,
+                static_cast<size_t>(y1 - y0) * kHdScale * rowPixels * sizeof(uint32_t));
+        });
+    }
+    for (std::thread& worker : workers) {
+        worker.join();
+    }
+}
+
+namespace {
+
+void upscaleWhole(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8,
+    bool tile, bool precise, HdImage* dest)
 {
     dest->width = width * kHdScale;
     dest->height = height * kHdScale;
@@ -657,6 +820,14 @@ void hdUpscaleScripted(const unsigned char* indices, int width, int height, int 
         }
     }
 
+    // Palette: 8-bit entries as the Python uses them, or (precise) the
+    // game's 6-bit values expanded at full precision, v * 255 / 63, kept as
+    // floats through every step (finer than 16 bits per channel).
+    float palette[256 * 3];
+    for (int i = 0; i < 256 * 3; i++) {
+        palette[i] = precise ? (palette8[i] >> 2) * (255.0f / 63.0f) : static_cast<float>(palette8[i]);
+    }
+
     size_t n = static_cast<size_t>(w) * h;
     std::vector<unsigned char> holes(n);
     std::vector<float> valid(n);
@@ -666,14 +837,14 @@ void hdUpscaleScripted(const unsigned char* indices, int width, int height, int 
         unsigned char index = work[i];
         holes[i] = isHole(index) ? 1 : 0;
         valid[i] = holes[i] ? 0.0f : 1.0f;
-        rgb.r[i] = palette8[index * 3];
-        rgb.g[i] = palette8[index * 3 + 1];
-        rgb.b[i] = palette8[index * 3 + 2];
+        rgb.r[i] = palette[index * 3];
+        rgb.g[i] = palette[index * 3 + 1];
+        rgb.b[i] = palette[index * 3 + 2];
     }
     fillHoles(rgb, holes);
 
     float steps[256];
-    paletteSteps(palette8, steps);
+    paletteSteps(palette, steps);
     std::vector<float> invS2(n);
     for (size_t i = 0; i < n; i++) {
         float sigma = 1.1f * steps[work[i]];
@@ -708,6 +879,15 @@ void hdUpscaleScripted(const unsigned char* indices, int width, int height, int 
             }
         }
         restoreGradients(big, invS2Big.data(), validBig.data());
+        if (precise) {
+            // Palette steps per 2x pixel (reuse the sigma buffer).
+            for (int y = 0; y < hh; y++) {
+                for (int x = 0; x < ww; x++) {
+                    invS2Big[static_cast<size_t>(y) * ww + x] = steps[work[static_cast<size_t>(y / 2) * w + x / 2]];
+                }
+            }
+            deband(big, invS2Big.data(), validBig.data());
+        }
     }
 
     // Grain: what the de-dither removed, bilinear 2x (weights 3/4, 1/4).
@@ -759,7 +939,11 @@ void hdUpscaleScripted(const unsigned char* indices, int width, int height, int 
                 continue;
             }
             size_t i = bigRow + x;
-            auto channel = [](float v) {
+            // Precise: a 4x4 ordered dither (+-0.5 level) before rounding,
+            // so the smooth ramps do not band again at 8 bits.
+            float bias = precise ? kBayer4[(y & 3) * 4 + (x & 3)] : 0.0f;
+            auto channel = [bias](float v) {
+                v += bias;
                 v = v < 0.0f ? 0.0f : (v > 255.0f ? 255.0f : v);
                 return static_cast<uint32_t>(std::nearbyint(v));
             };
@@ -768,7 +952,10 @@ void hdUpscaleScripted(const unsigned char* indices, int width, int height, int 
     }
 }
 
-uint64_t hdUpscaleKey(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8, bool tile)
+} // namespace
+
+uint64_t hdUpscaleKey(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8, bool tile,
+    bool precise)
 {
     uint64_t hash = 0xcbf29ce484222325ull;
     auto feed = [&](const void* data, size_t size) {
@@ -778,7 +965,7 @@ uint64_t hdUpscaleKey(const unsigned char* indices, int width, int height, int p
             hash *= 0x100000001b3ull;
         }
     };
-    int32_t header[4] = { kHdUpscaleVersion, width, height, tile ? 1 : 0 };
+    int32_t header[4] = { kHdUpscaleVersion, width, height, (tile ? 1 : 0) | (precise ? 2 : 0) };
     feed(header, sizeof(header));
     feed(palette8, 256 * 3);
     for (int y = 0; y < height; y++) {
@@ -800,13 +987,20 @@ namespace {
         return sub + "/" + name + ".rgba";
     }
 
+    // Creates `path` and any missing parents.
     void makeDir(const std::string& path)
     {
+        for (size_t at = 1; at <= path.size(); at++) {
+            if (at < path.size() && path[at] != '/' && path[at] != '\\') {
+                continue;
+            }
+            std::string part = path.substr(0, at);
 #ifdef _WIN32
-        _mkdir(path.c_str());
+            _mkdir(part.c_str());
 #else
-        mkdir(path.c_str(), 0755);
+            mkdir(part.c_str(), 0755);
 #endif
+        }
     }
 
     constexpr uint32_t kCacheMagic = 0x31554448; // "HDU1"
@@ -836,7 +1030,6 @@ bool hdUpscaleCacheWrite(const std::string& dir, uint64_t key, const HdImage& im
 {
     std::string subdir;
     std::string path = cachePath(dir, key, &subdir);
-    makeDir(dir);
     makeDir(subdir);
 
     static std::atomic<unsigned int> counter { 0 };
@@ -888,6 +1081,7 @@ void HdUpscalePool::stop()
         std::lock_guard<std::mutex> lock(mutex_);
         stopping_ = true;
         queue_.clear();
+        later_.clear();
         for (auto it = entries_.begin(); it != entries_.end();) {
             if (it->second.state == State::Queued) {
                 it = entries_.erase(it);
@@ -903,6 +1097,7 @@ void HdUpscalePool::stop()
     workers_.clear();
     std::lock_guard<std::mutex> lock(mutex_);
     entries_.clear();
+    done_.clear();
     running_ = 0;
 }
 
@@ -916,8 +1111,9 @@ void HdUpscalePool::submit(HdUpscaleJob job)
         std::string key = job.key;
         Entry& entry = entries_[key];
         entry.state = State::Queued;
+        bool urgent = job.urgent;
         entry.job = std::make_unique<HdUpscaleJob>(std::move(job));
-        queue_.push_back(key);
+        (urgent ? queue_ : later_).push_back(key);
         stats_.submitted++;
     }
     workAvailable_.notify_one();
@@ -926,13 +1122,15 @@ void HdUpscalePool::submit(HdUpscaleJob job)
 void HdUpscalePool::cancelQueued()
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    for (const std::string& key : queue_) {
-        auto found = entries_.find(key);
-        if (found != entries_.end() && found->second.state == State::Queued) {
-            entries_.erase(found);
+    for (std::deque<std::string>* list : { &queue_, &later_ }) {
+        for (const std::string& key : *list) {
+            auto found = entries_.find(key);
+            if (found != entries_.end() && found->second.state == State::Queued) {
+                entries_.erase(found);
+            }
         }
+        list->clear();
     }
-    queue_.clear();
 }
 
 std::shared_ptr<HdImage> HdUpscalePool::take(const std::string& key)
@@ -963,7 +1161,8 @@ std::shared_ptr<HdImage> HdUpscalePool::take(const std::string& key)
         // Queued: run it here.
         job = std::move(found->second.job);
         entries_.erase(found);
-        queue_.erase(std::remove(queue_.begin(), queue_.end(), key), queue_.end());
+        std::deque<std::string>& list = job->urgent ? queue_ : later_;
+        list.erase(std::remove(list.begin(), list.end(), key), list.end());
     }
     return run(*job, true);
 }
@@ -973,14 +1172,18 @@ void HdUpscalePool::drain(const std::function<void(const std::string&, std::shar
     std::vector<std::pair<std::string, std::shared_ptr<HdImage>>> done;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        for (auto it = entries_.begin(); it != entries_.end();) {
-            if (it->second.state == State::Done) {
-                done.emplace_back(it->first, std::move(it->second.image));
-                it = entries_.erase(it);
-            } else {
-                ++it;
+        if (done_.empty()) {
+            return;
+        }
+        for (const std::string& key : done_) {
+            // Taken meanwhile (take()) when no longer there.
+            auto found = entries_.find(key);
+            if (found != entries_.end() && found->second.state == State::Done) {
+                done.emplace_back(key, std::move(found->second.image));
+                entries_.erase(found);
             }
         }
+        done_.clear();
     }
     for (auto& entry : done) {
         if (entry.second != nullptr) {
@@ -992,13 +1195,13 @@ void HdUpscalePool::drain(const std::function<void(const std::string&, std::shar
 int HdUpscalePool::pending()
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    return static_cast<int>(queue_.size()) + running_;
+    return static_cast<int>(queue_.size() + later_.size()) + running_;
 }
 
 void HdUpscalePool::waitIdle()
 {
     std::unique_lock<std::mutex> lock(mutex_);
-    jobDone_.wait(lock, [&]() { return queue_.empty() && running_ == 0; });
+    jobDone_.wait(lock, [&]() { return queue_.empty() && later_.empty() && running_ == 0; });
 }
 
 HdUpscaleStats HdUpscalePool::stats()
@@ -1012,7 +1215,7 @@ std::shared_ptr<HdImage> HdUpscalePool::run(const HdUpscaleJob& job, bool inline
     auto image = std::make_shared<HdImage>();
     uint64_t key = 0;
     if (!cacheDir_.empty()) {
-        key = hdUpscaleKey(job.indices.data(), job.width, job.height, job.width, job.palette8, job.tile);
+        key = hdUpscaleKey(job.indices.data(), job.width, job.height, job.width, job.palette8, job.tile, job.precise);
         if (hdUpscaleCacheRead(cacheDir_, key, image.get())
             && image->width == job.width * kHdScale && image->height == job.height * kHdScale) {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -1021,8 +1224,14 @@ std::shared_ptr<HdImage> HdUpscalePool::run(const HdUpscaleJob& job, bool inline
         }
     }
 
+    // A caller waiting for the frame splits a large one over the cores.
+    int threads = 1;
+    if (inlineRun) {
+        threads = std::min(std::max(static_cast<int>(std::thread::hardware_concurrency()), 1), 8);
+    }
     auto started = std::chrono::steady_clock::now();
-    hdUpscaleScripted(job.indices.data(), job.width, job.height, job.width, job.palette8, job.tile, image.get());
+    hdUpscaleScripted(job.indices.data(), job.width, job.height, job.width, job.palette8, job.tile, image.get(), threads,
+        job.precise);
     double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
 
     bool wrote = !cacheDir_.empty() && hdUpscaleCacheWrite(cacheDir_, key, *image);
@@ -1044,12 +1253,13 @@ void HdUpscalePool::workerMain()
 {
     std::unique_lock<std::mutex> lock(mutex_);
     while (true) {
-        workAvailable_.wait(lock, [&]() { return stopping_ || !queue_.empty(); });
+        workAvailable_.wait(lock, [&]() { return stopping_ || !queue_.empty() || !later_.empty(); });
         if (stopping_) {
             return;
         }
-        std::string key = std::move(queue_.front());
-        queue_.pop_front();
+        std::deque<std::string>& list = !queue_.empty() ? queue_ : later_;
+        std::string key = std::move(list.front());
+        list.pop_front();
         auto found = entries_.find(key);
         if (found == entries_.end() || found->second.state != State::Queued) {
             continue;
@@ -1063,10 +1273,14 @@ void HdUpscalePool::workerMain()
 
         lock.lock();
         running_--;
+        if (running_ == 0 && queue_.empty() && later_.empty()) {
+            stats_.idleSince = std::chrono::steady_clock::now();
+        }
         auto entry = entries_.find(key);
         if (entry != entries_.end()) {
             entry->second.state = State::Done;
             entry->second.image = std::move(image);
+            done_.push_back(key);
         }
         jobDone_.notify_all();
     }

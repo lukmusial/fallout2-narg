@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -45,14 +46,25 @@ constexpr int kHdUpscaleTilePad = 8;
 
 // `indices` (width x height, row pitch `pitch`), `palette8` 256 RGB entries
 // (8 bits per channel); `tile` for floor/roof tiles. `dest` is 2x the size,
-// pixels 0xAARRGGBB (alpha 0 or 255).
+// pixels 0xAARRGGBB (alpha 0 or 255). With `threads` > 1 a large image is
+// split into horizontal strips (with enough overlap that the result is the
+// same) upscaled on that many threads.
+//
+// `precise` (the palette boost, `[graphics] hd_upscale_precision=16`): the
+// palette's 6-bit values (palette8 >> 2: the engine's colorExpand6 and the
+// tools' << 2 both keep them) are expanded at full precision, v * 255 / 63,
+// and every step works on floats (finer than 16 bits per channel); a
+// de-banding pass turns the one-palette-step bands of smooth areas into
+// ramps (edges of several steps stay), and the result is rounded to 8 bits
+// with a light 4x4 ordered dither. Without it the output is the Python's
+// (8-bit palette, no de-banding, plain rounding).
 void hdUpscaleScripted(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8,
-    bool tile, HdImage* dest);
+    bool tile, HdImage* dest, int threads = 1, bool precise = false);
 
 // FNV-1a 64 of everything the output depends on (pixels, size, palette, tile
 // flag, algorithm version): the disk cache key.
 uint64_t hdUpscaleKey(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8,
-    bool tile);
+    bool tile, bool precise = false);
 
 // Disk cache files: <dir>/<xx>/<key>.rgba (raw 0xAARRGGBB after a small
 // header). Safe from any thread (plain stdio, write to a temporary name and
@@ -71,7 +83,11 @@ struct HdUpscaleJob {
     int height = 0;
     unsigned char palette8[256 * 3];
     bool tile = false;
+    // Urgent jobs (the frames likely drawn first) are taken before others.
+    bool urgent = false;
+    bool precise = false; // hdUpscaleScripted's palette boost
 };
+
 
 struct HdUpscaleStats {
     unsigned long long submitted = 0;
@@ -82,6 +98,8 @@ struct HdUpscaleStats {
     unsigned long long waited = 0; // a caller waited for a running job
     double computeMs = 0; // summed over threads
     unsigned long long outputPixels = 0;
+    // When the pool last ran out of work (nothing queued or running).
+    std::chrono::steady_clock::time_point idleSince;
 };
 
 class HdUpscalePool {
@@ -142,7 +160,9 @@ private:
     std::mutex mutex_;
     std::condition_variable workAvailable_;
     std::condition_variable jobDone_;
-    std::deque<std::string> queue_;
+    std::deque<std::string> queue_; // urgent jobs
+    std::deque<std::string> later_; // the others
+    std::vector<std::string> done_; // finished since the last drain
     std::unordered_map<std::string, Entry> entries_;
     int running_ = 0;
     bool stopping_ = false;

@@ -3319,32 +3319,35 @@ void _obj_preload_art_cache(MapHeaderFlags flags)
         v11++;
     }
 
-    CacheEntry* cache_handle;
-    if (artLock(FrmId(*gObjectFids), &cache_handle) != nullptr) {
-        artUnlock(cache_handle);
-    }
+    // CE: while each art is locked here, the HD runtime upscale (Phase 2.22)
+    // queues its frames for the background threads.
+    hdArtPreupscaleMapBegin();
+    auto preload = [](const FrmId& frmId) {
+        CacheEntry* cache_handle;
+        Art* art = artLock(frmId, &cache_handle);
+        if (art != nullptr) {
+            hdArtPreupscaleArt(frmId.filePath(), art);
+            artUnlock(cache_handle);
+        }
+    };
+
+    preload(FrmId(*gObjectFids));
 
     for (int i = 1; i < v11; i++) {
         if (gObjectFids[i - 1] != gObjectFids[i]) {
-            if (artLock(FrmId(gObjectFids[i]), &cache_handle) != nullptr) {
-                artUnlock(cache_handle);
-            }
+            preload(FrmId(gObjectFids[i]));
         }
     }
 
     for (int i = FrmId::kMinFrameId; i <= FrmId::kMaxFrameId; i++) {
         if (arr[i] != 0) {
-            if (artLock(static_cast<TileFrameId>(i), &cache_handle) != nullptr) {
-                artUnlock(cache_handle);
-            }
+            preload(FrmId(static_cast<TileFrameId>(i)));
         }
     }
 
     for (int i = v11; i < gObjectFidsLength; i++) {
         if (gObjectFids[i - 1] != gObjectFids[i]) {
-            if (artLock(FrmId(gObjectFids[i]), &cache_handle) != nullptr) {
-                artUnlock(cache_handle);
-            }
+            preload(FrmId(gObjectFids[i]));
         }
     }
 
@@ -4820,9 +4823,10 @@ unsigned int objectHdCutOutDraws()
     return gObjectHd.cutOutDraws;
 }
 
-static bool objectHdIsHdType(ObjectType type)
+bool objectHdIsHdType(int type)
 {
-    return type == OBJ_TYPE_ITEM || type == OBJ_TYPE_SCENERY || type == OBJ_TYPE_WALL;
+    return type == OBJ_TYPE_ITEM || type == OBJ_TYPE_SCENERY || type == OBJ_TYPE_WALL
+        || (type == OBJ_TYPE_CRITTER && hdArtUpscalesCritters());
 }
 
 static uint32_t objectHdPaletteColor(const unsigned char* basePalette8, Color color)

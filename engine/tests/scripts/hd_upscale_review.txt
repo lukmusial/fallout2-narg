@@ -1,0 +1,18 @@
+# Phase 2.22 review captures (use with --dev-load-game=N, hd=1): the map
+# after the background upscale is done, the inventory and the character
+# screen (tools/dev/runtime_upscale_screens.py).
+until game 30000
+upscalewait stats
+wait 1500
+fbshot game
+key i
+wait 1500
+fbshot inventory
+key esc
+wait 1000
+key c
+wait 1500
+fbshot character
+key esc
+wait 500
+quit 0

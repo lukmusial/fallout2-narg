@@ -285,6 +285,12 @@ void initSettingsRegistry(bool isMapper)
     SETTING(hd_ground_variants);
     SETTING(hd_shot_light);
     SETTING(hd_wind);
+    SETTING(hd_upscale);
+    SETTING(hd_upscale_critters);
+    SETTING(hd_upscale_preload);
+    SETTING(hd_upscale_cache);
+    SETTING_P(hd_upscale_threads, clamp(0, 64));
+    SETTING_P(hd_upscale_precision, clamp(8, 16));
     SETTING(smooth_scroll);
     SETTING_P(scroll_speed, clamp(25, 400));
     SETTING(zoom);

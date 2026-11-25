@@ -14,6 +14,12 @@
 
 #include <stdio.h>
 #include <string.h>
+#ifdef _WIN32
+#include <direct.h>
+#define rmdir _rmdir
+#else
+#include <unistd.h>
+#endif
 
 #include <chrono>
 #include <cmath>
@@ -107,14 +113,18 @@ static std::vector<Fixture> loadFixtures()
     return list;
 }
 
-static void testAgainstPython(const std::vector<Fixture>& fixtures)
+// `precise`: the palette boost; the Python reference is 8-bit, so that
+// output differs from it on purpose (reported, loosely checked).
+static void testAgainstPython(const std::vector<Fixture>& fixtures, bool precise)
 {
+    printf("%s\n", precise ? "palette boost (precision 16) vs the 8-bit Python reference:" : "precision 8 vs the Python reference:");
     printf("%-20s %9s %8s %7s %9s %9s\n", "fixture", "size", "PSNR dB", "max err", "off>2 %", "alpha");
     double worstPsnr = 1e9;
     int worstMax = 0;
     for (const Fixture& fixture : fixtures) {
         HdImage image;
-        hdUpscaleScripted(fixture.indices.data(), fixture.width, fixture.height, fixture.width, fixture.palette, fixture.tile, &image);
+        hdUpscaleScripted(fixture.indices.data(), fixture.width, fixture.height, fixture.width, fixture.palette, fixture.tile, &image,
+            1, precise);
         CHECK(image.width == static_cast<int>(fixture.width * 2));
         CHECK(image.height == static_cast<int>(fixture.height * 2));
 
@@ -155,8 +165,12 @@ static void testAgainstPython(const std::vector<Fixture>& fixtures)
         printf("%-20s %9s %8.2f %7d %9.3f %9zu\n", fixture.name.c_str(), size, psnr, maxError,
             samples > 0 ? 100.0 * off / (samples / 3) : 0.0, alphaMismatch);
         CHECK(alphaMismatch == 0);
-        CHECK(psnr >= 40.0);
-        CHECK(maxError <= 24);
+        if (precise) {
+            CHECK(psnr >= 28.0);
+        } else {
+            CHECK(psnr >= 40.0);
+            CHECK(maxError <= 24);
+        }
         worstPsnr = std::min(worstPsnr, psnr);
         worstMax = std::max(worstMax, maxError);
     }
@@ -204,6 +218,126 @@ static void testDeterministicAndKey(const std::vector<Fixture>& fixtures)
     CHECK(allClear);
 }
 
+// The palette boost on a synthetic banded gradient: grey ramp of 6-bit
+// levels 10..41, each level a band 6 pixels wide. Precision 8 keeps the
+// steps (one palette step, ~4 levels, at each band edge, partly split in
+// two by the gradient restoration); precision 16 must give a monotonic ramp
+// without band edges. A jump of several steps (an edge) stays
+// sharp in both.
+static void testBandedGradient()
+{
+    unsigned char palette[256 * 3] = {};
+    for (int level = 0; level < 64; level++) {
+        int index = 1 + level;
+        unsigned char v = static_cast<unsigned char>((level << 2) | (level >> 4));
+        palette[index * 3] = palette[index * 3 + 1] = palette[index * 3 + 2] = v;
+    }
+    const int bandWidth = 6;
+    const int bands = 32;
+    const int width = bandWidth * bands;
+    const int height = 48;
+    std::vector<unsigned char> indices(static_cast<size_t>(width) * height);
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            indices[static_cast<size_t>(y) * width + x] = static_cast<unsigned char>(1 + 10 + x / bandWidth);
+        }
+    }
+
+    for (int mode = 0; mode < 2; mode++) {
+        bool precise = mode == 1;
+        HdImage image;
+        hdUpscaleScripted(indices.data(), width, height, width, palette, false, &image, 1, precise);
+        // Column profile over the middle rows (averages the dither out),
+        // away from the image's left and right ends.
+        std::vector<double> profile(image.width, 0.0);
+        int rows = 0;
+        for (int y = image.height / 4; y < image.height * 3 / 4; y++, rows++) {
+            for (int x = 0; x < image.width; x++) {
+                profile[x] += (image.pixels[static_cast<size_t>(y) * image.width + x] >> 8) & 0xFF;
+            }
+        }
+        // Bins of 4 columns (the ordered dither's period); a band is 3 bins.
+        double maxStep = 0.0;
+        double minStep = 1e9;
+        auto bin = [&](int b) {
+            double sum = 0.0;
+            for (int x = b * 4; x < b * 4 + 4; x++) {
+                sum += profile[x];
+            }
+            return sum / (4.0 * rows);
+        };
+        int binsCount = image.width / 4;
+        for (int b = 7; b < binsCount - 6; b++) {
+            double step = bin(b) - bin(b - 1);
+            maxStep = std::max(maxStep, step);
+            minStep = std::min(minStep, step);
+        }
+        printf("banded gradient, precision %d: steps between 4-pixel bins %.2f .. %.2f levels (even ramp 1.35; a band edge is %.2f)\n",
+            precise ? 16 : 8, minStep, maxStep, 255.0 / 63.0);
+        if (precise) {
+            CHECK(minStep >= 0.0); // monotonic
+            // No band edge left (one is ~4.05 levels). Not perfectly even:
+            // neighbours two palette steps away are an edge to the filter.
+            CHECK(maxStep <= 2.5);
+        } else {
+            CHECK(maxStep >= 2.8); // the 8-bit path keeps visible steps
+        }
+    }
+
+    // Edge: two flat areas 8 palette steps apart stay separated by a short
+    // transition.
+    std::vector<unsigned char> edge(static_cast<size_t>(64) * 32);
+    for (int y = 0; y < 32; y++) {
+        for (int x = 0; x < 64; x++) {
+            edge[static_cast<size_t>(y) * 64 + x] = static_cast<unsigned char>(x < 32 ? 1 + 20 : 1 + 28);
+        }
+    }
+    HdImage image;
+    hdUpscaleScripted(edge.data(), 64, 32, 64, palette, false, &image, 1, true);
+    int lo = palette[(1 + 20) * 3];
+    int hi = palette[(1 + 28) * 3];
+    int mid = 32;
+    int transition = 0;
+    for (int x = 0; x < image.width; x++) {
+        int v = (image.pixels[static_cast<size_t>(mid) * image.width + x] >> 8) & 0xFF;
+        if (v > lo + 2 && v < hi - 2) {
+            transition++;
+        }
+    }
+    printf("edge of 8 palette steps, precision 16: %d transition pixels at 2x\n", transition);
+    CHECK(transition <= 4);
+}
+
+// Large frames split into strips on several threads come out the same as in
+// one piece.
+static void testStrips(const std::vector<Fixture>& fixtures)
+{
+    for (const Fixture& fixture : fixtures) {
+        if (fixture.tile) {
+            continue;
+        }
+        // 3x3 copies of the fixture: large enough to be split.
+        int width = fixture.width * 3;
+        int height = fixture.height * 3;
+        std::vector<unsigned char> big(static_cast<size_t>(width) * height);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                big[static_cast<size_t>(y) * width + x] = fixture.indices[(y % fixture.height) * fixture.width + (x % fixture.width)];
+            }
+        }
+        HdImage whole;
+        HdImage split;
+        hdUpscaleScripted(big.data(), width, height, width, fixture.palette, false, &whole, 1, true);
+        auto start = std::chrono::steady_clock::now();
+        hdUpscaleScripted(big.data(), width, height, width, fixture.palette, false, &split, 8, true);
+        double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        CHECK(split.width == whole.width && split.height == whole.height);
+        CHECK(split.pixels == whole.pixels);
+        printf("strips: %s x9 (%dx%d) identical: %s, %.1f ms on 8 threads\n", fixture.name.c_str(), width, height,
+            split.pixels == whole.pixels ? "yes" : "NO", ms);
+    }
+}
+
 static void testDiskCache(const std::vector<Fixture>& fixtures)
 {
     std::string dir = "hd_upscale_test_cache";
@@ -216,6 +350,13 @@ static void testDiskCache(const std::vector<Fixture>& fixtures)
     CHECK(hdUpscaleCacheRead(dir, key, &back));
     CHECK(back.width == image.width && back.height == image.height && back.pixels == image.pixels);
     CHECK(!hdUpscaleCacheRead(dir, key ^ 1, &back));
+
+    char name[64];
+    snprintf(name, sizeof(name), "%016llx", static_cast<unsigned long long>(key));
+    std::string sub = dir + "/" + std::string(name, 2);
+    remove((sub + "/" + name + ".rgba").c_str());
+    rmdir(sub.c_str());
+    rmdir(dir.c_str());
 }
 
 static HdUpscaleJob makeJob(const Fixture& fixture, const std::string& key)
@@ -227,6 +368,7 @@ static HdUpscaleJob makeJob(const Fixture& fixture, const std::string& key)
     job.height = fixture.height;
     memcpy(job.palette8, fixture.palette, sizeof(job.palette8));
     job.tile = fixture.tile;
+    job.precise = true;
     return job;
 }
 
@@ -239,13 +381,28 @@ static void testPoolAndSpeed(const std::vector<Fixture>& fixtures)
     do {
         for (const Fixture& fixture : fixtures) {
             HdImage image;
-            hdUpscaleScripted(fixture.indices.data(), fixture.width, fixture.height, fixture.width, fixture.palette, fixture.tile, &image);
+            hdUpscaleScripted(fixture.indices.data(), fixture.width, fixture.height, fixture.width, fixture.palette, fixture.tile, &image,
+                1, true);
             pixels += image.pixels.size();
         }
         rounds++;
     } while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < 1.0);
     double single = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - start).count() / pixels;
-    printf("single thread: %.1f ns per output pixel (%d rounds)\n", single, rounds);
+    printf("single thread (precision 16): %.1f ns per output pixel (%d rounds)\n", single, rounds);
+    {
+        size_t pixels8 = 0;
+        auto start8 = std::chrono::steady_clock::now();
+        for (int round = 0; round < rounds; round++) {
+            for (const Fixture& fixture : fixtures) {
+                HdImage image;
+                hdUpscaleScripted(fixture.indices.data(), fixture.width, fixture.height, fixture.width, fixture.palette, fixture.tile,
+                    &image, 1, false);
+                pixels8 += image.pixels.size();
+            }
+        }
+        printf("single thread (precision 8): %.1f ns per output pixel\n",
+            std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - start8).count() / pixels8);
+    }
 
     // Pool: the same frames many times over, all threads.
     HdUpscalePool pool;
@@ -254,7 +411,8 @@ static void testPoolAndSpeed(const std::vector<Fixture>& fixtures)
     std::vector<HdImage> reference;
     for (const Fixture& fixture : fixtures) {
         HdImage image;
-        hdUpscaleScripted(fixture.indices.data(), fixture.width, fixture.height, fixture.width, fixture.palette, fixture.tile, &image);
+        hdUpscaleScripted(fixture.indices.data(), fixture.width, fixture.height, fixture.width, fixture.palette, fixture.tile, &image,
+            1, true);
         reference.push_back(std::move(image));
     }
     int copies = 12;
@@ -279,7 +437,7 @@ static void testPoolAndSpeed(const std::vector<Fixture>& fixtures)
         }
     }
     CHECK(matched == copies * static_cast<int>(fixtures.size()));
-    printf("pool (%d threads): %.1f ns per output pixel\n", pool.threadCount(), seconds * 1e9 / std::max<size_t>(poolPixels, 1));
+    printf("pool (%d threads, precision 16): %.1f ns per output pixel\n", pool.threadCount(), seconds * 1e9 / std::max<size_t>(poolPixels, 1));
 
     // take() of a queued job runs it on the caller; unknown keys give null.
     CHECK(pool.take("missing") == nullptr);
@@ -294,8 +452,11 @@ int main()
 {
     std::vector<Fixture> fixtures = loadFixtures();
     if (!fixtures.empty()) {
-        testAgainstPython(fixtures);
+        testAgainstPython(fixtures, false);
+        testAgainstPython(fixtures, true);
+        testBandedGradient();
         testDeterministicAndKey(fixtures);
+        testStrips(fixtures);
         testDiskCache(fixtures);
         testPoolAndSpeed(fixtures);
     }

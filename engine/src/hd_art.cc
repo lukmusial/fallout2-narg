@@ -4,8 +4,10 @@
 #include <string.h>
 
 #include <algorithm>
+#include <chrono>
 #include <list>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "art.h"
@@ -13,6 +15,8 @@
 #include "db.h"
 #include "debug.h"
 #include "hd_format.h"
+#include "hd_upscale.h"
+#include "platform_compat.h"
 #include "memory.h"
 #include "settings.h"
 #include "stimpak.h"
@@ -73,6 +77,31 @@ namespace {
         std::unordered_map<std::string, std::unordered_map<std::string, uint64_t>> runningHashes;
         int legacyChecked = 0;
         int legacyRejected = 0;
+
+        // Runtime scripted upscale (Phase 2.22): frames without a pack
+        // image. Results live in the LRU above ("rt<palette>:" keys).
+        HdUpscalePool pool;
+        bool poolStarted = false;
+        unsigned char palette8[256 * 3] = {};
+        bool paletteKnown = false;
+        std::string paletteTag;
+        // Art paths whose legacy art cannot be read (no runtime image).
+        std::unordered_set<std::string> runtimeMissing;
+        // Frames (frameKey "hd:") drawn from the runtime upscale.
+        std::unordered_set<std::string> runtimeServed;
+        unsigned long long runtimeInline = 0; // upscaled on first draw
+        double runtimeInlineMs = 0;
+        double runtimeInlineMaxMs = 0;
+        unsigned long long runtimeFromPool = 0; // ready (or finished) in the background
+        double runtimeTakeMs = 0; // main-thread time getting those (waiting, or running a queued one)
+        unsigned long long preupscaleQueued = 0;
+        // The last batch queued (start of the game, map load): when, how
+        // many frames, main-thread time spent queueing them.
+        std::chrono::steady_clock::time_point batchStart;
+        bool batchActive = false;
+        int batchQueued = 0;
+        double batchQueueMs = 0;
+        std::string batchName;
     };
 
     HdArtState gHdArt;
@@ -142,6 +171,7 @@ namespace {
         gHdArt.runningHashes.clear();
         gHdArt.legacyChecked = 0;
         gHdArt.legacyRejected = 0;
+        gHdArt.runtimeServed.clear();
     }
 
     void ensureInitialized()
@@ -406,6 +436,315 @@ namespace {
         return std::string(prefix) + path + "#" + std::to_string(direction) + "/" + std::to_string(frame);
     }
 
+    // The pack to draw a frame from: the first with an image of it made from
+    // the running game's frame; empty when none. Decided once per frame.
+    const std::string& pickPack(const std::string& path, int frame, int direction)
+    {
+        static const std::string kNone;
+        const std::vector<std::string>& packs = packsForAsset(path);
+        bool inPack = false;
+        for (const std::string& pack : packs) {
+            if (resolveAsset(pack, path).kind != AssetKind::None) {
+                inPack = true;
+                break;
+            }
+        }
+        if (!inPack) {
+            return kNone;
+        }
+
+        std::string key = frameKey("hd:", path, frame, direction);
+        auto chosen = gHdArt.framePacks.find(key);
+        if (chosen == gHdArt.framePacks.end()) {
+            std::string pick;
+            bool rejected = false;
+            for (const std::string& pack : packs) {
+                Asset& candidate = resolveAsset(pack, path);
+                if (!assetHasFrame(candidate, frame, direction)) {
+                    continue;
+                }
+                if (legacyFrameMatches(candidate, pack, path, frame, direction)) {
+                    pick = pack;
+                    break;
+                }
+                rejected = true;
+            }
+            if (pick.empty() && rejected) {
+                gHdArt.legacyRejected++;
+                debugPrint("HD: no pack has an image of %s (direction %d, frame %d) as the game draws it; drawing the game's own frame\n",
+                    path.c_str(), direction, frame);
+            }
+            chosen = gHdArt.framePacks.emplace(key, pick).first;
+        }
+        return chosen->second;
+    }
+
+    // --- runtime scripted upscale (Phase 2.22) ---------------------------------
+
+    bool runtimeEnabled()
+    {
+        return settings.graphics.hd && !gHdArt.pack.empty()
+            && compat_stricmp(settings.graphics.hd_upscale.c_str(), "scripted") == 0;
+    }
+
+    // Whether frames of `path` (normalised) without a pack image are
+    // upscaled at runtime: legacy art only (not the packs' ground variants),
+    // critters only with hd_upscale_critters.
+    bool runtimeAllowed(const std::string& path)
+    {
+        if (!runtimeEnabled() || path.compare(0, 4, "art/") != 0) {
+            return false;
+        }
+        if (path.compare(0, 19, "art/tiles/variants/") == 0) {
+            return false;
+        }
+        if (path.compare(0, 13, "art/critters/") == 0 && !settings.graphics.hd_upscale_critters) {
+            return false;
+        }
+        return true;
+    }
+
+    bool isTilePath(const std::string& path)
+    {
+        return path.compare(0, 10, "art/tiles/") == 0;
+    }
+
+    // The base palette (8 bits per channel) and a short tag naming it, part
+    // of every runtime key: art shown through another palette (the death
+    // screen, endings) is upscaled again with it.
+    const std::string& currentPalette(unsigned char* palette8)
+    {
+        unsigned char now[256 * 3];
+        for (int index = 0; index < 256 * 3; index++) {
+            now[index] = colorExpand6(_cmap[index]);
+        }
+        if (!gHdArt.paletteKnown || memcmp(now, gHdArt.palette8, sizeof(now)) != 0) {
+            memcpy(gHdArt.palette8, now, sizeof(now));
+            gHdArt.paletteKnown = true;
+            uint64_t hash = 0xcbf29ce484222325ull;
+            for (unsigned char byte : now) {
+                hash = (hash ^ byte) * 0x100000001b3ull;
+            }
+            char tag[24];
+            snprintf(tag, sizeof(tag), "%08x", static_cast<unsigned int>(hash ^ (hash >> 32)));
+            gHdArt.paletteTag = tag;
+        }
+        memcpy(palette8, gHdArt.palette8, sizeof(now));
+        return gHdArt.paletteTag;
+    }
+
+    std::string runtimeKey(const std::string& tag, const std::string& path, int frame, int direction)
+    {
+        return frameKey(("rt" + tag + ":").c_str(), path, frame, direction);
+    }
+
+    void ensurePool()
+    {
+        if (gHdArt.poolStarted) {
+            return;
+        }
+        gHdArt.poolStarted = true;
+        std::string cacheDir;
+        if (settings.graphics.hd_upscale_cache) {
+            cacheDir = settings.system.master_patches_path + "/hd/cache";
+        }
+        gHdArt.pool.start(settings.graphics.hd_upscale_threads, cacheDir);
+        debugPrint("HD: runtime upscale: %d background thread(s), disk cache %s\n", gHdArt.pool.threadCount(),
+            cacheDir.empty() ? "off" : cacheDir.c_str());
+    }
+
+    // Frames the background threads finished go into the LRU.
+    void drainPool()
+    {
+        if (!gHdArt.poolStarted) {
+            return;
+        }
+        gHdArt.pool.drain([](const std::string& key, std::shared_ptr<HdImage> image) {
+            if (gHdArt.frames.find(key) == gHdArt.frames.end()) {
+                cachePut(key, std::move(image));
+            }
+        });
+    }
+
+    HdUpscaleJob makeJob(const std::string& key, const std::string& path, const unsigned char* data, int width, int height,
+        int pitch, const unsigned char* palette8)
+    {
+        HdUpscaleJob job;
+        job.key = key;
+        job.width = width;
+        job.height = height;
+        job.indices.resize(static_cast<size_t>(width) * height);
+        for (int y = 0; y < height; y++) {
+            memcpy(job.indices.data() + static_cast<size_t>(y) * width, data + static_cast<size_t>(y) * pitch, width);
+        }
+        memcpy(job.palette8, palette8, sizeof(job.palette8));
+        job.tile = isTilePath(path);
+        job.precise = settings.graphics.hd_upscale_precision >= 16;
+        return job;
+    }
+
+    // Directions with their own frames: art with one direction points every
+    // direction at the same data and is looked up as direction 0.
+    bool artHasDirection(Art* art, int direction)
+    {
+        return direction == 0 || art->dataOffsets[direction] != art->dataOffsets[0];
+    }
+
+    // Queues every frame of `art` (the legacy art of `path`) that would be
+    // upscaled at runtime and is not ready yet, except (skipFrame,
+    // skipDirection).
+    int queueArtFrames(const std::string& path, Art* art, int skipFrame, int skipDirection)
+    {
+        if (!settings.graphics.hd_upscale_preload || art == nullptr) {
+            return 0;
+        }
+        ensurePool();
+        unsigned char palette8[256 * 3];
+        const std::string& tag = currentPalette(palette8);
+        int queued = 0;
+        int frames = artGetFrameCount(art);
+        for (int direction = 0; direction < ROTATION_COUNT; direction++) {
+            if (!artHasDirection(art, direction)) {
+                continue;
+            }
+            for (int frame = 0; frame < frames; frame++) {
+                if (frame == skipFrame && direction == skipDirection) {
+                    continue;
+                }
+                if (!pickPack(path, frame, direction).empty()) {
+                    continue;
+                }
+                std::string key = runtimeKey(tag, path, frame, direction);
+                if (gHdArt.frames.find(key) != gHdArt.frames.end()) {
+                    continue;
+                }
+                int width = 0;
+                int height = 0;
+                int xOffset = 0;
+                int yOffset = 0;
+                unsigned char* data = artGetFrameData(art, frame, static_cast<Rotation>(direction), &width, &height, &xOffset, &yOffset);
+                if (data == nullptr || width <= 0 || height <= 0) {
+                    continue;
+                }
+                HdUpscaleJob job = makeJob(key, path, data, width, height, width, palette8);
+                // First frames first: tiles, walls and most scenery have
+                // one; critters and animations show their first frame (or
+                // the one they rest on) when the map appears.
+                job.urgent = frame == 0;
+                gHdArt.pool.submit(std::move(job));
+                queued++;
+            }
+        }
+        gHdArt.preupscaleQueued += queued;
+        return queued;
+    }
+
+    // The runtime image of a frame no pack has: from the LRU, from the
+    // background threads (waiting for a running job, running a queued one
+    // here), else upscaled now. `data` (width x height, pitch) is the legacy
+    // frame when the caller has it; otherwise it is read from the art file.
+    std::shared_ptr<const HdImage> runtimeImage(const std::string& path, int frame, int direction, const unsigned char* data,
+        int width, int height, int pitch)
+    {
+        unsigned char palette8[256 * 3];
+        const std::string& tag = currentPalette(palette8);
+        std::string key = runtimeKey(tag, path, frame, direction);
+
+        drainPool();
+        std::shared_ptr<const HdImage> cached = cacheGet(key);
+        if (cached != nullptr) {
+            return cached;
+        }
+
+        ensurePool();
+        auto taking = std::chrono::steady_clock::now();
+        std::shared_ptr<HdImage> image = gHdArt.pool.take(key);
+        if (image != nullptr) {
+            gHdArt.runtimeTakeMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - taking).count();
+            gHdArt.runtimeFromPool++;
+            cachePut(key, image);
+            return image;
+        }
+
+        HdUpscaleJob job;
+        if (data != nullptr && width > 0 && height > 0) {
+            job = makeJob(key, path, data, width, height, pitch, palette8);
+        } else {
+            // Reading the art file from inside an art cache read (a present
+            // during a file read) could re-enter the file layer: draw the
+            // legacy frame this time.
+            if (gHdArt.runtimeMissing.count(path) != 0 || artIsLoading() || direction < 0 || direction >= ROTATION_COUNT) {
+                return nullptr;
+            }
+            Art* art = loadLegacyArt(path);
+            if (art == nullptr) {
+                gHdArt.runtimeMissing.insert(path);
+                return nullptr;
+            }
+            int xOffset = 0;
+            int yOffset = 0;
+            unsigned char* frameData = artGetFrameData(art, frame, static_cast<Rotation>(direction), &width, &height, &xOffset, &yOffset);
+            if (frameData == nullptr || width <= 0 || height <= 0) {
+                internal_free(art);
+                return nullptr;
+            }
+            job = makeJob(key, path, frameData, width, height, width, palette8);
+            // The art's other frames (animations, button states) follow in
+            // the background.
+            queueArtFrames(path, art, frame, direction);
+            internal_free(art);
+        }
+
+        auto started = std::chrono::steady_clock::now();
+        image = gHdArt.pool.run(job, true);
+        double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+        gHdArt.runtimeInline++;
+        gHdArt.runtimeInlineMs += ms;
+        gHdArt.runtimeInlineMaxMs = std::max(gHdArt.runtimeInlineMaxMs, ms);
+        debugPrint("HD: upscaled %s (direction %d, frame %d, %dx%d) on first draw: %.2f ms\n", path.c_str(), direction, frame,
+            job.width, job.height, ms);
+        cachePut(key, image);
+        return image;
+    }
+
+    // The image to draw for a frame: the pack's (hdArtFindFrame), else the
+    // runtime upscale (hd_upscale=scripted), else null.
+    std::shared_ptr<const HdImage> findFrame(const char* artPath, int frame, int direction, const unsigned char* data,
+        int width, int height, int pitch)
+    {
+        ensureInitialized();
+        if (gHdArt.pack.empty()) {
+            return nullptr;
+        }
+
+        std::string path = hdArtNormalizePath(artPath);
+        const std::string& pack = pickPack(path, frame, direction);
+        if (pack.empty()) {
+            if (!runtimeAllowed(path)) {
+                return nullptr;
+            }
+            std::shared_ptr<const HdImage> image = runtimeImage(path, frame, direction, data, width, height, pitch);
+            if (image != nullptr) {
+                gHdArt.runtimeServed.insert(frameKey("hd:", path, frame, direction));
+            }
+            return image;
+        }
+
+        std::string key = frameKey("hd:", path, frame, direction);
+        std::shared_ptr<const HdImage> image = cacheGet(key);
+        if (image != nullptr) {
+            return image;
+        }
+
+        auto loaded = std::make_shared<HdImage>();
+        if (!loadAssetFrame(resolveAsset(pack, path), frame, direction, loaded.get())) {
+            return nullptr;
+        }
+
+        cachePut(key, loaded);
+        return loaded;
+    }
+
 } // namespace
 
 void hdArtSetPack(const char* pack)
@@ -431,77 +770,23 @@ unsigned int hdArtGeneration()
 
 std::shared_ptr<const HdImage> hdArtFindFrame(const char* artPath, int frame, int direction)
 {
-    ensureInitialized();
-    if (gHdArt.pack.empty()) {
-        return nullptr;
-    }
-
-    std::string path = hdArtNormalizePath(artPath);
-    const std::vector<std::string>& packs = packsForAsset(path);
-    bool inPack = false;
-    for (const std::string& pack : packs) {
-        if (resolveAsset(pack, path).kind != AssetKind::None) {
-            inPack = true;
-            break;
-        }
-    }
-    if (!inPack) {
-        return nullptr;
-    }
-
-    // The first pack with an image of this frame made from the running
-    // game's frame; decided once per frame.
-    std::string key = frameKey("hd:", path, frame, direction);
-    auto chosen = gHdArt.framePacks.find(key);
-    if (chosen == gHdArt.framePacks.end()) {
-        std::string pick;
-        bool rejected = false;
-        for (const std::string& pack : packs) {
-            Asset& candidate = resolveAsset(pack, path);
-            if (!assetHasFrame(candidate, frame, direction)) {
-                continue;
-            }
-            if (legacyFrameMatches(candidate, pack, path, frame, direction)) {
-                pick = pack;
-                break;
-            }
-            rejected = true;
-        }
-        if (pick.empty() && rejected) {
-            gHdArt.legacyRejected++;
-            debugPrint("HD: no pack has an image of %s (direction %d, frame %d) as the game draws it; drawing the game's own frame\n",
-                path.c_str(), direction, frame);
-        }
-        chosen = gHdArt.framePacks.emplace(key, pick).first;
-    }
-    if (chosen->second.empty()) {
-        return nullptr;
-    }
-
-    std::shared_ptr<const HdImage> image = cacheGet(key);
-    if (image != nullptr) {
-        return image;
-    }
-
-    auto loaded = std::make_shared<HdImage>();
-    if (!loadAssetFrame(resolveAsset(chosen->second, path), frame, direction, loaded.get())) {
-        return nullptr;
-    }
-
-    cachePut(key, loaded);
-    return loaded;
+    return findFrame(artPath, frame, direction, nullptr, 0, 0, 0);
 }
 
 std::string hdArtFramePack(const char* artPath, int frame, int direction)
 {
-    auto found = gHdArt.framePacks.find(frameKey("hd:", hdArtNormalizePath(artPath), frame, direction));
-    return found != gHdArt.framePacks.end() ? found->second : std::string();
+    std::string key = frameKey("hd:", hdArtNormalizePath(artPath), frame, direction);
+    auto found = gHdArt.framePacks.find(key);
+    if (found != gHdArt.framePacks.end() && !found->second.empty()) {
+        return found->second;
+    }
+    return gHdArt.runtimeServed.count(key) != 0 ? std::string("runtime") : std::string();
 }
 
 std::shared_ptr<const HdImage> hdArtGetFrame(const char* artPath, int frame, int direction,
     const unsigned char* legacyData, int width, int height, int pitch, bool* fromLegacy)
 {
-    std::shared_ptr<const HdImage> image = hdArtFindFrame(artPath, frame, direction);
+    std::shared_ptr<const HdImage> image = findFrame(artPath, frame, direction, legacyData, width, height, pitch);
     if (fromLegacy != nullptr) {
         *fromLegacy = image == nullptr;
     }
@@ -554,7 +839,7 @@ bool hdArtDrawFrame(int win, const FrmId& frmId, int frame, int direction, int x
 
     std::shared_ptr<const HdImage> image = allowFallback
         ? hdArtGetFrame(path, frame, direction, legacyData, width, height, legacyPitch)
-        : hdArtFindFrame(path, frame, direction);
+        : findFrame(path, frame, direction, legacyData, width, height, legacyPitch);
     if (image == nullptr) {
         return false;
     }
@@ -573,7 +858,7 @@ std::shared_ptr<const HdImage> hdArtFindImage(const FrmImage& image)
         return nullptr;
     }
 
-    return hdArtFindFrame(path.c_str(), image.getFrame(), 0);
+    return findFrame(path.c_str(), image.getFrame(), 0, image.getData(), image.getWidth(), image.getHeight(), image.getWidth());
 }
 
 bool hdArtDrawImage(int win, const FrmImage& image, int x, int y)
@@ -617,7 +902,7 @@ bool hdArtDrawFrameRegion(int win, const FrmId& frmId, int frame, const unsigned
         return false;
     }
 
-    std::shared_ptr<const HdImage> hd = hdArtFindFrame(path, frame, 0);
+    std::shared_ptr<const HdImage> hd = findFrame(path, frame, 0, legacyData, legacyWidth, legacyHeight, legacyWidth);
     if (hd == nullptr) {
         return false;
     }
@@ -760,6 +1045,180 @@ void hdArtGetStats(HdArtStats* stats)
     stats->misses = gHdArt.misses;
     stats->legacyChecked = gHdArt.legacyChecked;
     stats->legacyRejected = gHdArt.legacyRejected;
+
+    stats->runtimeServed = static_cast<int>(gHdArt.runtimeServed.size());
+    stats->runtimeInline = gHdArt.runtimeInline;
+    stats->runtimeInlineMs = gHdArt.runtimeInlineMs;
+    stats->runtimeInlineMaxMs = gHdArt.runtimeInlineMaxMs;
+    stats->runtimeFromPool = gHdArt.runtimeFromPool;
+    stats->runtimeTakeMs = gHdArt.runtimeTakeMs;
+    stats->preupscaleQueued = gHdArt.preupscaleQueued;
+    if (gHdArt.poolStarted) {
+        HdUpscaleStats pool = gHdArt.pool.stats();
+        stats->upscaleThreads = gHdArt.pool.threadCount();
+        stats->upscalePending = gHdArt.pool.pending();
+        stats->upscaleComputed = pool.computed;
+        stats->upscaleComputedInline = pool.computedInline;
+        stats->upscaleDiskHits = pool.diskHits;
+        stats->upscaleDiskWrites = pool.diskWrites;
+        stats->upscaleComputeMs = pool.computeMs;
+        stats->upscaleOutputPixels = pool.outputPixels;
+        if (gHdArt.batchActive) {
+            stats->batchName = gHdArt.batchName;
+            stats->batchQueued = gHdArt.batchQueued;
+            stats->batchQueueMs = gHdArt.batchQueueMs;
+            if (stats->upscalePending == 0 && pool.idleSince > gHdArt.batchStart) {
+                stats->batchDoneMs = std::chrono::duration<double, std::milli>(pool.idleSince - gHdArt.batchStart).count();
+            }
+        }
+    }
+}
+
+// Early interface art (hdArtPreupscaleInterface): the main menu, load/save,
+// options and preferences, new character, the interface bar, inventory,
+// character screen, Pip-Boy and skilldex; the main menu and the bar first,
+// then the largest. Collected from the "upscaled ... on first draw" lines of
+// debug.log (tools/dev/hd_run.py with hd_upscale_preload=0).
+static const char* const kEarlyInterfaceArt[] = {
+    "art/intrface/mainmenu_sp.png",
+    "art/intrface/menuup.frm",
+    "art/intrface/menudown.frm",
+    "art/intrface/mainmenu.frm",
+    "art/intrface/iface.frm",
+    "art/intrface/prefscrn.frm",
+    "art/intrface/pip.frm",
+    "art/intrface/pickchar.frm",
+    "art/intrface/lsgame.frm",
+    "art/intrface/edtredt.frm",
+    "art/intrface/invbox2.png",
+    "art/intrface/combat.frm",
+    "art/intrface/skldxbox.frm",
+    "art/intrface/opbase_help.png",
+    "art/intrface/pipx.frm",
+    "art/intrface/sattkbup.frm",
+    "art/intrface/sattkbdn.frm",
+    "art/intrface/perksfdr.frm",
+    "art/intrface/prfbknbs.frm",
+    "art/intrface/bignum.frm",
+    "art/intrface/numbers.frm",
+    "art/intrface/months.frm",
+    "art/intrface/nameoff.frm",
+    "art/intrface/opbtnoff.frm",
+    "art/intrface/skldxoff.frm",
+    "art/intrface/ageoff.frm",
+    "art/intrface/sexoff.frm",
+    "art/intrface/iface_apbar_e.frm",
+    "art/intrface/slider.frm",
+    "art/intrface/optiup.frm",
+    "art/intrface/prflknbs.frm",
+    "art/intrface/pipup.frm",
+    "art/intrface/mapup.frm",
+    "art/intrface/chaup.frm",
+    "art/intrface/invbutup.frm",
+    "art/intrface/alarmout.frm",
+    "art/intrface/invupout.frm",
+    "art/intrface/invupds.frm",
+    "art/intrface/invdnout.frm",
+    "art/intrface/invdnds.frm",
+    "art/intrface/bigredup.frm",
+    "art/intrface/sru.frm",
+    "art/intrface/slu.frm",
+    "art/intrface/prfxout.frm",
+    "art/intrface/prfsldof.frm",
+    "art/intrface/lilredup.frm",
+    "art/intrface/snegoff.frm",
+    "art/intrface/splsoff.frm",
+    "art/intrface/uparwoff.frm",
+    "art/intrface/dnarwoff.frm",
+};
+
+void hdArtPreupscaleInterface()
+{
+    ensureInitialized();
+    if (!settings.graphics.hd_upscale_preload || !runtimeEnabled()) {
+        return;
+    }
+    auto started = std::chrono::steady_clock::now();
+    gHdArt.batchStart = started;
+    gHdArt.batchActive = true;
+    gHdArt.batchQueued = 0;
+    gHdArt.batchName = "interface";
+    int queued = 0;
+    // Called at start and again when the main menu loads: art that cannot
+    // be read yet at start (the CE main menu background) is queued then.
+    static bool done[sizeof(kEarlyInterfaceArt) / sizeof(kEarlyInterfaceArt[0])] = {};
+    for (size_t index = 0; index < sizeof(kEarlyInterfaceArt) / sizeof(kEarlyInterfaceArt[0]); index++) {
+        if (done[index]) {
+            continue;
+        }
+        std::string path = hdArtNormalizePath(kEarlyInterfaceArt[index]);
+        if (!runtimeAllowed(path) || !pickPack(path, 0, 0).empty()) {
+            done[index] = true;
+            continue;
+        }
+        Art* art = loadLegacyArt(path);
+        if (art == nullptr) {
+            continue;
+        }
+        done[index] = true;
+        queued += queueArtFrames(path, art, -1, -1);
+        internal_free(art);
+    }
+    double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+    gHdArt.batchQueued = queued;
+    gHdArt.batchQueueMs = ms;
+    debugPrint("HD: queued %d interface frame(s) for the runtime upscale in %.1f ms\n", queued, ms);
+}
+
+bool hdArtUpscalesCritters()
+{
+    ensureInitialized();
+    return runtimeEnabled() && settings.graphics.hd_upscale_critters;
+}
+
+void hdArtPreupscaleMapBegin()
+{
+    if (gHdArt.poolStarted) {
+        // Frames of the previous map not upscaled yet are no longer needed
+        // first; those still wanted are upscaled when drawn.
+        gHdArt.pool.cancelQueued();
+    }
+    gHdArt.batchStart = std::chrono::steady_clock::now();
+    gHdArt.batchActive = runtimeEnabled() && settings.graphics.hd_upscale_preload;
+    gHdArt.batchQueued = 0;
+    gHdArt.batchQueueMs = 0;
+    gHdArt.batchName = "map";
+}
+
+void hdArtPreupscaleArt(const char* artPath, Art* art)
+{
+    ensureInitialized();
+    if (artPath == nullptr || art == nullptr || !settings.graphics.hd_upscale_preload) {
+        return;
+    }
+    std::string path = hdArtNormalizePath(artPath);
+    if (!runtimeAllowed(path)) {
+        return;
+    }
+    auto started = std::chrono::steady_clock::now();
+    gHdArt.batchQueued += queueArtFrames(path, art, -1, -1);
+    gHdArt.batchQueueMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+}
+
+int hdArtUpscalePending()
+{
+    if (!gHdArt.poolStarted) {
+        return 0;
+    }
+    return gHdArt.pool.pending();
+}
+
+void hdArtUpscaleWaitIdle()
+{
+    if (gHdArt.poolStarted) {
+        gHdArt.pool.waitIdle();
+        drainPool();
+    }
 }
 
 // Stimpak's screens (hub, pickers, lists): HD art for the images and

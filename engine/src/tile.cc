@@ -650,15 +650,19 @@ bool tileHdCheck(TileHdCheck* check)
         }
         if (index != gTileWindowBuffer[offset]) {
             // Drawn by objects (or over them); the last object drawn at the
-            // pixel tells its kind: walls, scenery and items are HD, other
-            // objects (critters, misc, interface) stay legacy.
+            // pixel tells its kind: walls, scenery and items are HD, and
+            // critters with the runtime upscale (Phase 2.22); other objects
+            // (misc, interface) stay legacy.
             int covered = coverage[offset] - 1;
+            bool critter = covered == OBJ_TYPE_CRITTER && objectHdIsHdType(OBJ_TYPE_CRITTER);
             bool hdKind = covered == OBJ_TYPE_ITEM || covered == OBJ_TYPE_SCENERY || covered == OBJ_TYPE_WALL;
-            bool legacyKind = covered >= 0 && !hdKind;
+            bool legacyKind = covered >= 0 && !hdKind && !critter;
             check->objectPixels++;
             check->mask[offset] = 2;
             if (hdKind) {
                 check->sceneryPixels++;
+            } else if (critter) {
+                check->critterPixels++;
             } else if (legacyKind) {
                 check->legacyObjectPixels++;
             }
@@ -667,6 +671,9 @@ bool tileHdCheck(TileHdCheck* check)
                 if (hdKind) {
                     check->sceneryPixelsHd++;
                     check->mask[offset] = 6;
+                } else if (critter) {
+                    check->critterPixelsHd++;
+                    check->mask[offset] = 7;
                 } else {
                     check->mask[offset] = 3;
                     if (legacyKind) {

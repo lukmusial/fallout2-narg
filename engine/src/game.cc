@@ -221,6 +221,10 @@ int gameInitWithOptions(const char* windowTitle, bool isMapper, int font, Window
 
     debugPrint(">init_options_menu\n");
 
+    // CE: HD runtime upscale (Phase 2.22): the main menu, the interface bar
+    // and the common dialogs, in background threads from here on.
+    hdArtPreupscaleInterface();
+
     if (!gIsMapper && skipOpeningMovies < 2) {
         showSplash();
     }
