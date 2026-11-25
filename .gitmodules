@@ -1,3 +1,3 @@
-[submodule "external/stimpak"]
-	path = external/stimpak
+[submodule "engine/external/stimpak"]
+	path = engine/external/stimpak
 	url = https://github.com/lukmusial/fallout2-stimpak.git

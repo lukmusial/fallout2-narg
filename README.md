@@ -1,259 +1,86 @@
-# Fallout 2: Community Engine
-
-Fallout 2:CE is a fully working re-implementation of the classic Fallout engine, optimized for a hassle-free experience on multiple platforms, including Windows, Mac, iOS, Android, and Linux.  It provides high resolution support, quality-of-life improvements, and dozens upon dozens of bug fixes.
-
-This is a fork of the original Fallout 2:CE project, which is no longer getting regular updates.
-
-Popular total conversion mods are supported:
- * [Fallout Et Tu](https://github.com/rotators/Fo1in2): Full Support.  Use v2.0+
- * [Fallout: Sonora](https://github.com/NovaRain/Fallout-Sonora-English): Full Support.
- * [Fallout 2 Restoration Project](https://github.com/BGforgeNet/Fallout2_Restoration_Project): Full Support.
- * Fallout of Nevada: Supported with minor tweaks needed.
- * [Olympus 2207](https://steamcommunity.com/sharedfiles/filedetails/?id=2509613179), Resurrection, Yesterday: partially work but not fully supported.
+## Fallout 2: Narg Edition
 
-CE has broad (though not total) compatibility with [Sfall](https://github.com/sfall-team/sfall) scripting extensions.  Many traditional Fallout mods work out of the box, including NPC Armor, Party Orders, FO2Tweaks (we recommend v14.5+), Talking Heads, VOCK, and many others.
+[**Download**](#download)
+| [**Installation**](#installation)
+| [**Additional mods**](#additional-mods)
+| [**Report issues**](#bug-reports)
 
-## Local mods in this tree (branch `mods`)
+**Fallout 2: Narg Edition** is Fallout 2 in high definition on a modern engine:
 
-This local copy adds two mods on top of Fallout 2 CE. Nothing here is published.
+- the [Fallout 2 Community Edition](https://github.com/fallout2-ce/fallout2-ce) engine (CE), which replaces the game's executable, with
+- **HD rendering**: true colour at twice the resolution, HD art for the interface, floors, roofs, walls, scenery, items and inventory, 2x text, coloured lights and soft shadows, a light from every gunshot, trees swaying in the wind, smooth scrolling and map zoom;
+- **[Stimpak](https://github.com/lukmusial/fallout2-stimpak)**, a savegame editor on the main menu (character, companions, quests, locations, travel).
 
-### Stimpak: savegame editor
+It installs on vanilla Fallout 2 and on top of the [Restoration Project](https://github.com/BGforgeNet/Fallout2_Restoration_Project) (RPU). Characters (critters) keep their original art.
 
-Stimpak lives in its own repository and is included here as the git submodule
-`external/stimpak` (clone with `--recurse-submodules`, or run
-`git submodule update --init external/stimpak`). CMakeLists.txt attaches it with
-`stimpak_attach()`: its patches are applied to a copy of `src/` at build time, so
-this tree keeps only the HD changes. `src/character_editor.cc` carries Stimpak's
-patch merged in, because the HD screen code is interwoven with its editor mode
-(`stimpak-merged.txt` pins the patch it merged; a newer Stimpak that changes it
-stops the build until it is merged again). HD hooks into Stimpak's screens
-through `stimpakSetRenderHooks` (`hdArtAttachStimpak` in `src/hd_art.cc`) and
-adds its test commands through the harness's extension API
-(`src/hd_dev_automation.cc`). See `external/stimpak/README.md` and
-`docs/INTEGRATING.md` there.
-
-A **STIMPAK** button on the main menu (hotkey **S**, above EXIT) opens a save without starting the game and shows a hub:
+> **The HD art is made from the game's own art.** Its images are upscaled from Fallout 2's art files, so you need your own copy of Fallout 2 ([GOG](https://www.gog.com/game/fallout_2), [Steam](https://store.steampowered.com/app/38410), [Epic](https://store.epicgames.com/p/fallout-2)) to play, and the archives are not meant to be redistributed without the game.
 
-- **CHARACTER**: the character screen in an edit mode: SPECIAL 1–10 with no point pool, any skill 0–300% at no cost, tag skills, traits, name/age/sex, a **PERKS** editor (every perk, add/remove ranks), and click-to-type Level, Exp, Hit Points (`cur` or `cur/max`) and Skill Points. Cancel reverts everything.
-- **COMPANIONS**: the same screen for a party member (stats, skills, hit points, perks) and **LEVEL UP** with the game's own companion level-up.
-- **ROSTER**: companions join (experimental: their own story state is not set) or leave.
-- **QUESTS**: set any quest to not started / ACTIVE / DONE (the quest variable only: no rewards or map changes).
-- **LOCATION**: towns unknown / known / visited, and **TRAVEL** to move the party there for real.
-- **SAVE AS** writes to the first empty slot and returns to the main menu; **EXIT** leaves without saving.
-
-### HD: true colour and 2x art
+## Download
 
-With `[graphics] hd=1` (and `[screen] scale=2`) the game renders in true colour at twice its logical resolution. HD art comes from packs under `data/hd/<pack>/` made by `tools/hd` (scripted or local-AI enhancement of the original art; they are derived from the game's art and stay local). `hd_pack=mixed` (the default in `files/fallout2.cfg`) takes the AI pack except where the AI does poorly (`ce.dat` `hd/mixed/manifest.txt`). In HD so far: main menu, load/save, character editor, Stimpak screens, and floors and roofs of Arroyo, Klamath and the Den with smooth RGB lighting. Objects, critters and text are still the original art (work in progress). `hd=0` gives the original 256-colour look.
+Releases are archives per platform: `narg_v<version>_macos.zip`, `narg_v<version>_linux.zip`, `narg_v<version>_windows.zip` (see [the changelog](docs/changelog.md)). Each holds:
 
-Map motion (Phase 2.13, `[graphics]` in `fallout2.cfg`): `hd_lights_follow=1` makes the light a walking critter carries (the player's light circle at night) follow the drawn sprite instead of jumping hex by hex (HD lights only); `smooth_scroll=1` pans the map smoothly every frame (arrow keys, mouse at the screen edge, Home; `scroll_speed` in % of the original); `zoom=1` zooms the map view 0.5x–2x with the mouse wheel over the map or Ctrl+= / Ctrl+- (Ctrl+0 resets). The interface bar keeps its size, the zoom lasts for the session and is not saved, dialogue pictures of the map are taken at 1x. The map is then drawn into a larger off-screen surface that the map window shows through a pan/zoom transform (`src/map_view.h`); game logic, saves and scroll limits are unchanged.
+| File | What it is |
+|---|---|
+| `Fallout 2 Narg Edition.app` (macOS), `narg/linux/fallout2-ce`, `narg/windows/fallout2-ce.exe` | the engine |
+| `mods/narg_hd.dat` | the HD art: AI-upscaled pack, plus the scripted images the default `mixed` pack uses |
+| `mods/narg_hd_scripted.dat` | optional: the whole scripted pack (`--pack scripted`) |
+| `mods_order.txt` | the mods the installer adds to `mods/mods_order.txt` |
+| `narg/narg.cfg` | the settings the installer puts into `fallout2.cfg` |
+| `narg/settings/*.cfg` | optional settings components (see below) |
+| `narg/f2_res.dat` | hi-res interface art, installed when the game has none |
+| `narg-install.sh` / `.command` / `.bat` | the installer |
+| `narg/docs/` | this documentation |
 
-The bundled `f2_res.dat` has a Russian 800-pixel interface bar; `ce.dat` overrides it with an English one built from the original art (`tools/dev/iface_bar_art.py`).
+## Installation
 
-### Playing and testing
+- Narg Edition installs on **vanilla Fallout 2** (GOG, Steam, CD) or on **Fallout 2 with RPU** (install RPU first, then Narg Edition).
+- Saved games keep working; with RPU, start a new game after installing RPU as usual.
+- Everything the installer replaces or changes is copied to `backup/narg/` first.
 
-- `tools/dev/setup-play-dir.sh` makes `out/play` (own copy of your saves, HD on, 3440x1440); open `out/play/Fallout II Community Edition.app`.
-- `tools/dev/run-tests.sh` runs the game hidden and silent with scripted input (`--dev-script`), in parallel; see `CONTRIBUTING.md`.
+Per platform: [macOS](docs/macos.md) | [Linux](docs/linux.md) | [Windows](docs/windows.md) | [on top of RPU](docs/rpu.md).
 
-## Installation — [Download Latest CE Release](https://github.com/fallout2-ce/fallout2-ce/releases)
+In short: extract the archive into the game folder, run `narg-install.command` (macOS), `narg-install.sh` (Linux) or `narg-install.bat` (Windows), then start the game with `Fallout 2 Narg Edition.app` / `fallout2-ce` / `fallout2-ce.exe`.
 
-You *must* own the game to play. Purchase your copy on [GOG](https://www.gog.com/game/fallout_2), [Epic Games](https://store.epicgames.com/p/fallout-2) or [Steam](https://store.steampowered.com/app/38410).
+### Options
 
-Download CE from the link above, then extract the archive into your game folder. Launch `fallout2-ce.exe` on Windows (or the platform-specific executable) to play. CE has a lot of enhancements that require configuration. See [Configuration](#configuration) for examples.
+| Option | Effect |
+|---|---|
+| `--pack mixed` (default) | AI-upscaled art, scripted (deterministic) upscale where the AI does poorly |
+| `--pack ai` / `--pack scripted` | one pack only (`scripted` needs `mods/narg_hd_scripted.dat`) |
+| `--with no_wind` | trees and bushes stand still |
+| `--with no_shot_light` | no light from gunshots and explosions |
+| `--with no_lights` | no coloured lights, glow or soft shadows (for slow machines) |
+| `--with classic` | the original 256-colour look; engine, Stimpak and fixes stay |
+| `--with windowed` | a window instead of full screen |
+| `--resolution 2560x1440` | screen size, instead of the detected one |
 
-For detailed instructions on how to play on Mac, Linux, iOS, or Android, see the [Platform-specific instructions](#platform-specific-installation).
+All of them are settings in `fallout2.cfg` (`[graphics]`, `[screen]`) that you can change later. On Windows the options are written `-Pack ai -With no_wind,windowed -Resolution 2560x1440`.
 
-## Quality of life benefits over vanilla Fallout
+### Compatibility with content mods
 
-* High resolution support
-* Party members can loot and barter in place of PC
-* Directly equip party members instead of convincing them to use the right equipment.
-* Expanded 2-column inventory, loot screens
-* Expanded 4-row barter screen
-* Expanded AP bar
-* Ctrl-click to quickly move items when bartering, looting, or stealing, and auto-balance caps
-* Music continues playing between maps
-* Auto open doors
-* Integrated "HELP" menu
-* 44.1 kHz stereo sound/music supported, in .ogg and .wav format as well as legacy .acm
-* Last used save slot is remembered
-* You can cancel elevator floor selection using ESC
-* Spiffy ammo meter with burst-mode segmentation
-* Item/Corpse/Container/Critter highlighting (configure using [mods/sfall-mods.ini](https://github.com/sfall-team/sfall/blob/master/artifacts/config_files/sfall-mods.ini))
+HD images are found by the art file they were made from. When a mod replaces a picture (RPU repaints the world map, adds real tiles where the game had placeholders, changes the dialogue frame, some items and the hi-res main menu), the engine compares the game's own picture with the one the HD image was made from (`hd/<pack>/legacy.txt`, `[graphics] hd_verify=1`) and draws the mod's picture, doubled, wherever they differ. New art from a mod is also drawn doubled. See [RPU notes](docs/rpu.md).
 
-<table>
-  <tr>
-    <td align="center">
-    <img src="docs/images/two-column-inventory.jpg" alt="Expanded 2-column inventory" width="360"><br>
-    <sub>Expanded 2-column inventory</sub>
-    </td>
-    <td align="center">
-      <img src="docs/images/companion-equip.gif" alt="Companion equip screen" width="360"><br>
-      <sub>Companion equip screen</sub>
-    </td>
+## Additional mods
 
-  </tr>
-  <tr>
-    <td align="center">
-      <img src="docs/images/party-member-loot.gif" alt="Party member loot" width="360"><br>
-      <sub>Party member loot</sub>
-    </td>
-    <td align="center">
-      <img src="docs/images/help-menu.gif" alt="Integrated HELP menu" width="360"><br>
-      <sub>Integrated HELP menu</sub>
-    </td>
-  </tr>
-</table>
+### Included
 
-There are also dozens of small things that just work a little better than they did in the original.  Better pathfinding, fewer graphics glitches, less finicky weapon stacking, picking up items hidden behind scenery, and much more.
+- [Fallout 2 Community Edition](https://github.com/fallout2-ce/fallout2-ce) engine at c30f1efc
+- [Stimpak](https://github.com/lukmusial/fallout2-stimpak) savegame editor
+- HD rendering and HD art (this project)
 
-## Configuration
+### Recommended
 
-The main configuration file is `fallout2.cfg`. This contains original game config as well as new CE settings.
+- [Restoration Project](https://github.com/BGforgeNet/Fallout2_Restoration_Project) (tested with v2.4.34)
+- the sfall mods CE supports, e.g. [FO2tweaks](https://github.com/BGforgeNet/FO2tweaks), [Inventory Filter](https://github.com/rotators/InventoryFilter)
 
-Additional settings for screen resolution, UI customization, and map options are now integrated into the main `fallout2.cfg` file (previously part of `f2_res.ini` from Mash's HRP).
+## Bug reports
 
-Here are some important settings in `fallout2.cfg` under the `[screen]` and `[ui]` sections.  See [the example config](https://github.com/fallout2-ce/fallout2-ce/tree/refs/heads/main/files/fallout2.cfg) for a full list of settings.
+Describe the problem, attach a savegame and a screenshot (in HD, F12 saves a full-resolution PNG), and say whether RPU is installed.
 
-```ini
-[screen]
-resolution_x=1600 ; actual game window size (screen resolution), in pixels
-resolution_y=1080
-windowed=1 ; 0 = fullscreen
-scale=2 ; 1 = original scale, 2 = 2x scale, etc. (e.g. at scale 2 and screen resolution 1920x1080, in-game resolution will be 960x540, thus every pixel is twice as wide and tall)
+## Additional info
 
-[ui]
-; Maximum number of columns shown in the main inventory and loot/steal windows (valid range: 1..2)
-inventory_columns=2
-
-; Set to 1 to expand the barter/trade window vertically, adding a 4th item slot per side (requires ce.dat)
-expand_barter_window=1
-
-[qol]
-; Allow opening party member inventory from the long-press context menu.
-party_trade_from_menu=1
-
-; Allow switching to companions' inventories in loot screens (and barter, in the future)
-party_loot_and_barter=1
-```
-
-**Recommendations:**
-- **Desktops**: Use any size you see fit.
-- **Tablets**: Set these values to logical resolution of your device, for example iPad Pro 11 is 1668x2388 (pixels), but its logical resolution is 834x1194 (points).
-- **Mobile phones**: Set height to 480, calculate width according to your device screen (aspect) ratio, for example Samsung S21 is 20:9 device, so the width should be 480 * 20 / 9 = 1067.
-
-In time this stuff will receive an in-game interface, right now you have to do it manually. To see all currently working fallout2.cfg settings, just run the game once and quit. It will be automatically updated with defaults for every supported setting.
-*Note*: Use of the IFACE_BAR settings requires the `f2_res.dat` file, which contains graphical assets. Various versions are available, but one compatible with the above settings can be found here: [f2_res.dat](https://github.com/fallout2-ce/fallout2-ce/raw/refs/heads/main/files/f2_res.dat)
-
-Note: There are a few settings that are still configured in `ddraw.ini`.  They will be migrated to cfg over time.
-
-## Platform-specific installation
-
-### Windows
-
-[Download](https://github.com/fallout2-ce/fallout2-ce/releases) and unzip into your `Fallout2` folder. Launch the game using `fallout2-ce.exe`.
-
-### Linux
-
-- Use Windows installation as a base - it contains data assets needed to play. Copy `Fallout2` folder somewhere, for example `/home/john/Desktop/Fallout2`.
-
-- Alternatively you can extract the needed files from the GoG installer:
-
-```console
-$ sudo apt install innoextract
-$ innoextract ~/Downloads/setup_fallout_2_1.02_gog_v1_\(77792\).exe -d Fallout2
-```
-
-- Download the Linux release archive, extract `fallout2-ce` and `ce.dat`, and copy them into this folder.
-
-- Run `./fallout2-ce`.
-
-### macOS
-
-> **NOTE**: macOS 10.11 (El Capitan) or higher is required. Runs natively on Intel-based Macs and Apple Silicon.
-
-- Use Windows installation as a base - it contains data assets needed to play. Copy `Fallout2` folder somewhere, for example `/Applications/Fallout2`.
-
-- Alternatively you can use Fallout 2 from Macplay/The Omni Group as a base - you need to extract game assets from the original bundle. Mount CD/DMG, right click `Fallout 2` -> `Show Package Contents`, navigate to `Contents/Resources`. Copy `GameData` folder somewhere, for example `/Applications/Fallout2`.
-
-- Or if you're a Terminal user and have Homebrew installed you can extract the needed files from the GoG installer.  **Note**: You must use "Offline backup game installer", not the main game installer.
-
-```console
-$ brew install innoextract
-$ innoextract ~/Downloads/setup_fallout_2_1.02_gog_v1_\(77792\).exe -d fallout2
-$ mv fallout2 /Applications/Fallout2
-```
-
-- [Download](https://github.com/fallout2-ce/fallout2-ce/releases) and copy `Fallout II Community Edition.app` to this folder.
-
-- Run `Fallout II Community Edition.app`.
-
-### Android
-
-> **NOTE**: Fallout 2 was designed with mouse in mind. There are many controls that require precise cursor positioning, which is not possible with fingers. Current control scheme resembles trackpad usage:
-- One finger moves mouse cursor around.
-- Tap one finger for left mouse click.
-- Tap two fingers for right mouse click (switches mouse cursor mode).
-- Move two fingers to scroll current view (map view, worldmap view, inventory scrollers).
-
-> **NOTE**: From Android standpoint release and debug builds are different apps. Both apps require their own copy of game assets and have their own savegames. This is intentional. As a gamer just stick with release version and check for updates.
-
-- Download the Android [release](https://github.com/fallout2-ce/fallout2-ce/releases), which contains an .apk file and `ce.dat`.
-
-- Use Windows installation as a base - it contains data assets needed to play. Copy `Fallout2` folder to your device, for example to `Downloads`. You need `master.dat`, `critter.dat`, `patch000.dat`, and `data` folder. Watch for file names - keep (or make) them lowercased (see [Configuration](#configuration)).  Copy `ce.dat` into this folder.
-
-- Copy `fallout2-ce.apk` from the release to your device. Open it with file explorer, follow instructions (install from unknown source).
-
-- When you run the game for the first time it will immediately present file picker. Select the folder from the first step. Wait until this data is copied. A loading dialog will appear, just wait for about 30 seconds. If you're installing total conversion mod or localized version with a large number of unpacked resources in `data` folder it can take up to 20 minutes. Once copied, the game will start automatically.
-
-### iOS
-
-> **NOTE**: See Android note on controls.
-
-- Download `fallout2-ce.ipa`. Use sideloading applications ([AltStore](https://altstore.io/) or [Sideloadly](https://sideloadly.io/)) to install it to your device. Alternatively you can always build from source with your own signing certificate.
-
-- Run the game once. You'll see error message saying "Couldn't find/load text fonts". This step is needed for iOS to expose the game via File Sharing feature.
-
-- Use Finder (macOS Catalina and later) or iTunes (Windows and macOS Mojave or earlier) to copy `master.dat`, `critter.dat`, `patch000.dat`, `ce.dat`, and `data` folder to "Fallout 2" app ([how-to](https://support.apple.com/HT210598)). Watch for file names - keep (or make) them lowercased (see [Configuration](#configuration)).
-
--
-
-**Controls on iPad:**
-
-- One-finger tap → left click; hold → left button held.
-- Two-finger tap → right click (cycles cursor mode between walk and attack).
-- One-finger drag → scroll map / windows.
-- Two-finger drag → mouse wheel.
-- **Three-finger swipe down → ESC** (opens options / main menu).
-- **Four-finger long press → F6** (quicksave). Hold four fingers on the screen for about half a second.
-- **Three-finger long press → hold Shift** (highlights interactable objects — containers, doors, items — while held).
-- Taps on the HUD (interface bar / end-turn / end-combat buttons) act as direct touches so small buttons are easy to hit without aiming.
-- A Bluetooth keyboard works for everything else (numbered dialog choices, load game, etc.).
-
-### Browser
-
-> **NOTE**: WebAssembly build with emscripten
-```
-docker run --rm -v $(pwd):/src emscripten/emsdk:3.1.74 sh -c 'git config --global --add safe.directory "*" && mkdir -p build && cd build && emcmake cmake ../ -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchain/Emscripten.cmake && emmake make'
-```
-- Demo available at https://github.com/ololoken/fallout2-ce-ems.git
-
-
-## Contributing
-
-For build instructions and contributor notes, see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-Integrating Sfall goodies is the top priority. Quality of life updates are OK too.  In any case open up an issue with your suggestion or to notify other people that something is being worked on.
-
-For current sfall compatibility status and the remaining work needed to close gaps, see [SFALL_COMPATIBILITY.md](SFALL_COMPATIBILITY.md).
-
-## For modders
-
-* Robust (though not 100%) Sfall opcode and hook support
-* .ogg/.wav support for map music
-* .png support for static assets (must be 8bit indexed)
-* .zip support for .dat archives
-* Working BIS mapper
-
-## License
-
-The source code is this repository is available under the [Sustainable Use License](LICENSE.md).
+- [Changelog](docs/changelog.md)
+- [Known issues](docs/known.md)
+- [Credits and licences](docs/credits.md)
+- [Development: building the engine and the archives](docs/development.md)
+- [Tests of the 1.0.0 release](docs/testing.md)
