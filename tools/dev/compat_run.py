@@ -61,6 +61,7 @@ def main() -> int:
     parser.add_argument("--scan", action="store_true", help="add --scan-unimplemented")
     parser.add_argument("--load", type=int, help="--dev-load-game=<slot>")
     parser.add_argument("--timeout", type=int, default=600)
+    parser.add_argument("--app", default=APP, help=f"app bundle in the run directory (default {APP})")
     args = parser.parse_args()
 
     run_dir = args.run_dir.resolve()
@@ -77,7 +78,7 @@ def main() -> int:
     else:
         script = Path(args.script).resolve()
 
-    exe = run_dir / APP / "Contents/MacOS/Fallout II Community Edition"
+    exe = run_dir / args.app / "Contents/MacOS/Fallout II Community Edition"
     cmd = [str(exe), f"--dev-script={script}", f"--dev-out={out}", "--dev-fast", "[debug]mode=log"]
     if args.scan:
         cmd.append("--scan-unimplemented")

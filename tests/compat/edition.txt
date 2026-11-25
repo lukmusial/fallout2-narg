@@ -1,0 +1,18 @@
+# Compatibility (an installed release, its own fallout2.cfg): main menu, a new
+# game (not saved) and the HD art counters at both.
+until mainmenu 30000
+wait 1500
+shot menu
+legacyshot menu_legacy
+hdstats menu_stats
+key n
+wait 2000
+key t
+wait 2500
+key esc
+until game 90000
+wait 3000
+shot game
+hdstats game_stats
+dump game
+quit 0
