@@ -10,8 +10,8 @@ name: build
 # the installed packs (ai/ and scripted/ with legacy.txt) to include it;
 # without it the archives contain the engine, installer and docs only.
 #
-# Written for the repository layout; not run yet. The engine submodule (and
-# its external/stimpak submodule) must point at public URLs first.
+# The engine is in engine/; its Stimpak submodule (engine/external/stimpak)
+# comes from github.com/lukmusial/fallout2-stimpak.
 
 on:
   push:
