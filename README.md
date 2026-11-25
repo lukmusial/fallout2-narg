@@ -25,6 +25,7 @@ Releases are archives per platform: `narg_v<version>_macos.zip`, `narg_v<version
 | `mods/narg_hd.dat` | the HD art: AI-upscaled pack, plus the scripted images the default `mixed` pack uses |
 | `mods/narg_hd_scripted.dat` | optional: the whole scripted pack (`--pack scripted`) |
 | `mods/narg_hd_rpu.dat` | separate archive `narg_v<version>_rpu.zip`: HD art for the Restoration Project's own images, loaded only on RPU |
+| `narg/rpu-save-convert.py` | converts saves from the unmodded game for the Restoration Project ([RPU notes](docs/rpu.md)) |
 | `mods_order.txt` | the mods the installer adds to `mods/mods_order.txt` |
 | `narg/narg.cfg` | the settings the installer puts into `fallout2.cfg` |
 | `narg/settings/*.cfg` | optional settings components (see below) |

@@ -41,6 +41,7 @@ cp "$ROOT"/components/settings/*.cfg "$STAGE/narg/settings/"
 cp "$ROOT/README.md" "$STAGE/narg/docs/README.md"
 cp "$ROOT"/docs/*.md "$STAGE/narg/docs/"
 cp "$ROOT/engine/files/f2_res.dat" "$STAGE/narg/f2_res.dat"
+cp "$ROOT/release/narg/rpu-save-convert.py" "$STAGE/narg/"
 case "$PLATFORM" in
 macos)
     cp "$ROOT/release/narg-install.command" "$ROOT/release/narg-install.sh" "$STAGE/"
