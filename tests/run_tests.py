@@ -255,6 +255,29 @@ def test_hd_art_lookup(update):
     return f"png/fhd/manifest/fallback ok, cache {stats} ({seconds:.0f}s)"
 
 
+def test_hd_legacy_verify(update):
+    """Legacy source check (hd/<pack>/legacy.txt, [graphics] hd_verify): an HD
+    image is only used while the game's frame has the hash the pack recorded;
+    with hd_verify=0 every image is used."""
+    args = [*HD_ARGS, "[graphics]hd_pack=testlegacy"]
+    out, seconds = run_game("hd_legacy_verify", "hd_legacy_verify.txt", args)
+    off, more = run_game("hd_legacy_verify_off", "hd_legacy_verify.txt", [*args, "[graphics]hd_verify=0"])
+    probe = {name: json.loads((out / f"{name}.json").read_text()) for name in ("probe_match", "probe_mismatch")}
+    if not probe["probe_match"]["found"] or probe["probe_match"]["from_legacy"]:
+        raise TestFailure(f"matching source not used: {probe['probe_match']}")
+    p = probe["probe_mismatch"]
+    if not p["from_legacy"] or (p["width"], p["height"]) != (2 * p["legacy_width"], 2 * p["legacy_height"]):
+        raise TestFailure(f"changed source not rejected: {p}")
+    stats = json.loads((out / "stats.json").read_text())
+    if (stats["legacy_checked"], stats["legacy_rejected"]) != (2, 1):
+        raise TestFailure(f"legacy counters: {stats}")
+    off_mismatch = json.loads((off / "probe_mismatch.json").read_text())
+    off_stats = json.loads((off / "stats.json").read_text())
+    if off_mismatch["from_legacy"] or off_stats["legacy_checked"] != 0:
+        raise TestFailure(f"hd_verify=0 still checks: {off_mismatch} {off_stats}")
+    return f"match used, mismatch rejected, off unchecked ({seconds + more:.0f}s)"
+
+
 # --- Phase 2.6: interface screens with the real HD packs --------------------
 #
 # The packs come from tools/hd (enhance_scripted.py, enhance_ai.py, then
@@ -1871,6 +1894,7 @@ def make_hd_wind_test(slot):
 
 
 TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_art, test_main_menu_hd_fhd,
+          test_hd_legacy_verify,
           test_hd_art_lookup]
          + [make_slot_test(slot) for slot in range(1, SLOT_COUNT + 1)]
          + [make_slot_test(slot, hd=True) for slot in HD_SLOTS]

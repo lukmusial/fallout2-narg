@@ -73,6 +73,28 @@ void hdManifestParse(const std::string& text, std::unordered_map<std::string, st
 // Decodes a PNG stream to 0xAARRGGBB.
 bool hdImageDecodePng(const unsigned char* data, size_t size, HdImage* image, std::string* error = nullptr);
 
+// Legacy source hashes. A pack's `legacy.txt` (tools/hd/legacy_art.py) lists
+// the legacy frame each HD image was made from:
+//
+//   <art path> <direction> <frame> <hash>
+//
+// <art path> normalised (hdArtNormalizePath, keeping the legacy file's own
+// extension), <hash> 16 hex digits of hdLegacyFrameHash. The engine uses an HD
+// image only while the running game's frame still has that hash, so a mod
+// that replaces the art (another picture under the same path) gets its own
+// picture drawn instead of the pack's image of the original.
+
+// FNV-1a 64 over width and height (uint16 little-endian each), then the
+// frame's palette indices row by row (`pitch` bytes between rows).
+uint64_t hdLegacyFrameHash(const unsigned char* pixels, int width, int height, int pitch);
+
+// The table key of a frame: "<art path>#<direction>/<frame>".
+std::string hdLegacyKey(const std::string& artPath, int direction, int frame);
+
+// Parses legacy.txt into key -> hash; malformed lines are skipped. Returns
+// the number of entries read.
+size_t hdLegacyParse(const std::string& text, std::unordered_map<std::string, uint64_t>* entries);
+
 } // namespace fallout
 
 #endif /* FALLOUT_HD_FORMAT_H_ */

@@ -1166,7 +1166,9 @@ namespace {
             << ", \"frames_cached\": " << stats.framesCached
             << ", \"bytes_cached\": " << stats.bytesCached
             << ", \"hits\": " << stats.hits
-            << ", \"misses\": " << stats.misses << "}\n";
+            << ", \"misses\": " << stats.misses
+            << ", \"legacy_checked\": " << stats.legacyChecked
+            << ", \"legacy_rejected\": " << stats.legacyRejected << "}\n";
         return true;
     }
 

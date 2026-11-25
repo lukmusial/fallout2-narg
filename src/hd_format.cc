@@ -1,6 +1,8 @@
 #include "hd_format.h"
 
 #include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <lodepng.h>
@@ -155,6 +157,74 @@ bool hdImageDecodePng(const unsigned char* data, size_t size, HdImage* image, st
         image->pixels[i] = (static_cast<uint32_t>(p[3]) << 24) | (static_cast<uint32_t>(p[0]) << 16) | (static_cast<uint32_t>(p[1]) << 8) | p[2];
     }
     return true;
+}
+
+uint64_t hdLegacyFrameHash(const unsigned char* pixels, int width, int height, int pitch)
+{
+    constexpr uint64_t kPrime = 0x100000001B3ULL;
+    uint64_t hash = 0xCBF29CE484222325ULL;
+    auto add = [&hash](unsigned char byte) {
+        hash = (hash ^ byte) * kPrime;
+    };
+
+    add(static_cast<unsigned char>(width & 0xFF));
+    add(static_cast<unsigned char>((width >> 8) & 0xFF));
+    add(static_cast<unsigned char>(height & 0xFF));
+    add(static_cast<unsigned char>((height >> 8) & 0xFF));
+    if (pixels == nullptr) {
+        return hash;
+    }
+    for (int y = 0; y < height; y++) {
+        const unsigned char* row = pixels + static_cast<size_t>(y) * pitch;
+        for (int x = 0; x < width; x++) {
+            add(row[x]);
+        }
+    }
+    return hash;
+}
+
+std::string hdLegacyKey(const std::string& artPath, int direction, int frame)
+{
+    return artPath + "#" + std::to_string(direction) + "/" + std::to_string(frame);
+}
+
+size_t hdLegacyParse(const std::string& text, std::unordered_map<std::string, uint64_t>* entries)
+{
+    size_t count = 0;
+    size_t start = 0;
+    while (start < text.size()) {
+        size_t end = text.find('\n', start);
+        if (end == std::string::npos) {
+            end = text.size();
+        }
+        std::string line = text.substr(start, end - start);
+        start = end + 1;
+
+        size_t comment = line.find('#');
+        if (comment != std::string::npos) {
+            line.resize(comment);
+        }
+
+        char path[512];
+        int direction = 0;
+        int frame = 0;
+        char hex[32];
+        if (sscanf(line.c_str(), "%511s %d %d %31s", path, &direction, &frame, hex) != 4) {
+            continue;
+        }
+        if (direction < 0 || direction >= kHdFhdMaxDirections || frame < 0 || strlen(hex) != 16) {
+            continue;
+        }
+        char* parsedEnd = nullptr;
+        uint64_t hash = strtoull(hex, &parsedEnd, 16);
+        if (parsedEnd == nullptr || *parsedEnd != '\0') {
+            continue;
+        }
+
+        (*entries)[hdLegacyKey(hdArtNormalizePath(path), direction, frame)] = hash;
+        count++;
+    }
+    return count;
 }
 
 } // namespace fallout

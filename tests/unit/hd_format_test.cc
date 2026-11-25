@@ -158,12 +158,48 @@ static void testManifest()
     CHECK(entries["art/tiles/a.frm"] == "ai");
 }
 
+static void testLegacy()
+{
+    // Reference values from tools/hd/legacy_art.py (frame_hash).
+    unsigned char four[4] = { 1, 2, 3, 4 };
+    CHECK(hdLegacyFrameHash(four, 2, 2, 2) == 0x9ee5a5d615aca5fdULL);
+    CHECK(hdLegacyFrameHash(nullptr, 0, 0, 0) == 0x4d25767f9dce13f5ULL);
+    std::vector<unsigned char> wide(300, 0);
+    for (int i = 0; i < 256; i++) {
+        wide[i] = static_cast<unsigned char>(i);
+    }
+    CHECK(hdLegacyFrameHash(wide.data(), 300, 1, 300) == 0xe0ed46c1d8fb5be7ULL);
+
+    // The pitch skips the padding after each row.
+    unsigned char padded[6] = { 1, 2, 99, 3, 4, 98 };
+    CHECK(hdLegacyFrameHash(padded, 2, 2, 3) == 0x9ee5a5d615aca5fdULL);
+    // Width and height are part of the hash.
+    CHECK(hdLegacyFrameHash(four, 4, 1, 4) != hdLegacyFrameHash(four, 2, 2, 2));
+
+    CHECK(hdLegacyKey("art/tiles/a.frm", 2, 7) == "art/tiles/a.frm#2/7");
+
+    std::unordered_map<std::string, uint64_t> entries;
+    size_t count = hdLegacyParse("# header\n"
+                                 "ART\\TILES\\EDG5000.FRM 0 0 9ee5a5d615aca5fd\n"
+                                 "art/items/chest1.frm 0 3 00000000000000ff\r\n"
+                                 "art/x.frm 0 0 123\n" // short hash
+                                 "art/x.frm 7 0 0123456789abcdef\n" // bad direction
+                                 "art/x.frm 0 0 0123456789abcdeg\n" // not hex
+                                 "broken\n",
+        &entries);
+    CHECK(count == 2);
+    CHECK(entries.size() == 2);
+    CHECK(entries["art/tiles/edg5000.frm#0/0"] == 0x9ee5a5d615aca5fdULL);
+    CHECK(entries["art/items/chest1.frm#0/3"] == 0xffULL);
+}
+
 int main()
 {
     testFhd();
     testPngColourTypes();
     testPaths();
     testManifest();
+    testLegacy();
 
     if (gFailures != 0) {
         fprintf(stderr, "hd_format_test: %d check(s) failed\n", gFailures);

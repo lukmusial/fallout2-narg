@@ -766,3 +766,27 @@ cd tools/hd
 .venv/bin/python palm_repaint.py     # ~25 s
 ```
 
+
+## Legacy sources and content mods (`legacy_art.py`)
+
+HD images are looked up by art path, so a mod that ships another picture
+under the same path (the Restoration Project repaints the world map, the
+dialogue frame, the hi-res main menu, some items, and replaces about 170
+tiles) would get the pack's picture of the original drawn over its own.
+`install.py` therefore ends with `legacy_art.py hashes`, which writes
+`data/hd/<pack>/legacy.txt`: for every image and `.fhd` frame the legacy art
+path, direction, frame and an FNV-1a 64 hash of the frame's size and palette
+indices, taken from the art the pack was made from (the game's chain:
+master.dat < critter.dat < f2_res.dat < ce.dat < patch000.dat < data/).
+`src/hd_art.cc` uses an image only while the running game's frame has that
+hash (`[graphics] hd_verify=1`, the default); otherwise the frame is drawn
+from the game, doubled. Ground variants follow their tile.
+
+```sh
+.venv/bin/python legacy_art.py hashes ../../out/build/macos/data/hd/ai ../../out/build/macos/data/hd/scripted
+.venv/bin/python legacy_art.py compare ../../out/build/macos/data/hd/ai --base ~/Games/Fallout\ 2 \
+    --mod ~/dev/rpu-test/game --md report.md   # what a mod replaces and adds
+```
+
+See `docs/rpu_compatibility.md` for the Restoration Project results. Hashing
+both packs takes about 10 minutes, most of it `ce-dat-tool extract`.

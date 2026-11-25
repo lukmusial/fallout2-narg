@@ -10,7 +10,9 @@ patches folder), so `[graphics] hd_pack=<pack>` then selects it. Multi-frame
 art (doors, fires, containers: the enhanced frames
 art/<type>/<name>/d<direction>_f<frame>.png) is packed into one
 art/<type>/<name>.fhd container (src/hd_format.h). Files that are already
-identical are skipped; files no longer in the pack are removed.
+identical are skipped; files no longer in the pack are removed. Each pack
+then gets legacy.txt (legacy_art.py): the hash of the legacy frame every image
+was made from, which the engine checks before using an image.
 The run directory is gitignored: the packs are derived from the game's art
 and never go into git.
 """
@@ -118,6 +120,12 @@ def main() -> None:
     for pack in args.packs:
         copied, kept, removed = install(pack, args.run_dir)
         print(f"{pack}: {copied} copied, {kept} unchanged, {removed} removed -> {args.run_dir / 'data/hd' / pack}")
+    # legacy.txt: the source frame of every image, so the engine skips images
+    # whose art a mod has replaced (legacy_art.py, src/hd_art.h).
+    import legacy_art
+
+    legacy_art.cmd_hashes(argparse.Namespace(packs=[args.run_dir / "data/hd" / p for p in args.packs],
+                                             game=hdlib.GAME_DIR, f2_res=None))
 
 
 if __name__ == "__main__":

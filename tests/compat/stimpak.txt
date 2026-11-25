@@ -1,0 +1,17 @@
+# Compatibility: Stimpak opens slot 1 and shows its hub, then PLAY.
+until mainmenu 30000
+wait 300
+key s
+wait 1500
+shot slots
+key home
+key enter
+until stimpak 30000
+wait 1000
+shot hub
+key p
+until game 30000
+wait 2000
+shot play
+dump play
+quit 0

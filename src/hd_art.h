@@ -25,6 +25,13 @@ class FrmImage;
 //   * = scripted                       # default for assets not listed
 //   art/intrface/mainmenu.frm = ai
 //
+// A pack may also contain `legacy.txt` (hd_format.h, tools/hd/legacy_art.py):
+// the hash of every legacy frame its images were made from. An image is then
+// only used while the running game's frame has that hash, so art a mod
+// replaces (e.g. the Restoration Project's) is drawn from the mod's frame,
+// doubled, instead of as the pack's picture of the original. `[graphics]
+// hd_verify=0` turns the check off.
+//
 // Decoded frames are kept in an LRU cache bounded by `[graphics]
 // hd_cache_mb`. When an asset has no HD image, callers can ask for an
 // automatic 2x expansion of the legacy frame instead, so later RGB effects
@@ -118,6 +125,8 @@ struct HdArtStats {
     size_t bytesCached;
     unsigned long long hits;
     unsigned long long misses;
+    int legacyChecked; // frames whose legacy source was checked (legacy.txt)
+    int legacyRejected; // of those, frames the running game draws differently
 };
 
 void hdArtGetStats(HdArtStats* stats);

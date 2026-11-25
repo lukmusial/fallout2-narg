@@ -1,0 +1,24 @@
+# Compatibility: a new game with the first premade character (intro skipped),
+# saved to slot 1 as "start" (the save the load tests use).
+until mainmenu 30000
+wait 300
+key n
+wait 2000
+shot selector
+key t
+wait 2500
+key esc
+until game 90000
+wait 3000
+shot newgame
+dump newgame
+key f4
+wait 1500
+key home
+key enter
+until input 10000
+text start
+key enter
+wait 2000
+shot saved
+quit 0

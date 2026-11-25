@@ -112,6 +112,10 @@ struct GraphicsSettings {
     std::string hd_pack;
     // Memory for decoded HD frames (LRU), in MiB.
     int hd_cache_mb = 256;
+    // Use an HD image only while the game's own frame is the one the pack
+    // made it from (the pack's legacy.txt): art replaced by a mod shows the
+    // mod's picture.
+    bool hd_verify = true;
     // With hd=1: text drawn at 2x (see hd_text.h).
     bool hd_text = true;
     // 2x glyph source: sharp (edge-preserving 2x of the original glyphs) or

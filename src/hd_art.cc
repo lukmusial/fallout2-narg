@@ -13,6 +13,7 @@
 #include "db.h"
 #include "debug.h"
 #include "hd_format.h"
+#include "memory.h"
 #include "settings.h"
 #include "stimpak.h"
 #include "window_manager.h"
@@ -31,6 +32,9 @@ namespace {
         AssetKind kind = AssetKind::None;
         std::string file; // resolved HD file path
         HdFhdInfo fhd;
+        // Legacy source check per frame (direction << 16 | frame): true when
+        // the running game's frame is the one the pack's image was made from.
+        std::unordered_map<int, bool> legacyOk;
     };
 
     struct CachedFrame {
@@ -56,6 +60,13 @@ namespace {
 
         unsigned long long hits = 0;
         unsigned long long misses = 0;
+
+        // legacy.txt of each pack used (empty: the pack has none, no check).
+        std::unordered_map<std::string, std::unordered_map<std::string, uint64_t>> legacyTables;
+        // Hashes of the running game's frames, by art path (hdLegacyKey).
+        std::unordered_map<std::string, std::unordered_map<std::string, uint64_t>> runningHashes;
+        int legacyChecked = 0;
+        int legacyRejected = 0;
     };
 
     HdArtState gHdArt;
@@ -112,6 +123,10 @@ namespace {
         gHdArt.lru.clear();
         gHdArt.frames.clear();
         gHdArt.bytes = 0;
+        gHdArt.legacyTables.clear();
+        gHdArt.runningHashes.clear();
+        gHdArt.legacyChecked = 0;
+        gHdArt.legacyRejected = 0;
     }
 
     void ensureInitialized()
@@ -135,7 +150,7 @@ namespace {
         return gHdArt.pack;
     }
 
-    const Asset& resolveAsset(const std::string& key)
+    Asset& resolveAsset(const std::string& key)
     {
         auto found = gHdArt.assets.find(key);
         if (found != gHdArt.assets.end()) {
@@ -243,6 +258,123 @@ namespace {
         return false;
     }
 
+    const std::unordered_map<std::string, uint64_t>& legacyTable(const std::string& pack)
+    {
+        auto found = gHdArt.legacyTables.find(pack);
+        if (found != gHdArt.legacyTables.end()) {
+            return found->second;
+        }
+
+        std::unordered_map<std::string, uint64_t> table;
+        std::vector<unsigned char> data;
+        if (readWholeFile("hd/" + pack + "/legacy.txt", data)) {
+            hdLegacyParse(std::string(data.begin(), data.end()), &table);
+            debugPrint("HD: pack %s: legacy sources of %zu frames\n", pack.c_str(), table.size());
+        }
+        return gHdArt.legacyTables.emplace(pack, std::move(table)).first->second;
+    }
+
+    // The legacy art the game draws for `path` (normalised): the localized
+    // version when there is one, as the art cache and named art do.
+    Art* loadLegacyArt(const std::string& path)
+    {
+        const std::string& language = settings.system.language;
+        if (!language.empty() && path.compare(0, 4, "art/") == 0) {
+            std::string localized = dbPath("art/" + language + "/" + path.substr(4));
+            if (fileExists(localized)) {
+                Art* art = artLoad(localized.c_str());
+                if (art != nullptr) {
+                    return art;
+                }
+            }
+        }
+        std::string name = dbPath(path);
+        return artLoad(name.c_str());
+    }
+
+    const std::unordered_map<std::string, uint64_t>& runningLegacyHashes(const std::string& path)
+    {
+        auto found = gHdArt.runningHashes.find(path);
+        if (found != gHdArt.runningHashes.end()) {
+            return found->second;
+        }
+
+        std::unordered_map<std::string, uint64_t> hashes;
+        Art* art = loadLegacyArt(path);
+        if (art != nullptr) {
+            int frames = artGetFrameCount(art);
+            for (int direction = 0; direction < ROTATION_COUNT; direction++) {
+                for (int frame = 0; frame < frames; frame++) {
+                    int width = 0;
+                    int height = 0;
+                    int xOffset = 0;
+                    int yOffset = 0;
+                    unsigned char* data = artGetFrameData(art, frame, static_cast<Rotation>(direction), &width, &height, &xOffset, &yOffset);
+                    if (data != nullptr && width > 0 && height > 0) {
+                        hashes[hdLegacyKey(path, direction, frame)] = hdLegacyFrameHash(data, width, height, width);
+                    }
+                }
+            }
+            internal_free(art);
+        }
+        return gHdArt.runningHashes.emplace(path, std::move(hashes)).first->second;
+    }
+
+    // Whether the pack's image of `path` (normalised) may be drawn: the
+    // running game's legacy frame must be the one the image was made from
+    // (the pack's legacy.txt). Packs without legacy.txt, frames it does not
+    // list and `[graphics] hd_verify=0` are not checked. Ground variants
+    // (art/tiles/variants/<tile>/<k>) follow their tile.
+    bool legacyFrameMatches(Asset& asset, const std::string& pack, const std::string& path, int frame, int direction)
+    {
+        if (!settings.graphics.hd_verify) {
+            return true;
+        }
+
+        int slot = (direction << 16) | (frame & 0xFFFF);
+        auto known = asset.legacyOk.find(slot);
+        if (known != asset.legacyOk.end()) {
+            return known->second;
+        }
+
+        bool ok = true;
+        const auto& table = legacyTable(pack);
+        if (!table.empty()) {
+            std::string source = path;
+            int sourceFrame = frame;
+            int sourceDirection = direction;
+            static const std::string kVariants = "art/tiles/variants/";
+            if (path.compare(0, kVariants.size(), kVariants) == 0) {
+                size_t slash = path.find('/', kVariants.size());
+                source = "art/tiles/" + path.substr(kVariants.size(), slash - kVariants.size()) + ".frm";
+                sourceFrame = 0;
+                sourceDirection = 0;
+            }
+
+            std::string key = hdLegacyKey(source, sourceDirection, sourceFrame);
+            auto expected = table.find(key);
+            if (expected == table.end() && sourceDirection != 0) {
+                // One-direction art is listed as direction 0.
+                key = hdLegacyKey(source, 0, sourceFrame);
+                expected = table.find(key);
+            }
+            if (expected != table.end()) {
+                gHdArt.legacyChecked++;
+                const auto& running = runningLegacyHashes(source);
+                auto actual = running.find(key);
+                ok = actual != running.end() && actual->second == expected->second;
+                if (!ok) {
+                    gHdArt.legacyRejected++;
+                    debugPrint("HD: %s (direction %d, frame %d) is not the art pack %s was made from; drawing the game's own frame\n",
+                        source.c_str(), sourceDirection, sourceFrame, pack.c_str());
+                }
+            }
+        }
+
+        asset.legacyOk.emplace(slot, ok);
+        return ok;
+    }
+
     std::string frameKey(const char* prefix, const std::string& path, int frame, int direction)
     {
         return std::string(prefix) + path + "#" + std::to_string(direction) + "/" + std::to_string(frame);
@@ -279,8 +411,11 @@ std::shared_ptr<const HdImage> hdArtFindFrame(const char* artPath, int frame, in
     }
 
     std::string path = hdArtNormalizePath(artPath);
-    const Asset& asset = resolveAsset(path);
+    Asset& asset = resolveAsset(path);
     if (asset.kind == AssetKind::None) {
+        return nullptr;
+    }
+    if (!legacyFrameMatches(asset, packForAsset(path), path, frame, direction)) {
         return nullptr;
     }
 
@@ -559,6 +694,8 @@ void hdArtGetStats(HdArtStats* stats)
     stats->bytesCached = gHdArt.bytes;
     stats->hits = gHdArt.hits;
     stats->misses = gHdArt.misses;
+    stats->legacyChecked = gHdArt.legacyChecked;
+    stats->legacyRejected = gHdArt.legacyRejected;
 }
 
 // Stimpak's screens (hub, pickers, lists): HD art for the images and

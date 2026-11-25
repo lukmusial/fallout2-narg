@@ -15,7 +15,10 @@ the menu background is drawn without transparency.
 It also writes two packs that exercise the other lookup routes with the same
 images: hd/testfhd/ (each image as a one-frame .fhd container, built with
 tools/dev/fhd.py) and hd/testmixed/ (only a manifest.txt that takes the main
-menu background from the "test" pack and everything else from a missing pack).
+menu background from the "test" pack and everything else from a missing pack),
+and hd/testlegacy/ (the vanilla and hi-res main menu images with a legacy.txt
+that has the right source hash for the first and a wrong one for the second,
+for the legacy source check, tools/hd/legacy_art.py).
 
 This is test art only (a simple filter, no enhancement); the real packs come
 from tools/hd/. Output stays in the gitignored run directory.
@@ -32,6 +35,8 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "hd"))
+import legacy_art  # noqa: E402
 import stimpak_menu_art  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -106,6 +111,22 @@ def main():
 
         fhd.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run([sys.executable, str(ROOT / "tools/dev/fhd.py"), "build", str(fhd), str(out)], check=True)
+
+    legacy = RUN_DIR / "data/hd/testlegacy/legacy.txt"
+    if not legacy.exists() or args.force:
+        lines = ["# Test legacy sources (tools/dev/make_test_hd_art.py): right for", "# mainmenu, wrong for hr_mainmenu"]
+        for art, right in (("art/intrface/mainmenu.frm", True), ("art/intrface/hr_mainmenu.frm", False)):
+            with tempfile.TemporaryDirectory() as tmp:
+                indices = frm_indices(art.replace("/", "\\"), Path(tmp))
+            height, width = indices.shape
+            value = legacy_art.frame_hash(width, height, np.ascontiguousarray(indices, dtype=np.uint8).tobytes())
+            lines.append(f"{art} 0 0 {value if right else value ^ 1:016x}")
+            image = RUN_DIR / "data/hd/test" / Path(art).with_suffix(".png")
+            target = legacy.parent / Path(art).with_suffix(".png")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(image.read_bytes())
+        legacy.write_text("\n".join(lines) + "\n")
+        print(f"wrote {legacy}")
 
     manifest = RUN_DIR / "data/hd/testmixed/manifest.txt"
     if not manifest.exists() or args.force:

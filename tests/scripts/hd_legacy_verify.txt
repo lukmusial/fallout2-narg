@@ -1,0 +1,8 @@
+# Legacy source check (run with [graphics]hd=1 [graphics]hd_pack=testlegacy):
+# the pack's legacy.txt has the right hash for mainmenu and a wrong one for
+# hr_mainmenu, so only mainmenu may use the pack image.
+until mainmenu 20000
+hdprobe art/intrface/mainmenu.frm probe_match
+hdprobe art/intrface/hr_mainmenu.frm probe_mismatch
+hdstats stats
+quit 0

@@ -1,0 +1,7 @@
+# Compatibility: a loaded save (--dev-load-game) reaches the game; screenshot
+# and state dump.
+until game 60000
+wait 3000
+shot loaded
+dump loaded
+quit 0
