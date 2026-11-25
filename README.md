@@ -13,6 +13,33 @@
 
 It installs on vanilla Fallout 2 and on top of the [Restoration Project](https://github.com/BGforgeNet/Fallout2_Restoration_Project) (RPU). Characters (critters) keep their original art.
 
+![Arroyo in Narg Edition](docs/media/hd_arroyo.jpg)
+
+## Screenshots
+
+Each pair shows the same spot before (the original art, as the game draws it at this screen size) and after (Narg Edition), enlarged 2x so single pixels show.
+
+![Arroyo: original art and HD](docs/media/compare_arroyo.jpg)
+![Klamath: original art and HD](docs/media/compare_klamath.jpg)
+![Main menu: original art and HD](docs/media/compare_menu.jpg)
+![Inventory: original art and HD](docs/media/compare_inventory.jpg)
+![Character screen: original art and HD](docs/media/compare_character.jpg)
+
+On the Restoration Project, before (RPU's art, as the game draws it) and after (Narg Edition with the `narg_hd_rpu.dat` add-on):
+
+![RPU's new location art: doubled and HD](docs/media/rpu_abbey.jpg)
+![RPU's EPA: doubled and HD](docs/media/rpu_epa.jpg)
+
+In motion: lights that move with the player at night, a light from every round of a burst, trees in the wind, and map zoom.
+
+| Lights | Gunshots |
+|---|---|
+| ![Lights at night in the Den](docs/media/lights_walk.gif) | ![A burst at night](docs/media/gunshot.gif) |
+| **Wind** | **Zoom** |
+| ![Trees in the wind in Arroyo](docs/media/wind.gif) | ![Zooming the map out and in](docs/media/zoom.gif) |
+
+Stimpak's screens are in [its README](https://github.com/lukmusial/fallout2-stimpak#readme).
+
 > **The HD art is made from the game's own art.** Its images are upscaled from Fallout 2's art files, so you need your own copy of Fallout 2 ([GOG](https://www.gog.com/game/fallout_2), [Steam](https://store.steampowered.com/app/38410), [Epic](https://store.epicgames.com/p/fallout-2)) to play, and the archives are not meant to be redistributed without the game.
 
 ## Download
@@ -36,7 +63,7 @@ Releases are archives per platform: `narg_v<version>_macos.zip`, `narg_v<version
 ## Installation
 
 - Narg Edition installs on **vanilla Fallout 2** (GOG, Steam, CD) or on **Fallout 2 with RPU** (install RPU first, then Narg Edition).
-- Saved games keep working; with RPU, start a new game after installing RPU as usual.
+- Saved games keep working. Saves from before RPU load on RPU after `narg/rpu-save-convert.py` ([RPU notes](docs/rpu.md#saves-from-before-rpu)).
 - Everything the installer replaces or changes is copied to `backup/narg/` first.
 
 Per platform: [macOS](docs/macos.md) | [Linux](docs/linux.md) | [Windows](docs/windows.md) | [on top of RPU](docs/rpu.md).
@@ -85,4 +112,4 @@ Describe the problem, attach a savegame and a screenshot (in HD, F12 saves a ful
 - [Known issues](docs/known.md)
 - [Credits and licences](docs/credits.md)
 - [Development: building the engine and the archives](docs/development.md)
-- [Tests of the 1.0.0 release](docs/testing.md)
+- [Test results](docs/testing.md)
