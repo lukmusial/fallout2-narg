@@ -178,7 +178,7 @@ bool hdImageDecodePng(const unsigned char* data, size_t size, HdImage* image, st
 
 uint64_t hdLegacyFrameHash(const unsigned char* pixels, int width, int height, int pitch)
 {
-    constexpr uint64_t kPrime = 0x100000001B3ULL;
+    static constexpr uint64_t kPrime = 0x100000001B3ULL;
     uint64_t hash = 0xCBF29CE484222325ULL;
     auto add = [&hash](unsigned char byte) {
         hash = (hash ^ byte) * kPrime;

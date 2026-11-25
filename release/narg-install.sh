@@ -79,7 +79,7 @@ done
 
 # Case-sensitive file systems: the engine looks files up in lower case.
 touch fs_testx fs_testX
-if [[ "$(ls fs_test* | wc -l | tr -d ' ')" == "2" ]]; then
+if [[ "$(find . -maxdepth 1 -name 'fs_test*' | wc -l | tr -d ' ')" == "2" ]]; then
     echo "note: the file system is case sensitive; Fallout 2's own files must have lower-case names."
     rm -f fs_testx fs_testX
 else
@@ -165,7 +165,7 @@ backup mods/mods_order.txt
 if [[ ! -f mods/mods_order.txt ]]; then
     # Without a load order the engine would load every mods/*.dat; write the
     # mods that are there now, in name order, as it would.
-    (cd mods && ls -1 | awk 'tolower($0) ~ /\.dat$/ && $0 !~ /^narg_hd/' | sort) >mods/mods_order.txt
+    (cd mods && find . -maxdepth 1 -type f | sed 's|^\./||' | awk 'tolower($0) ~ /\.dat$/ && $0 !~ /^narg_hd/' | sort) >mods/mods_order.txt
 fi
 add_mod() {
     if ! NARG_M="$1" awk 'BEGIN { m = ENVIRON["NARG_M"]; f = 0 } { sub(/\r$/, "") } tolower($0) == tolower(m) { f = 1 } END { exit !f }' mods/mods_order.txt; then
@@ -182,12 +182,17 @@ remove_mod() {
     mv mods/mods_order.tmp mods/mods_order.txt
 }
 # HD art only adds files under hd/, so its place in the order does not matter.
-while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line%$'\r'}"
-    [[ -z "$line" || "$line" == \#* || "$line" == \;* ]] && continue
-    add_mod "$line"
-done <mods_order.txt
-rm -f mods_order.txt
+# The archive's list is removed once used; a second run adds the main pack.
+if [[ -f mods_order.txt ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        [[ -z "$line" || "$line" == \#* || "$line" == \;* ]] && continue
+        add_mod "$line"
+    done <mods_order.txt
+    rm -f mods_order.txt
+else
+    add_mod narg_hd.dat
+fi
 if [[ "$PACK" == "scripted" ]]; then
     add_mod narg_hd_scripted.dat
 else
