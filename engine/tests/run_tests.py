@@ -1469,8 +1469,8 @@ def test_stimpak_perk_scan(update):
 
 
 def test_english_interface_bar(update):
-    """At 800+ logical pixels the 800-wide interface bar comes from ce.dat
-    (English labels), not the Russian one in f2_res.dat."""
+    """At 800+ logical pixels the 800-wide interface bar is built from the
+    game's iface.frm (English labels), not the Russian one in f2_res.dat."""
     reset_saves()
     out, seconds = run_game("iface800", "load_slot.txt", ["--dev-load-game=1", "[screen]resolution_x=1600",
                                                           "[screen]resolution_y=960", "[ui]iface_bar_width=800"])
@@ -1485,6 +1485,34 @@ def test_english_interface_bar(update):
     if english < 0.25 or english < 2 * russian:
         raise TestFailure(f"bar matches English art {english:.0%}, Russian art {russian:.0%}")
     return f"English {english:.0%} vs Russian {russian:.0%} ({seconds:.0f}s)"
+
+
+# The HR_IFACE_800.FRM shipped in ce.dat before the bar was built at run time
+# (tools/dev/iface_bar_art.py from the game's iface.frm), as artLoad returned
+# it: FNV-1a 64 of its pixels and of the whole in-memory art.
+SHIPPED_BAR_PIXELS_FNV = "06bfa3f99bd636b6"
+SHIPPED_BAR_ART_FNV = "225522509f582b1b"
+
+
+def test_iface_bar_built(update):
+    """The 800-wide bar built from the game's iface.frm in place of the
+    Russian one in f2_res.dat is the art ce.dat used to ship, byte for byte;
+    ce.dat no longer carries it."""
+    entries = subprocess.run([str(RUN_DIR / "ce-dat-tool"), str(RUN_DIR / "ce.dat"), "list"],
+                             capture_output=True, text=True, check=True).stdout.lower()
+    if "hr_iface_800" in entries:
+        raise TestFailure("ce.dat still carries HR_IFACE_800.FRM")
+    out, seconds = run_game("iface_bar_built", "iface_bar_built.txt")
+    bar = json.loads((out / "bar.json").read_text())
+    expected = {"loaded": True, "frames": 1, "width": 800, "height": 99, "x": 0, "y": 0,
+                "pixels_fnv": SHIPPED_BAR_PIXELS_FNV, "art_fnv": SHIPPED_BAR_ART_FNV}
+    wrong = {key: bar.get(key) for key, value in expected.items() if bar.get(key) != value}
+    if wrong:
+        raise TestFailure(f"built bar differs from the shipped one: {wrong}")
+    log = (run_dir() / "debug.log").read_text(errors="replace")
+    if "HR_IFACE_800.FRM built from the game's iface.frm" not in log:
+        raise TestFailure("debug.log does not say the bar was built")
+    return f"identical to the shipped bar ({seconds:.0f}s)"
 
 
 def test_load_save_with_hidden_bar(update):
@@ -2213,7 +2241,7 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
          + [make_slot_test(slot, hd=True) for slot in HD_SLOTS]
          + [test_stimpak_save_unchanged, test_character_screens, test_stimpak_edit_player, test_stimpak_cancel,
             test_stimpak_edit_companion, test_stimpak_lists, test_stimpak_perk_scan,
-            test_english_interface_bar, test_load_save_with_hidden_bar]
+            test_english_interface_bar, test_iface_bar_built, test_load_save_with_hidden_bar]
          + [make_hd_screens_test(pack) for pack in ("scripted", "ai")]
          + [make_hd_map_test(pack, slot) for pack in HD_MAP_PACKS for slot in range(1, SLOT_COUNT + 1)]
          + [test_hd_mixed_pack]
