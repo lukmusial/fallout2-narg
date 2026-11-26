@@ -18,7 +18,9 @@ struct Art;
 //
 // The active pack is `[graphics] hd_pack` (a folder name under hd/, looked up
 // through the normal file layering: data/ patches folder, mods, ce.dat,
-// master.dat). Empty means no HD art. A pack folder may contain
+// master.dat). Empty means no pack: every frame comes from the runtime
+// upscale (hd_upscale=scripted, the default), or is doubled
+// (hd_upscale=double). A pack folder may contain
 // `manifest.txt` to take individual assets from other packs; this is how a
 // "mixed" pack is made:
 //
@@ -145,6 +147,8 @@ struct HdArtStats {
     double runtimeInlineMs = 0; // time spent on those (main thread)
     double runtimeInlineMaxMs = 0;
     unsigned long long runtimeFromPool = 0; // taken from the background threads when first drawn
+    unsigned long long drawUpscales = 0; // frames not ready when drawn (upscaled or waited for then)
+    unsigned long long drawUpscalesSinceScene = 0; // of those, since the last scene preparation ended
     double runtimeTakeMs = 0; // main-thread time for those (waiting for one, or running a queued one)
     unsigned long long preupscaleQueued = 0; // frames queued at start and at map loads
     int upscaleThreads = 0;
@@ -186,16 +190,49 @@ void hdArtGetStats(HdArtStats* stats);
 // palette; nothing here locks art (the callers that have the frame pass it,
 // others read the art file, never from inside an art cache read).
 
+// Whether HD art is on: a pack is set, or the runtime upscale is (no pack
+// needed: `hd_pack` empty with hd_upscale=scripted upscales everything).
+bool hdArtActive();
+
 // Whether critters are drawn HD (runtime upscale on, hd_upscale_critters).
 bool hdArtUpscalesCritters();
 
 // Queues the early interface art (start of the game).
 void hdArtPreupscaleInterface();
-// Map load: drops queued frames of the previous map.
-void hdArtPreupscaleMapBegin();
-// Map load: queues every frame of `art` (locked by the caller, the legacy art
-// of `artPath`) that would be upscaled at runtime.
-void hdArtPreupscaleArt(const char* artPath, Art* art);
+// Job groups of the background upscale.
+constexpr int kHdUpscaleGroupGeneral = 0; // interface, frames drawn
+constexpr int kHdUpscaleGroupScene = 1; // what a map load waits for (hd_scene.h)
+constexpr int kHdUpscaleGroupBackground = 2; // idle-time preparation
+
+// Queues every frame of `art` (locked by the caller, the legacy art of
+// `artPath`) that would be upscaled at runtime, at `priority` (lower first)
+// in `group`. Returns how many.
+int hdArtQueueArt(const char* artPath, Art* art, float priority, int group);
+// The same for an art file read now (`palettePath`: the .pal the game shows
+// it with, e.g. the death screen's; null: the current palette).
+int hdArtQueueArtFile(const char* artPath, const char* palettePath, float priority, int group);
+// Drops a group's queued frames.
+void hdArtUpscaleCancel(int group);
+// Frames of a group queued since its last reset, and how many are done.
+void hdArtUpscaleProgress(int group, int* total, int* done);
+void hdArtUpscaleResetGroup(int group);
+// Floor and roof tiles upscaled with their real neighbours (hd_scene.h):
+// `neighbours` [row delta + 1][screen column delta + 1] (null: the tile
+// itself), each width x height packed. Cleared for every map.
+void hdArtClearTileContexts();
+void hdArtSetTileContext(const char* artPath, const unsigned char* const neighbours[3][3], int width, int height);
+// Runs one queued frame on the calling (main) thread; false when none.
+bool hdArtUpscaleHelp();
+// Scene preparation bookkeeping (stats, "upscaled when drawn" counter).
+void hdArtSceneBegin();
+void hdArtSceneEnd(double queueMs);
+// The HD art cache's size and budget (hd_cache_mb), bytes.
+size_t hdArtCacheBytes();
+size_t hdArtCacheBudget();
+// An image that is not game art (a splash screen with its own palette),
+// upscaled at runtime now (or from the cache); `name` identifies it.
+std::shared_ptr<const HdImage> hdArtUpscaleImage(const std::string& name, const unsigned char* data, int width, int height,
+    int pitch, const unsigned char* palette8);
 // Frames queued or being upscaled in the background.
 int hdArtUpscalePending();
 // Waits until the background threads are idle and takes their results.

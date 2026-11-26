@@ -350,11 +350,12 @@ static HdLayer* tileHdExistingLayer()
     return window->hdLayer;
 }
 
-// Sets up gTileHd for a render pass; HD tiles need hd=1 and an HD pack.
+// Sets up gTileHd for a render pass; HD tiles need hd=1 and HD art (a pack
+// or the runtime upscale).
 static void tileHdBegin()
 {
     gTileHd.layer = nullptr;
-    if (!windowHdIsActive() || hdArtGetPack().empty()) {
+    if (!windowHdIsActive() || !hdArtActive()) {
         return;
     }
 

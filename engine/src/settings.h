@@ -108,10 +108,12 @@ struct GraphicsSettings {
     // Presents at twice the logical resolution (needs [screen] scale=2):
     // legacy pixels are doubled and HD layers show at full resolution.
     bool hd = false;
-    // Folder under hd/ holding the HD art pack (empty: no HD art).
+    // Folder under hd/ holding an HD art pack. Empty: none, every frame is
+    // upscaled at runtime (hd_upscale=scripted) or doubled (double).
     std::string hd_pack;
-    // Memory for decoded HD frames (LRU), in MiB.
-    int hd_cache_mb = 256;
+    // Memory for decoded HD frames (LRU), in MiB: the prepared scene and
+    // what idle time prepares (up to 3/4 of it) live here.
+    int hd_cache_mb = 512;
     // Use an HD image only while the game's own frame is the one the pack
     // made it from (the pack's legacy.txt): art replaced by a mod shows the
     // mod's picture.
@@ -146,12 +148,22 @@ struct GraphicsSettings {
     // With hd_upscale=scripted: critters (characters) are drawn upscaled in
     // the HD layer too; 0 keeps them doubled (legacy).
     bool hd_upscale_critters = true;
+    // Floor and roof tiles upscaled with their most common neighbours on
+    // the map instead of copies of themselves (no seams; hd_scene.h).
+    bool hd_upscale_tile_neighbours = true;
     // Upscale the art a map uses (and the early interface art at start) in
     // background threads when it loads; 0 upscales each frame when it is
     // first drawn.
     bool hd_upscale_preload = true;
-    // Keep upscaled frames on disk (data/hd/cache) for later sessions.
-    bool hd_upscale_cache = false;
+    // Keep upscaled frames on disk (data/hd/cache, the user's own derived
+    // files) for later sessions, up to hd_upscale_cache_mb (least recently
+    // used ones removed).
+    bool hd_upscale_cache = true;
+    int hd_upscale_cache_mb = 2048;
+    // While a map's art is prepared (hd_scene.h): a loading screen (the
+    // splash picture and a progress bar) once it takes this long.
+    bool hd_loading_screen = true;
+    int hd_loading_screen_min_ms = 150;
     // Background threads (0 = processor threads - 1, at most 8).
     int hd_upscale_threads = 0;
     // 16: the palette boost (6-bit palette expanded at full precision,

@@ -1,0 +1,73 @@
+# Phase 2.23 timings (use with --dev-load-game=N, hd=1, [graphics]zoom=1;
+# tools/dev/runtime_perf_play.py): the first 30 s of play walking, running
+# and scrolling; entering combat; zoomed out to 0.5x; a map transition with
+# its loading screen; the world map and the town map. Frame times are the
+# game loop's (one input poll to the next, frame limiter included).
+until game 60000
+hdstats load
+frametimes reset
+walk 1 8 run
+wait 3000
+scrollhold 1 0 2500
+wait 2500
+walk 4 8 run
+wait 3000
+scrollhold -1 0 2500
+wait 2500
+scrollhold 0 1 2500
+wait 2500
+walk 2 6
+wait 3500
+scrollhold 0 -1 2500
+wait 2500
+move 639 240
+wait 2500
+move 0 240
+wait 2500
+move 320 240
+wait 1500
+frametimes play
+hdstats play_stats
+fbshot play
+frametimes reset
+shoot 8 nearest
+wait 5000
+frametimes combat
+hdstats combat_stats
+key enter
+wait 1500
+frametimes reset
+zoom 0.5
+viewsettle
+scrollhold 1 0 2500
+wait 2500
+scrollhold 0 1 2000
+wait 2000
+frametimes zoom
+hdstats zoom_stats
+fbshot zoom
+zoom 1 now
+wait 500
+loadingshot transition_loading
+frametimes reset
+gotomap $NEXT_MAP
+wait 3000
+until game 60000
+wait 3000
+frametimes newtown
+hdstats newtown_stats
+fbshot newtown
+frametimes reset
+worldmap
+wait 2500
+fbshot worldmap
+key right 4
+wait 1200
+key down 4
+wait 1200
+key T
+wait 2000
+fbshot townmap
+frametimes worldmap
+hdstats end_stats
+quit 0

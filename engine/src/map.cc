@@ -22,6 +22,7 @@
 #include "game_mouse.h"
 #include "game_movie.h"
 #include "game_sound.h"
+#include "hd_scene.h"
 #include "input.h"
 #include "interface.h"
 #include "item.h"
@@ -1194,6 +1195,8 @@ err:
     interfaceBarShow();
     _proto_dude_update_gender();
     _map_place_dude_and_mouse();
+    // CE: the HD runtime upscale prepares the scene before play (hd_scene.h).
+    hdScenePrepareMap();
     fileSetReadProgressHandler(nullptr, 0);
     isoEnable();
     _gmouse_disable_scrolling();

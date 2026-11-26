@@ -158,6 +158,8 @@ set(FALLOUT_ENGINE_SOURCES
     "src/hd_lights.h"
     "src/hd_text.cc"
     "src/hd_text.h"
+    "src/hd_scene.cc"
+    "src/hd_scene.h"
     "src/hd_upscale.cc"
     "src/hd_upscale.h"
     "src/heap.cc"

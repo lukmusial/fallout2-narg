@@ -1,0 +1,25 @@
+# Phase 2.23 scene preparation (run with --dev-load-game=N, hd=1, no pack):
+# a map transition shows the loading screen (loadingshot captures it) while
+# the new map's art is upscaled; afterwards nothing is upscaled when drawn,
+# also while walking and scrolling.
+until game 30000
+upscalewait first
+loadingshot loading
+gotomap DENBUS1
+wait 4000
+until game 30000
+wait 1000
+hdstats arrived
+fbshot den
+key right
+wait 300
+key down
+wait 300
+move 639 240
+wait 1500
+move 0 240
+wait 1500
+move 320 240
+wait 500
+hdstats end
+quit 0

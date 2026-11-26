@@ -26,6 +26,7 @@
 #include "game.h"
 #include "game_mouse.h"
 #include "hd_art.h"
+#include "hd_scene.h"
 #include "hd_lights.h"
 #include "hd_lights_map.h"
 #include "hd_shot_light.h"
@@ -1192,7 +1193,94 @@ namespace {
             << ", \"batch\": \"" << stats.batchName << "\""
             << ", \"batch_queued\": " << stats.batchQueued
             << ", \"batch_queue_ms\": " << stats.batchQueueMs
-            << ", \"batch_done_ms\": " << stats.batchDoneMs << "}\n";
+            << ", \"batch_done_ms\": " << stats.batchDoneMs
+            << ", \"draw_upscales\": " << stats.drawUpscales
+            << ", \"draw_upscales_since_scene\": " << stats.drawUpscalesSinceScene;
+        HdSceneStats scene;
+        hdSceneGetStats(&scene);
+        out << ", \"scenes\": " << scene.scenes
+            << ", \"scene_arts\": " << scene.sceneArts
+            << ", \"scene_frames\": " << scene.sceneFrames
+            << ", \"scene_collect_ms\": " << scene.collectMs
+            << ", \"scene_wait_ms\": " << scene.waitMs
+            << ", \"loading_screens\": " << scene.loadingScreens
+            << ", \"background_arts\": " << scene.backgroundArts
+            << ", \"background_left\": " << scene.backgroundLeft << "}\n";
+        return true;
+    }
+
+    // Frame times (Phase 2.23): the interval between input polls (one game
+    // loop iteration, including the frame limiter's wait), recorded from
+    // `frametimes reset` to `frametimes <name>` (count, mean, p95, p99, max,
+    // frames over 33 and 50 ms).
+    struct FrameTimes {
+        bool recording = false;
+        std::chrono::steady_clock::time_point last;
+        std::vector<float> intervals;
+    };
+
+    FrameTimes gFrameTimes;
+
+    void frameTimesTicker()
+    {
+        if (!gFrameTimes.recording) {
+            return;
+        }
+        auto now = std::chrono::steady_clock::now();
+        if (gFrameTimes.last.time_since_epoch().count() != 0) {
+            gFrameTimes.intervals.push_back(std::chrono::duration<float, std::milli>(now - gFrameTimes.last).count());
+        }
+        gFrameTimes.last = now;
+    }
+
+    bool commandFrametimes(const DevAutomationCommand& command, bool first)
+    {
+        (void)first;
+        if (command.args.empty()) {
+            devAutomationFail(command, "usage: frametimes reset|<name>");
+        }
+        if (command.args[0] == "reset") {
+            gFrameTimes.intervals.clear();
+            gFrameTimes.last = {};
+            gFrameTimes.recording = true;
+            return true;
+        }
+        std::vector<float> sorted = gFrameTimes.intervals;
+        std::sort(sorted.begin(), sorted.end());
+        auto at = [&](double q) {
+            return sorted.empty() ? 0.0f : sorted[std::min(sorted.size() - 1, static_cast<size_t>(q * (sorted.size() - 1) + 0.5))];
+        };
+        double sum = 0;
+        int over33 = 0;
+        int over50 = 0;
+        for (float value : sorted) {
+            sum += value;
+            over33 += value > 33.4f ? 1 : 0;
+            over50 += value > 50.0f ? 1 : 0;
+        }
+        std::ofstream out(devAutomationOutputPath(command.args[0], ".json"));
+        out << "{\"frames\": " << sorted.size()
+            << ", \"mean_ms\": " << (sorted.empty() ? 0.0 : sum / sorted.size())
+            << ", \"p50_ms\": " << at(0.5) << ", \"p95_ms\": " << at(0.95) << ", \"p99_ms\": " << at(0.99)
+            << ", \"max_ms\": " << (sorted.empty() ? 0.0f : sorted.back())
+            << ", \"over_33ms\": " << over33 << ", \"over_50ms\": " << over50 << "}\n";
+        return true;
+    }
+
+    // loadingshot <name>: the next loading screen (map load with the
+    // runtime upscale) writes its first presented frame as <name>.png.
+    bool commandLoadingshot(const DevAutomationCommand& command, bool first)
+    {
+        (void)first;
+        if (command.args.empty()) {
+            devAutomationFail(command, "usage: loadingshot <name>");
+        }
+        std::string path = devAutomationOutputPath(command.args[0], ".png");
+        hdSceneSetLoadingScreenHook([path]() {
+            if (!screenshotSaveFramebufferPng(path.c_str())) {
+                debugPrint("AUTOMATION: loadingshot: cannot write %s\n", path.c_str());
+            }
+        });
         return true;
     }
 
@@ -1393,6 +1481,9 @@ void hdDevAutomationInit()
     devAutomationRegisterCommand("hdcheck", commandHdcheck);
     devAutomationRegisterCommand("hdstats", commandHdstats);
     devAutomationRegisterCommand("upscalewait", commandUpscalewait);
+    devAutomationRegisterCommand("loadingshot", commandLoadingshot);
+    devAutomationRegisterCommand("frametimes", commandFrametimes);
+    devAutomationRegisterTicker(frameTimesTicker);
     devAutomationRegisterCommand("fadeshot", commandFadeshot);
     devAutomationRegisterCommand("perf", commandPerf);
     devAutomationRegisterCommand("worldmap", commandWorldmap);

@@ -11,9 +11,14 @@
 
 #ifdef _WIN32
 #include <direct.h>
+#include <io.h>
+#include <sys/stat.h>
+#include <sys/utime.h>
 #else
+#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <utime.h>
 #endif
 
 namespace fallout {
@@ -87,13 +92,14 @@ namespace {
 
     // hdlib.wrap_pad_tile without context: the tile drawn on the isometric
     // lattice around itself (offsets from src/tile.cc), then itself on top.
-    void wrapPadTile(const unsigned char* indices, int width, int height, int pitch, int pad, std::vector<unsigned char>* canvas)
+    void wrapPadTile(const unsigned char* indices, int width, int height, int pitch, int pad, std::vector<unsigned char>* canvas,
+        const HdTileContext* context)
     {
         int canvasWidth = width + 2 * pad;
         int canvasHeight = height + 2 * pad;
         canvas->assign(static_cast<size_t>(canvasWidth) * canvasHeight, 0);
 
-        auto blit = [&](int x0, int y0) {
+        auto blit = [&](int x0, int y0, const unsigned char* source, int sourcePitch) {
             for (int y = 0; y < height; y++) {
                 int cy = y0 + y;
                 if (cy < 0 || cy >= canvasHeight) {
@@ -101,7 +107,7 @@ namespace {
                 }
                 for (int x = 0; x < width; x++) {
                     int cx = x0 + x;
-                    unsigned char index = indices[static_cast<size_t>(y) * pitch + x];
+                    unsigned char index = source[static_cast<size_t>(y) * sourcePitch + x];
                     if (cx >= 0 && cx < canvasWidth && index != 0) {
                         (*canvas)[static_cast<size_t>(cy) * canvasWidth + cx] = index;
                     }
@@ -115,10 +121,18 @@ namespace {
                 if (r == 0 && c == 0) {
                     continue;
                 }
-                blit(pad + c * 48 + r * 32, pad + c * -12 + r * 24);
+                const unsigned char* other = nullptr;
+                if (context != nullptr && r >= -1 && r <= 1 && c >= -1 && c <= 1) {
+                    other = context->neighbour[r + 1][c + 1];
+                }
+                if (other != nullptr) {
+                    blit(pad + c * 48 + r * 32, pad + c * -12 + r * 24, other, width);
+                } else {
+                    blit(pad + c * 48 + r * 32, pad + c * -12 + r * 24, indices, pitch);
+                }
             }
         }
-        blit(pad, pad);
+        blit(pad, pad, indices, pitch);
     }
 
     // Per palette index: distance to the nearest different usable entry.
@@ -969,7 +983,7 @@ namespace {
     };
 
     void upscaleWhole(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8,
-        bool tile, bool precise, HdImage* dest);
+        bool tile, bool precise, HdImage* dest, const HdTileContext* context = nullptr);
 
     // Rows of source context each strip gets above and below: more than
     // every stage reaches (de-dither 3, DCCI 2 + 3/2, restoration and
@@ -981,10 +995,10 @@ namespace {
 } // namespace
 
 void hdUpscaleScripted(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8,
-    bool tile, HdImage* dest, int threads, bool precise)
+    bool tile, HdImage* dest, int threads, bool precise, const HdTileContext* context)
 {
     if (threads <= 1 || tile || static_cast<long long>(width) * height < 40000 || height < 4 * kStripMargin) {
-        upscaleWhole(indices, width, height, pitch, palette8, tile, precise, dest);
+        upscaleWhole(indices, width, height, pitch, palette8, tile, precise, dest, context);
         return;
     }
 
@@ -1016,7 +1030,7 @@ void hdUpscaleScripted(const unsigned char* indices, int width, int height, int 
 namespace {
 
 void upscaleWhole(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8,
-    bool tile, bool precise, HdImage* dest)
+    bool tile, bool precise, HdImage* dest, const HdTileContext* context)
 {
     dest->width = width * kHdScale;
     dest->height = height * kHdScale;
@@ -1032,7 +1046,7 @@ void upscaleWhole(const unsigned char* indices, int width, int height, int pitch
     int pad = 0;
     if (tile) {
         pad = kHdUpscaleTilePad;
-        wrapPadTile(indices, width, height, pitch, pad, &work);
+        wrapPadTile(indices, width, height, pitch, pad, &work, context);
         w = width + 2 * pad;
         h = height + 2 * pad;
     } else {
@@ -1196,7 +1210,7 @@ void hdUpscaleStageTimes(unsigned long long* ns, bool reset)
 }
 
 uint64_t hdUpscaleKey(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8, bool tile,
-    bool precise)
+    bool precise, const HdTileContext* context)
 {
     uint64_t hash = 0xcbf29ce484222325ull;
     auto feed = [&](const void* data, size_t size) {
@@ -1211,6 +1225,17 @@ uint64_t hdUpscaleKey(const unsigned char* indices, int width, int height, int p
     feed(palette8, 256 * 3);
     for (int y = 0; y < height; y++) {
         feed(indices + static_cast<size_t>(y) * pitch, width);
+    }
+    if (tile && context != nullptr) {
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) {
+                unsigned char marker = context->neighbour[r][c] != nullptr ? 1 : 0;
+                feed(&marker, 1);
+                if (marker) {
+                    feed(context->neighbour[r][c], static_cast<size_t>(width) * height);
+                }
+            }
+        }
     }
     return hash;
 }
@@ -1250,10 +1275,17 @@ namespace {
 
 bool hdUpscaleCacheRead(const std::string& dir, uint64_t key, HdImage* image)
 {
-    FILE* stream = fopen(cachePath(dir, key, nullptr).c_str(), "rb");
+    std::string path = cachePath(dir, key, nullptr);
+    FILE* stream = fopen(path.c_str(), "rb");
     if (stream == nullptr) {
         return false;
     }
+    // Last use = modification time (the cache trims the oldest).
+#ifdef _WIN32
+    _utime(path.c_str(), nullptr);
+#else
+    utime(path.c_str(), nullptr);
+#endif
     uint32_t header[3];
     bool ok = fread(header, sizeof(header), 1, stream) == 1 && header[0] == kCacheMagic
         && header[1] > 0 && header[2] > 0 && header[1] <= 16384 && header[2] <= 16384;
@@ -1292,6 +1324,81 @@ bool hdUpscaleCacheWrite(const std::string& dir, uint64_t key, const HdImage& im
     return true;
 }
 
+namespace {
+
+    struct CacheFile {
+        std::string path;
+        time_t used = 0;
+        unsigned long long size = 0;
+    };
+
+    void listCacheDir(const std::string& dir, std::vector<CacheFile>* files)
+    {
+#ifdef _WIN32
+        struct _finddata_t found;
+        intptr_t handle = _findfirst((dir + "\\*.rgba").c_str(), &found);
+        if (handle == -1) {
+            return;
+        }
+        do {
+            files->push_back({ dir + "/" + found.name, found.time_write, static_cast<unsigned long long>(found.size) });
+        } while (_findnext(handle, &found) == 0);
+        _findclose(handle);
+#else
+        DIR* stream = opendir(dir.c_str());
+        if (stream == nullptr) {
+            return;
+        }
+        while (struct dirent* entry = readdir(stream)) {
+            size_t length = strlen(entry->d_name);
+            if (length < 6 || strcmp(entry->d_name + length - 5, ".rgba") != 0) {
+                continue;
+            }
+            std::string path = dir + "/" + entry->d_name;
+            struct stat info;
+            if (stat(path.c_str(), &info) == 0) {
+                files->push_back({ path, info.st_mtime, static_cast<unsigned long long>(info.st_size) });
+            }
+        }
+        closedir(stream);
+#endif
+    }
+
+} // namespace
+
+unsigned long long hdUpscaleCacheTrim(const std::string& dir, unsigned long long maxBytes, unsigned long long* removedBytes)
+{
+    std::vector<CacheFile> files;
+    for (int sub = 0; sub < 256; sub++) {
+        char name[8];
+        snprintf(name, sizeof(name), "%02x", sub);
+        listCacheDir(dir + "/" + name, &files);
+    }
+    unsigned long long total = 0;
+    for (const CacheFile& file : files) {
+        total += file.size;
+    }
+    unsigned long long removed = 0;
+    if (total > maxBytes) {
+        // Oldest first, down to 90% of the cap.
+        std::sort(files.begin(), files.end(), [](const CacheFile& a, const CacheFile& b) { return a.used < b.used; });
+        unsigned long long target = maxBytes / 10 * 9;
+        for (const CacheFile& file : files) {
+            if (total <= target) {
+                break;
+            }
+            if (remove(file.path.c_str()) == 0) {
+                total -= file.size;
+                removed += file.size;
+            }
+        }
+    }
+    if (removedBytes != nullptr) {
+        *removedBytes = removed;
+    }
+    return total;
+}
+
 // --- pool ---------------------------------------------------------------------
 
 HdUpscalePool::~HdUpscalePool()
@@ -1299,9 +1406,11 @@ HdUpscalePool::~HdUpscalePool()
     stop();
 }
 
-void HdUpscalePool::start(int threads, const std::string& cacheDir)
+void HdUpscalePool::start(int threads, const std::string& cacheDir, unsigned long long cacheMaxBytes)
 {
     stop();
+    cacheMaxBytes_ = cacheMaxBytes;
+    cacheWrittenSinceTrim_ = 0;
     if (threads <= 0) {
         unsigned int hardware = std::thread::hardware_concurrency();
         threads = std::min(std::max(static_cast<int>(hardware) - 1, 1), 8);
@@ -1314,6 +1423,20 @@ void HdUpscalePool::start(int threads, const std::string& cacheDir)
     for (int index = 0; index < threads; index++) {
         workers_.emplace_back([this]() { workerMain(); });
     }
+    if (!cacheDir.empty() && cacheMaxBytes > 0) {
+        // The size cap, checked at start (in the background) and again
+        // after every 1/8 of it written.
+        trimmer_ = std::thread([this]() { trimCache(); });
+    }
+}
+
+void HdUpscalePool::trimCache()
+{
+    unsigned long long removed = 0;
+    unsigned long long total = hdUpscaleCacheTrim(cacheDir_, cacheMaxBytes_, &removed);
+    std::lock_guard<std::mutex> lock(mutex_);
+    stats_.cacheBytes = total;
+    stats_.cacheTrimmedBytes += removed;
 }
 
 void HdUpscalePool::stop()
@@ -1321,69 +1444,125 @@ void HdUpscalePool::stop()
     {
         std::lock_guard<std::mutex> lock(mutex_);
         stopping_ = true;
-        queue_.clear();
-        later_.clear();
-        for (auto it = entries_.begin(); it != entries_.end();) {
-            if (it->second.state == State::Queued) {
-                it = entries_.erase(it);
-            } else {
-                ++it;
-            }
-        }
     }
+    cancelQueued();
     workAvailable_.notify_all();
     for (std::thread& worker : workers_) {
         worker.join();
     }
     workers_.clear();
+    if (trimmer_.joinable()) {
+        trimmer_.join();
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     entries_.clear();
     done_.clear();
     running_ = 0;
+    for (int group = 0; group < kGroups; group++) {
+        pendingByGroup_[group] = 0;
+    }
 }
 
 void HdUpscalePool::submit(HdUpscaleJob job)
 {
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (stopping_ || workers_.empty() || entries_.count(job.key) != 0) {
+        if (stopping_ || workers_.empty()) {
+            return;
+        }
+        int group = std::min(std::max(job.group, 0), kGroups - 1);
+        auto found = entries_.find(job.key);
+        if (found != entries_.end()) {
+            // Already known; a queued one moves up if wanted sooner.
+            Entry& entry = found->second;
+            if (entry.state == State::Queued && job.priority < entry.order.first) {
+                queue_.erase(entry.order);
+                entry.order = { job.priority, sequence_++ };
+                queue_.emplace(entry.order, job.key);
+            }
             return;
         }
         std::string key = job.key;
         Entry& entry = entries_[key];
         entry.state = State::Queued;
-        bool urgent = job.urgent;
+        entry.group = group;
+        entry.order = { job.priority, sequence_++ };
         entry.job = std::make_unique<HdUpscaleJob>(std::move(job));
-        (urgent ? queue_ : later_).push_back(key);
+        queue_.emplace(entry.order, key);
+        pendingByGroup_[group]++;
+        totalByGroup_[group]++;
         stats_.submitted++;
     }
     workAvailable_.notify_one();
 }
 
-void HdUpscalePool::cancelQueued()
+void HdUpscalePool::cancelQueued(int group)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    for (std::deque<std::string>* list : { &queue_, &later_ }) {
-        for (const std::string& key : *list) {
-            auto found = entries_.find(key);
-            if (found != entries_.end() && found->second.state == State::Queued) {
-                entries_.erase(found);
-            }
+    for (auto it = queue_.begin(); it != queue_.end();) {
+        auto found = entries_.find(it->second);
+        if (found == entries_.end() || (group >= 0 && found->second.group != group)) {
+            ++it;
+            continue;
         }
-        list->clear();
+        pendingByGroup_[found->second.group]--;
+        totalByGroup_[found->second.group]--;
+        entries_.erase(found);
+        it = queue_.erase(it);
     }
 }
 
-std::shared_ptr<HdImage> HdUpscalePool::take(const std::string& key)
+std::unique_ptr<HdUpscaleJob> HdUpscalePool::popLocked(std::string* key)
+{
+    while (!queue_.empty()) {
+        auto first = queue_.begin();
+        std::string name = std::move(first->second);
+        queue_.erase(first);
+        auto found = entries_.find(name);
+        if (found == entries_.end() || found->second.state != State::Queued) {
+            continue;
+        }
+        found->second.state = State::Running;
+        running_++;
+        *key = std::move(name);
+        return std::move(found->second.job);
+    }
+    return nullptr;
+}
+
+void HdUpscalePool::finishLocked(const std::string& key, int group, std::shared_ptr<HdImage> image)
+{
+    running_--;
+    pendingByGroup_[group]--;
+    doneByGroup_[group]++;
+    auto entry = entries_.find(key);
+    if (entry != entries_.end()) {
+        entry->second.state = State::Done;
+        entry->second.image = std::move(image);
+        done_.push_back(key);
+    }
+    if (running_ == 0 && queue_.empty()) {
+        stats_.idleSince = std::chrono::steady_clock::now();
+    }
+    jobDone_.notify_all();
+}
+
+std::shared_ptr<HdImage> HdUpscalePool::take(const std::string& key, bool* ready)
 {
     std::unique_ptr<HdUpscaleJob> job;
+    int group = 0;
+    if (ready != nullptr) {
+        *ready = false;
+    }
     {
         std::unique_lock<std::mutex> lock(mutex_);
         auto found = entries_.find(key);
         if (found == entries_.end()) {
             return nullptr;
         }
+        bool waitedHere = false;
         if (found->second.state == State::Running) {
+            waitedHere = true;
             stats_.waited++;
             jobDone_.wait(lock, [&]() {
                 auto again = entries_.find(key);
@@ -1395,17 +1574,39 @@ std::shared_ptr<HdImage> HdUpscalePool::take(const std::string& key)
             }
         }
         if (found->second.state == State::Done) {
+            if (ready != nullptr) {
+                *ready = !waitedHere;
+            }
             std::shared_ptr<HdImage> image = std::move(found->second.image);
             entries_.erase(found);
             return image;
         }
         // Queued: run it here.
+        group = found->second.group;
         job = std::move(found->second.job);
+        queue_.erase(found->second.order);
         entries_.erase(found);
-        std::deque<std::string>& list = job->urgent ? queue_ : later_;
-        list.erase(std::remove(list.begin(), list.end(), key), list.end());
+        pendingByGroup_[group]--;
+        doneByGroup_[group]++;
     }
     return run(*job, true);
+}
+
+bool HdUpscalePool::help()
+{
+    std::string key;
+    std::unique_ptr<HdUpscaleJob> job;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        job = popLocked(&key);
+    }
+    if (job == nullptr) {
+        return false;
+    }
+    std::shared_ptr<HdImage> image = run(*job, true);
+    std::lock_guard<std::mutex> lock(mutex_);
+    finishLocked(key, job->group, std::move(image));
+    return true;
 }
 
 void HdUpscalePool::drain(const std::function<void(const std::string&, std::shared_ptr<HdImage>)>& sink)
@@ -1436,13 +1637,35 @@ void HdUpscalePool::drain(const std::function<void(const std::string&, std::shar
 int HdUpscalePool::pending()
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    return static_cast<int>(queue_.size() + later_.size()) + running_;
+    return static_cast<int>(queue_.size()) + running_;
+}
+
+int HdUpscalePool::pending(int group)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return group >= 0 && group < kGroups ? pendingByGroup_[group] : 0;
+}
+
+void HdUpscalePool::groupProgress(int group, int* total, int* done)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    *total = group >= 0 && group < kGroups ? totalByGroup_[group] : 0;
+    *done = group >= 0 && group < kGroups ? doneByGroup_[group] : 0;
+}
+
+void HdUpscalePool::resetGroup(int group)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (group >= 0 && group < kGroups) {
+        totalByGroup_[group] = pendingByGroup_[group];
+        doneByGroup_[group] = 0;
+    }
 }
 
 void HdUpscalePool::waitIdle()
 {
     std::unique_lock<std::mutex> lock(mutex_);
-    jobDone_.wait(lock, [&]() { return queue_.empty() && later_.empty() && running_ == 0; });
+    jobDone_.wait(lock, [&]() { return queue_.empty() && running_ == 0; });
 }
 
 HdUpscaleStats HdUpscalePool::stats()
@@ -1454,9 +1677,20 @@ HdUpscaleStats HdUpscalePool::stats()
 std::shared_ptr<HdImage> HdUpscalePool::run(const HdUpscaleJob& job, bool inlineRun)
 {
     auto image = std::make_shared<HdImage>();
+    HdTileContext context;
+    bool hasContext = false;
+    size_t tileSize = static_cast<size_t>(job.width) * job.height;
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) {
+            if (job.context[r][c].size() == tileSize && tileSize > 0) {
+                context.neighbour[r][c] = job.context[r][c].data();
+                hasContext = true;
+            }
+        }
+    }
     uint64_t key = 0;
     if (!cacheDir_.empty()) {
-        key = hdUpscaleKey(job.indices.data(), job.width, job.height, job.width, job.palette8, job.tile, job.precise);
+        key = hdUpscaleKey(job.indices.data(), job.width, job.height, job.width, job.palette8, job.tile, job.precise, &context);
         if (hdUpscaleCacheRead(cacheDir_, key, image.get())
             && image->width == job.width * kHdScale && image->height == job.height * kHdScale) {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -1472,10 +1706,22 @@ std::shared_ptr<HdImage> HdUpscalePool::run(const HdUpscaleJob& job, bool inline
     }
     auto started = std::chrono::steady_clock::now();
     hdUpscaleScripted(job.indices.data(), job.width, job.height, job.width, job.palette8, job.tile, image.get(), threads,
-        job.precise);
+        job.precise, hasContext ? &context : nullptr);
     double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
 
     bool wrote = !cacheDir_.empty() && hdUpscaleCacheWrite(cacheDir_, key, *image);
+    bool trim = false;
+    if (wrote && cacheMaxBytes_ > 0) {
+        unsigned long long written = cacheWrittenSinceTrim_.fetch_add(image->pixels.size() * sizeof(uint32_t) + 12)
+            + image->pixels.size() * sizeof(uint32_t);
+        if (written > cacheMaxBytes_ / 8) {
+            cacheWrittenSinceTrim_ = 0;
+            trim = true;
+        }
+    }
+    if (trim) {
+        trimCache();
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     if (inlineRun) {
         stats_.computedInline++;
@@ -1494,36 +1740,19 @@ void HdUpscalePool::workerMain()
 {
     std::unique_lock<std::mutex> lock(mutex_);
     while (true) {
-        workAvailable_.wait(lock, [&]() { return stopping_ || !queue_.empty() || !later_.empty(); });
+        workAvailable_.wait(lock, [&]() { return stopping_ || !queue_.empty(); });
         if (stopping_) {
             return;
         }
-        std::deque<std::string>& list = !queue_.empty() ? queue_ : later_;
-        std::string key = std::move(list.front());
-        list.pop_front();
-        auto found = entries_.find(key);
-        if (found == entries_.end() || found->second.state != State::Queued) {
+        std::string key;
+        std::unique_ptr<HdUpscaleJob> job = popLocked(&key);
+        if (job == nullptr) {
             continue;
         }
-        found->second.state = State::Running;
-        std::unique_ptr<HdUpscaleJob> job = std::move(found->second.job);
-        running_++;
         lock.unlock();
-
         std::shared_ptr<HdImage> image = run(*job, false);
-
         lock.lock();
-        running_--;
-        if (running_ == 0 && queue_.empty() && later_.empty()) {
-            stats_.idleSince = std::chrono::steady_clock::now();
-        }
-        auto entry = entries_.find(key);
-        if (entry != entries_.end()) {
-            entry->second.state = State::Done;
-            entry->second.image = std::move(image);
-            done_.push_back(key);
-        }
-        jobDone_.notify_all();
+        finishLocked(key, job->group, std::move(image));
     }
 }
 

@@ -4,3 +4,4 @@ scenery_comp5 0
 scenery_monitr7 0
 scenery_firepit 0
 intrface_opbase 0
+tile_ctx_edg5000 1

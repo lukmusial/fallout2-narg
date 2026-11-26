@@ -22,6 +22,7 @@
 #include "game.h"
 #include "game_mouse.h"
 #include "hd_art.h"
+#include "hd_scene.h"
 #include "hd_layer.h"
 #include "hd_wind.h"
 #include "item.h"
@@ -3319,14 +3320,11 @@ void _obj_preload_art_cache(MapHeaderFlags flags)
         v11++;
     }
 
-    // CE: while each art is locked here, the HD runtime upscale (Phase 2.22)
-    // queues its frames for the background threads.
-    hdArtPreupscaleMapBegin();
+    // (The HD runtime upscale prepares the map's art itself, see
+    // hd_scene.h.)
     auto preload = [](const FrmId& frmId) {
         CacheEntry* cache_handle;
-        Art* art = artLock(frmId, &cache_handle);
-        if (art != nullptr) {
-            hdArtPreupscaleArt(frmId.filePath(), art);
+        if (artLock(frmId, &cache_handle) != nullptr) {
             artUnlock(cache_handle);
         }
     };
@@ -3782,6 +3780,10 @@ int _obj_load_dude(File* stream)
     memcpy(gDude, temp, sizeof(*gDude));
 
     gDude->flags |= OBJECT_NO_SAVE;
+
+    // CE: the player's art as loaded (weapon in hand, the bar's picture of
+    // it) is upscaled before it is drawn (HD runtime upscale, hd_scene.h).
+    hdScenePrepareDude();
 
     scriptsClearDudeScript();
 

@@ -69,7 +69,8 @@ def prepare_worker(index):
         if (RUN_DIR / name).exists():
             (worker / name).symlink_to((RUN_DIR / name).resolve())
     for pack in (RUN_DIR / "data/hd").glob("*"):
-        (worker / "data/hd" / pack.name).symlink_to(pack.resolve())
+        if pack.name != "cache":  # each worker has its own upscale cache
+            (worker / "data/hd" / pack.name).symlink_to(pack.resolve())
     shutil.copyfile(RUN_DIR / "fallout2.cfg", worker / "fallout2.cfg")
     return worker
 
@@ -187,8 +188,9 @@ def test_main_menu(update):
 
 
 def test_main_menu_hd(update):
-    """hd=1 without HD art: the 2x framebuffer is the legacy frame pixel-doubled."""
-    out, seconds = run_game("main_menu_hd", "smoke_menu.txt", HD_ARGS)
+    """hd=1 without HD art (no pack, hd_upscale=double): the 2x framebuffer is
+    the legacy frame pixel-doubled."""
+    out, seconds = run_game("main_menu_hd", "smoke_menu.txt", [*HD_ARGS, DOUBLE])
     return compare_image(out / "mainmenu.png", "main_menu.png", False, mask=MAIN_MENU_MASK, upscale=2)
 
 
@@ -589,10 +591,10 @@ def make_hd_map_test(pack, slot):
 #
 # Frames no pack has an image of are upscaled at runtime with the scripted
 # pack's algorithm (src/hd_upscale.h; [graphics] hd_upscale=scripted, the
-# default). `hd_pack=runtime` names a pack that is not installed, so every
-# frame is upscaled at runtime, as with hd_pack=scripted and no scripted pack.
+# default). With no pack (hd_pack empty, the default) every frame is upscaled
+# at runtime.
 
-RUNTIME_ARGS = [*HD_ARGS, "[graphics]hd_pack=runtime"]
+RUNTIME_ARGS = [*HD_ARGS, "[graphics]hd_pack="]
 RUNTIME_MAP_SLOTS = (3, 1, 8)
 # Runtime frame vs the offline scripted pack's (same view, golden of
 # test_hd_map_scripted): mean abs difference and share of pixels off by more
@@ -619,9 +621,9 @@ def test_hd_runtime_lookup(update):
         detail = nonuniform_blocks(load_png(out / f"{name}.png"))
         if detail < 0.3:
             raise TestFailure(f"{name}: runtime image has detail in only {detail:.0%} of 2x2 blocks")
-    # `hdpack -` turns HD art off: no runtime upscale either.
-    if not probe["probe_none"]["from_legacy"]:
-        raise TestFailure(f"probe_none: HD art off but got {probe['probe_none']}")
+    # `hdpack -`: no pack at all, the runtime upscale alone.
+    if probe["probe_none"]["from_pack"] != "runtime" or probe["probe_none"]["from_legacy"]:
+        raise TestFailure(f"probe_none: no pack, expected the runtime upscale, got {probe['probe_none']}")
     verify, more = run_game("hd_runtime_verify", "hd_legacy_verify.txt", [*HD_ARGS, "[graphics]hd_pack=testlegacy"])
     mismatch = json.loads((verify / "probe_mismatch.json").read_text())
     match = json.loads((verify / "probe_match.json").read_text())
@@ -657,7 +659,12 @@ def make_hd_runtime_map_test(slot):
         detail = scenery_detail(fb, out, "check")
         if check["scenery_pixels"] > 1000 and detail < HD_MIN_SCENERY_DETAIL:
             raise TestFailure(f"slot {slot}: only {detail:.0%} of HD wall/scenery blocks show detail")
-        notes = [f"queued {stats['batch_queued']} frames, done in {stats['batch_done_ms']:.0f} ms",
+        end_stats = json.loads((out / "end_stats.json").read_text())
+        if end_stats["draw_upscales_since_scene"] != 0:
+            raise TestFailure(f"slot {slot}: {end_stats['draw_upscales_since_scene']} frames were upscaled when drawn "
+                              f"after the scene was prepared (debug.log: 'when drawn' / 'on first draw')")
+        notes = [f"scene {end_stats['scene_frames']} frames ({end_stats['scene_arts']} arts) in "
+                 f"{end_stats['scene_collect_ms']:.0f}+{end_stats['scene_wait_ms']:.0f} ms, none upscaled when drawn",
                  f"floors/roofs {share:.0%}, walls/scenery/items {scenery:.0%} ({detail:.0%} detail), "
                  f"critters {critters:.0%} HD"]
         offline_path = GOLDEN / f"hd_scripted_slot{slot:02d}.png"
@@ -684,6 +691,32 @@ def make_hd_runtime_map_test(slot):
         return ", ".join(notes) + f" ({seconds:.0f}s)"
     test.__name__ = f"test_hd_runtime_map_slot{slot:02d}"
     return test
+
+
+def test_hd_loading_screen(update):
+    """A map transition with no pack: the loading screen (the splash picture
+    upscaled, a progress bar) shows while the new map's art is prepared;
+    after it nothing is upscaled when drawn, also while scrolling."""
+    reset_saves()
+    out, seconds = run_game("hd_loading_screen", "hd_scene_transition.txt",
+                            [f"--dev-load-game={RUNTIME_MAP_SLOTS[1]}", *RUNTIME_ARGS, "[graphics]hd_loading_screen_min_ms=0"])
+    shot = out / "loading.png"
+    if not shot.exists():
+        raise TestFailure("no loading screen was shown")
+    image = load_png(shot)
+    if image.shape != (960, 1280, 3):
+        raise TestFailure(f"loading screen is {image.shape}")
+    detail = nonuniform_blocks(image[100:700, 100:1180])
+    if detail < 0.3 or image.mean() < 10:
+        raise TestFailure(f"loading screen shows no upscaled picture (detail {detail:.0%}, mean {image.mean():.0f})")
+    arrived = json.loads((out / "arrived.json").read_text())
+    end = json.loads((out / "end.json").read_text())
+    if arrived["scenes"] < 2 or arrived["loading_screens"] < 1:
+        raise TestFailure(f"scene not prepared on the transition: {arrived}")
+    if end["draw_upscales_since_scene"] != 0:
+        raise TestFailure(f"{end['draw_upscales_since_scene']} frames upscaled when drawn after the scene was prepared")
+    return (f"loading screen detail {detail:.0%}; new map: {arrived['scene_frames']} frames in "
+            f"{arrived['scene_collect_ms']:.0f}+{arrived['scene_wait_ms']:.0f} ms, none upscaled when drawn ({seconds:.0f}s)")
 
 
 def test_hd_runtime_disk_cache(update):
@@ -1192,7 +1225,7 @@ def make_slot_test(slot, hd=False):
         reset_saves()
         suffix = "_hd" if hd else ""
         out, seconds = run_game(f"slot{slot:02d}{suffix}", "load_slot.txt",
-                                [f"--dev-load-game={slot}", *(HD_ARGS if hd else [])])
+                                [f"--dev-load-game={slot}", *([*HD_ARGS, DOUBLE] if hd else [])])
         notes = [compare_state(out / "state.json", f"slot{slot:02d}_state.json", update and not hd)]
         notes.append(compare_image(out / "game.png", f"slot{slot:02d}_game.png", update and not hd, LIVE_VIEW_MAX_DIFF,
                                    upscale=2 if hd else 1))
@@ -2131,7 +2164,7 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
          + [make_hd_bar_test(pack) for pack in HD_BAR_PACKS]
          + [test_view_identity, test_view_pan, test_view_zoom, test_view_zoom_hd0, test_view_light_follow]
          + [test_hd_shot_light] + [make_hd_wind_test(slot) for slot in WIND_SLOTS]
-         + [test_hd_runtime_lookup, test_hd_runtime_disk_cache, test_hd_runtime_screens]
+         + [test_hd_runtime_lookup, test_hd_runtime_disk_cache, test_hd_runtime_screens, test_hd_loading_screen]
          + [make_hd_runtime_map_test(slot) for slot in RUNTIME_MAP_SLOTS])
 
 

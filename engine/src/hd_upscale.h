@@ -3,9 +3,10 @@
 
 #include <stdint.h>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <deque>
+#include <map>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -59,8 +60,17 @@ constexpr int kHdUpscaleTilePad = 8;
 // de-dithered base, where the bands are), and the result is rounded to 8
 // bits with a light 4x4 ordered dither. Without it the output is the Python's
 // (8-bit palette, no de-banding, plain rounding).
+//
+// `context` (tiles): the tile's real neighbours on the map at the 8 nearest
+// lattice positions ([row delta + 1][column delta + 1], screen columns; each
+// packed, the tile's size), drawn around it instead of copies of itself, so
+// its edges continue into what is really next to it (no seams).
+struct HdTileContext {
+    const unsigned char* neighbour[3][3] = {};
+};
+
 void hdUpscaleScripted(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8,
-    bool tile, HdImage* dest, int threads = 1, bool precise = false);
+    bool tile, HdImage* dest, int threads = 1, bool precise = false, const HdTileContext* context = nullptr);
 
 // Time spent per stage (ns, all threads): 0 palette/holes/steps, 1
 // de-dither, 2 DCCI, 3 gradient restoration, 4 de-banding, 5 grain, 6
@@ -71,13 +81,17 @@ void hdUpscaleStageTimes(unsigned long long* ns, bool reset = false);
 // FNV-1a 64 of everything the output depends on (pixels, size, palette, tile
 // flag, algorithm version): the disk cache key.
 uint64_t hdUpscaleKey(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8,
-    bool tile, bool precise = false);
+    bool tile, bool precise = false, const HdTileContext* context = nullptr);
 
 // Disk cache files: <dir>/<xx>/<key>.rgba (raw 0xAARRGGBB after a small
 // header). Safe from any thread (plain stdio, write to a temporary name and
 // rename). Return false on a miss or error.
 bool hdUpscaleCacheRead(const std::string& dir, uint64_t key, HdImage* image);
 bool hdUpscaleCacheWrite(const std::string& dir, uint64_t key, const HdImage& image);
+// Removes the least recently used files (reads refresh a file's time) until
+// the cache is at most 90% of `maxBytes` when it is above it; returns the
+// size left.
+unsigned long long hdUpscaleCacheTrim(const std::string& dir, unsigned long long maxBytes, unsigned long long* removedBytes = nullptr);
 
 // Background upscaling of whole frames on a small pool of threads. Jobs carry
 // their own copy of the pixels and palette: workers never touch the art
@@ -90,16 +104,21 @@ struct HdUpscaleJob {
     int height = 0;
     unsigned char palette8[256 * 3];
     bool tile = false;
-    // Urgent jobs (the frames likely drawn first) are taken before others.
-    bool urgent = false;
     bool precise = false; // hdUpscaleScripted's palette boost
+    // Tiles: the neighbours (HdTileContext), [r + 1][c + 1], empty = itself.
+    std::vector<unsigned char> context[3][3];
+    // Lower first (e.g. the distance from the view in pixels).
+    float priority = 0.0f;
+    // Progress is counted per group (hdUpscaleJob groups: 0 general, the
+    // scene a map load waits for, background work); cancelQueued can drop
+    // one group.
+    int group = 0;
 };
-
 
 struct HdUpscaleStats {
     unsigned long long submitted = 0;
     unsigned long long computed = 0; // by workers
-    unsigned long long computedInline = 0; // by a caller that needed it (taken from the queue)
+    unsigned long long computedInline = 0; // by a caller (take or help)
     unsigned long long diskHits = 0;
     unsigned long long diskWrites = 0;
     unsigned long long waited = 0; // a caller waited for a running job
@@ -107,38 +126,54 @@ struct HdUpscaleStats {
     unsigned long long outputPixels = 0;
     // When the pool last ran out of work (nothing queued or running).
     std::chrono::steady_clock::time_point idleSince;
+    unsigned long long cacheBytes = 0; // disk cache size at the last check
+    unsigned long long cacheTrimmedBytes = 0;
 };
 
 class HdUpscalePool {
 public:
+    static constexpr int kGroups = 4;
+
     HdUpscalePool() = default;
     ~HdUpscalePool();
     HdUpscalePool(const HdUpscalePool&) = delete;
     HdUpscalePool& operator=(const HdUpscalePool&) = delete;
 
     // threads <= 0: hardware threads - 1 (1..8). `cacheDir` empty: no disk
-    // cache.
-    void start(int threads, const std::string& cacheDir);
+    // cache; `cacheMaxBytes` > 0: its size cap.
+    void start(int threads, const std::string& cacheDir, unsigned long long cacheMaxBytes = 0);
     void stop();
     bool running() const { return !workers_.empty(); }
     int threadCount() const { return static_cast<int>(workers_.size()); }
 
-    // Queues a job unless one with that key is queued, running or done.
+    // Queues a job unless one with that key is queued, running or done (a
+    // queued one with a later priority is moved up).
     void submit(HdUpscaleJob job);
 
-    // Drops queued jobs (not running or done ones).
-    void cancelQueued();
+    // Drops queued jobs (not running or done ones), of one group or all
+    // (group < 0).
+    void cancelQueued(int group = -1);
 
     // The result for `key`: done -> returned (and forgotten); queued -> run
     // on the calling thread now; running -> waits for it. Null when the pool
     // has never seen the key (or it failed).
-    std::shared_ptr<HdImage> take(const std::string& key);
+    // `ready` (optional): whether it was done already (no waiting or work).
+    std::shared_ptr<HdImage> take(const std::string& key, bool* ready = nullptr);
+
+    // Runs the first queued job on the calling thread (its result is kept
+    // as done). False when nothing is queued.
+    bool help();
 
     // Moves every finished result out (key, image).
     void drain(const std::function<void(const std::string&, std::shared_ptr<HdImage>)>& sink);
 
-    // Jobs queued or running.
+    // Jobs queued or running (in total, or of a group).
     int pending();
+    int pending(int group);
+    // Jobs of a group submitted since its counters were reset, and how many
+    // of them are finished.
+    void groupProgress(int group, int* total, int* done);
+    void resetGroup(int group);
     // Blocks until nothing is queued or running.
     void waitIdle();
 
@@ -160,21 +195,34 @@ private:
         State state = State::Queued;
         std::unique_ptr<HdUpscaleJob> job;
         std::shared_ptr<HdImage> image;
+        std::pair<float, unsigned long long> order;
+        int group = 0;
     };
 
+    // Takes the first queued job (lock held); null when none.
+    std::unique_ptr<HdUpscaleJob> popLocked(std::string* key);
+    void finishLocked(const std::string& key, int group, std::shared_ptr<HdImage> image);
     void workerMain();
+    void trimCache();
 
     std::mutex mutex_;
     std::condition_variable workAvailable_;
     std::condition_variable jobDone_;
-    std::deque<std::string> queue_; // urgent jobs
-    std::deque<std::string> later_; // the others
+    // Queued jobs by (priority, submission order).
+    std::map<std::pair<float, unsigned long long>, std::string> queue_;
+    unsigned long long sequence_ = 0;
     std::vector<std::string> done_; // finished since the last drain
     std::unordered_map<std::string, Entry> entries_;
     int running_ = 0;
+    int pendingByGroup_[kGroups] = {};
+    int totalByGroup_[kGroups] = {};
+    int doneByGroup_[kGroups] = {};
     bool stopping_ = false;
     std::vector<std::thread> workers_;
     std::string cacheDir_;
+    unsigned long long cacheMaxBytes_ = 0;
+    std::atomic<unsigned long long> cacheWrittenSinceTrim_ { 0 };
+    std::thread trimmer_;
     HdUpscaleStats stats_;
 };
 

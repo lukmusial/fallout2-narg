@@ -14,11 +14,16 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #ifdef _WIN32
 #include <direct.h>
+#include <sys/utime.h>
 #define rmdir _rmdir
+#define utime _utime
+#define utimbuf _utimbuf
 #else
 #include <unistd.h>
+#include <utime.h>
 #endif
 
 #include <chrono>
@@ -54,7 +59,29 @@ struct Fixture {
     std::vector<unsigned char> indices;
     unsigned char palette[256 * 3] = {};
     std::vector<unsigned char> expected; // RGBA, 2x
+    std::vector<unsigned char> context[3][3]; // tiles with neighbours (<name>.ctx<r><c>.png)
+    HdTileContext tileContext() const
+    {
+        HdTileContext result;
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) {
+                result.neighbour[r][c] = context[r][c].empty() ? nullptr : context[r][c].data();
+            }
+        }
+        return result;
+    }
 };
+
+static bool loadIndexed(const std::string& path, std::vector<unsigned char>* indices, unsigned* width, unsigned* height)
+{
+    std::vector<unsigned char> png;
+    if (lodepng::load_file(png, path) != 0) {
+        return false;
+    }
+    lodepng::State state;
+    state.decoder.color_convert = 0;
+    return lodepng::decode(*indices, *width, *height, state, png) == 0;
+}
 
 static bool loadFixture(const std::string& name, bool tile, Fixture* fixture)
 {
@@ -83,6 +110,19 @@ static bool loadFixture(const std::string& name, bool tile, Fixture* fixture)
         fixture->palette[i * 3] = state.info_png.color.palette[i * 4];
         fixture->palette[i * 3 + 1] = state.info_png.color.palette[i * 4 + 1];
         fixture->palette[i * 3 + 2] = state.info_png.color.palette[i * 4 + 2];
+    }
+
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) {
+            unsigned cw = 0;
+            unsigned ch = 0;
+            std::vector<unsigned char> neighbour;
+            char suffix[16];
+            snprintf(suffix, sizeof(suffix), ".ctx%d%d.png", r, c);
+            if (loadIndexed(base + suffix, &neighbour, &cw, &ch) && cw == width && ch == height) {
+                fixture->context[r][c] = neighbour;
+            }
+        }
     }
 
     unsigned ew = 0;
@@ -123,8 +163,9 @@ static void testAgainstPython(const std::vector<Fixture>& fixtures, bool precise
     int worstMax = 0;
     for (const Fixture& fixture : fixtures) {
         HdImage image;
+        HdTileContext context = fixture.tileContext();
         hdUpscaleScripted(fixture.indices.data(), fixture.width, fixture.height, fixture.width, fixture.palette, fixture.tile, &image,
-            1, precise);
+            1, precise, &context);
         CHECK(image.width == static_cast<int>(fixture.width * 2));
         CHECK(image.height == static_cast<int>(fixture.height * 2));
 
@@ -351,11 +392,40 @@ static void testDiskCache(const std::vector<Fixture>& fixtures)
     CHECK(back.width == image.width && back.height == image.height && back.pixels == image.pixels);
     CHECK(!hdUpscaleCacheRead(dir, key ^ 1, &back));
 
-    char name[64];
-    snprintf(name, sizeof(name), "%016llx", static_cast<unsigned long long>(key));
-    std::string sub = dir + "/" + std::string(name, 2);
-    remove((sub + "/" + name + ".rgba").c_str());
-    rmdir(sub.c_str());
+    // Size cap: the least recently used files go first.
+    std::vector<uint64_t> keys;
+    for (int index = 0; index < 6; index++) {
+        uint64_t extra = 0x1000 + index * 0x0100000000000000ull;
+        CHECK(hdUpscaleCacheWrite(dir, extra, image));
+        keys.push_back(extra);
+    }
+    // Older uses for all but the last (file times have 1 s resolution).
+    for (size_t index = 0; index + 1 < keys.size(); index++) {
+        char name[64];
+        snprintf(name, sizeof(name), "%016llx", static_cast<unsigned long long>(keys[index]));
+        std::string path = dir + "/" + std::string(name, 2) + "/" + name + ".rgba";
+        struct utimbuf times;
+        times.actime = times.modtime = time(nullptr) - 1000 + static_cast<time_t>(index);
+        utime(path.c_str(), &times);
+    }
+    HdImage touched;
+    unsigned long long fileSize = static_cast<unsigned long long>(image.pixels.size()) * 4 + 12;
+    unsigned long long removed = 0;
+    unsigned long long left = hdUpscaleCacheTrim(dir, fileSize * 4, &removed);
+    CHECK(left <= fileSize * 4);
+    CHECK(removed >= fileSize * 2);
+    CHECK(hdUpscaleCacheRead(dir, keys.back(), &touched));
+    printf("disk cache: 7 files, cap 4: %llu kept, %llu removed (bytes)\n", left, removed);
+
+    // Clean up.
+    keys.push_back(key);
+    for (uint64_t each : keys) {
+        char name[64];
+        snprintf(name, sizeof(name), "%016llx", static_cast<unsigned long long>(each));
+        std::string sub = dir + "/" + std::string(name, 2);
+        remove((sub + "/" + name + ".rgba").c_str());
+        rmdir(sub.c_str());
+    }
     rmdir(dir.c_str());
 }
 

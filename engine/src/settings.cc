@@ -289,8 +289,12 @@ void initSettingsRegistry(bool isMapper)
     SETTING(hd_upscale_critters);
     SETTING(hd_upscale_preload);
     SETTING(hd_upscale_cache);
+    SETTING_P(hd_upscale_cache_mb, clamp(64, 1048576));
     SETTING_P(hd_upscale_threads, clamp(0, 64));
     SETTING_P(hd_upscale_precision, clamp(8, 16));
+    SETTING(hd_loading_screen);
+    SETTING(hd_upscale_tile_neighbours);
+    SETTING_P(hd_loading_screen_min_ms, clamp(0, 10000));
     SETTING(smooth_scroll);
     SETTING_P(scroll_speed, clamp(25, 400));
     SETTING(zoom);
