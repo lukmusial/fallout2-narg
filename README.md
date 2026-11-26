@@ -8,16 +8,18 @@
 **Fallout 2: Narg Edition** is Fallout 2 in high definition on a modern engine:
 
 - the [Fallout 2 Community Edition](https://github.com/fallout2-ce/fallout2-ce) engine (CE), which replaces the game's executable, with
-- **HD rendering**: true colour at twice the resolution, HD art for the interface, floors, roofs, walls, scenery, items and inventory, 2x text, coloured lights and soft shadows, a light from every gunshot, trees swaying in the wind, smooth scrolling and map zoom;
+- **HD rendering**: true colour at twice the resolution; every picture of the game (interface, floors, roofs, walls, scenery, items, characters, world map) upscaled 2x by the engine from your own copy of the game, with 16-bit colour smoothing; 2x text, coloured lights and soft shadows, a light from every gunshot, trees swaying in the wind, smooth scrolling and map zoom;
 - **[Stimpak](https://github.com/lukmusial/fallout2-stimpak)**, a savegame editor on the main menu (character, companions, quests, locations, travel).
 
-It installs on vanilla Fallout 2 and on top of the [Restoration Project](https://github.com/BGforgeNet/Fallout2_Restoration_Project) (RPU). Characters (critters) keep their original art.
+It installs on vanilla Fallout 2 and on top of the [Restoration Project](https://github.com/BGforgeNet/Fallout2_Restoration_Project) (RPU), whose own art is upscaled the same way.
+
+**No game art is distributed.** The archives hold the engine, the installer and documentation; the HD pictures are made on your machine, from your game's files, while the game runs. You need your own copy of Fallout 2 ([GOG](https://www.gog.com/game/fallout_2), [Steam](https://store.steampowered.com/app/38410), [Epic](https://store.epicgames.com/p/fallout-2)).
 
 ![Arroyo in Narg Edition](docs/media/hd_arroyo.jpg)
 
 ## Screenshots
 
-Each pair shows the same spot before (the original art, as the game draws it at this screen size) and after (Narg Edition), enlarged 2x so single pixels show.
+Each pair shows the same spot before (the original art, as the game draws it at this screen size) and after (Narg Edition, upscaled by the engine), enlarged 2x so single pixels show.
 
 ![Arroyo: original art and HD](docs/media/compare_arroyo.jpg)
 ![Klamath: original art and HD](docs/media/compare_klamath.jpg)
@@ -25,7 +27,7 @@ Each pair shows the same spot before (the original art, as the game draws it at 
 ![Inventory: original art and HD](docs/media/compare_inventory.jpg)
 ![Character screen: original art and HD](docs/media/compare_character.jpg)
 
-On the Restoration Project, before (RPU's art, as the game draws it) and after (Narg Edition with the `narg_hd_rpu.dat` add-on):
+On the Restoration Project, before (RPU's art, as the game draws it) and after (Narg Edition):
 
 ![RPU's new location art: doubled and HD](docs/media/rpu_abbey.jpg)
 ![RPU's EPA: doubled and HD](docs/media/rpu_epa.jpg)
@@ -40,7 +42,15 @@ In motion: lights that move with the player at night, a light from every round o
 
 Stimpak's screens are in [its README](https://github.com/lukmusial/fallout2-stimpak#readme).
 
-> **The HD art is made from the game's own art.** Its images are upscaled from Fallout 2's art files, so you need your own copy of Fallout 2 ([GOG](https://www.gog.com/game/fallout_2), [Steam](https://store.steampowered.com/app/38410), [Epic](https://store.epicgames.com/p/fallout-2)) to play, and the archives are not meant to be redistributed without the game.
+### How the HD pictures are made
+
+The engine upscales each picture the first time it is needed, with a deterministic, palette-aware 2x upscale (de-dithering, edge-directed interpolation, gradient restoration and sharpening, run in 16-bit colour so smooth areas lose their banding), on all CPU cores:
+
+- while a map loads, everything it can show at once (floor and roof tiles with their real neighbours on the map, walls, scenery, items, and every character's standing, walking and running animations in all directions), behind a loading screen with a progress bar;
+- the world map, town maps and help screens, other elevations and the rest of the characters' animations in idle time;
+- the results are kept in `data/hd/cache` (at most 2 GB, oldest removed first), so a second visit to a town loads faster.
+
+After a map has loaded nothing is upscaled while you play. On an Apple M5 Pro a town takes 0.2-0.8 s to prepare the first time and 0.1-0.3 s with the cache; play runs at the 60 fps limit.
 
 ## Download
 
@@ -49,10 +59,7 @@ Releases are archives per platform: `narg_v<version>_macos.zip`, `narg_v<version
 | File | What it is |
 |---|---|
 | `Fallout 2 Narg Edition.app` (macOS), `narg/linux/fallout2-ce`, `narg/windows/fallout2-ce.exe` | the engine |
-| `mods/narg_hd.dat` | the HD art the default `mixed` pack draws: AI-upscaled images, and scripted (deterministic) ones where the AI does poorly |
-| `mods/narg_hd_rpu.dat` | separate archive `narg_v<version>_rpu.zip`: HD art for the Restoration Project's own images, loaded only on RPU |
 | `narg/rpu-save-convert.py` | converts saves from the unmodded game for the Restoration Project ([RPU notes](docs/rpu.md)) |
-| `mods_order.txt` | the mods the installer adds to `mods/mods_order.txt` |
 | `narg/narg.cfg` | the settings the installer puts into `fallout2.cfg` |
 | `narg/settings/*.cfg` | optional settings components (see below) |
 | `narg/f2_res.dat` | hi-res interface art, installed when the game has none |
@@ -73,21 +80,21 @@ In short: extract the archive into the game folder, run `narg-install.command` (
 
 | Option | Effect |
 |---|---|
-| `--pack mixed` (default) | AI-upscaled art, scripted (deterministic) upscale where the AI does poorly |
-| `--pack ai` | AI images only; the 141 images `mixed` takes from the scripted upscale are drawn doubled |
-| `--pack scripted` | the whole scripted pack, `mods/narg_hd_scripted.dat`; not in the release archives (`NARG_WITH_SCRIPTED=1 extra/package.sh` builds it) |
 | `--with no_wind` | trees and bushes stand still |
 | `--with no_shot_light` | no light from gunshots and explosions |
 | `--with no_lights` | no coloured lights, glow or soft shadows (for slow machines) |
+| `--with pixel_doubled` | HD output with the original art pixel-doubled instead of upscaled (no upscaling work) |
 | `--with classic` | the original 256-colour look; engine, Stimpak and fixes stay |
 | `--with windowed` | a window instead of full screen |
 | `--resolution 2560x1440` | screen size, instead of the detected one |
 
-All of them are settings in `fallout2.cfg` (`[graphics]`, `[screen]`) that you can change later. On Windows the options are written `-Pack ai -With no_wind,windowed -Resolution 2560x1440`.
+All of them are settings in `fallout2.cfg` (`[graphics]`, `[screen]`) that you can change later. On Windows the options are written `-With no_wind,windowed -Resolution 2560x1440`.
+
+`--pack mixed|ai|scripted` draws a pre-made HD art pack instead (`mods/narg_hd.dat`), for those who build one from their own game with `engine/tools/hd` ([HD art packs](components/hd_packs/README.md)); the releases have none.
 
 ### Compatibility with content mods
 
-HD images are found by the art file they were made from. When a mod replaces a picture (RPU repaints the world map, adds real tiles where the game had placeholders, changes the dialogue frame, some items and the hi-res main menu), the engine compares the game's own picture with the one the HD image was made from (`hd/<pack>/legacy.txt`, `[graphics] hd_verify=1`) and draws the mod's picture, doubled, wherever they differ. New art from a mod is also drawn doubled. See [RPU notes](docs/rpu.md).
+The engine upscales whatever picture the game draws, so art a mod replaces or adds (RPU's world map, new locations, tiles, items, the hi-res main menu) is upscaled like the game's own. See [RPU notes](docs/rpu.md).
 
 ## Additional mods
 
@@ -95,7 +102,7 @@ HD images are found by the art file they were made from. When a mod replaces a p
 
 - [Fallout 2 Community Edition](https://github.com/fallout2-ce/fallout2-ce) engine at c30f1efc
 - [Stimpak](https://github.com/lukmusial/fallout2-stimpak) savegame editor
-- HD rendering and HD art (this project)
+- HD rendering and the in-engine upscale (this project)
 
 ### Recommended
 

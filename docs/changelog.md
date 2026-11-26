@@ -5,14 +5,20 @@
 
 ### Version 1.1.0
 
-#### HD art
+#### HD without distributed art
 
-- `narg_v1.1.0_rpu.zip` (add-on, all platforms): `mods/narg_hd_rpu.dat`, HD art for the Restoration Project's own images: the 1876 it adds (new locations' tiles, walls and scenery, inventory items, interface, endgame slides) and the 309 it changes (world map, elevator panels, dialogue frame, skilldex cards, tiles). The installer loads it only on RPU.
-- A manifest line may name several packs, tried in order for each frame: the default `mixed` pack is `ai`, then `rpu`. Each frame comes from the first pack made from the picture the game draws, so the same install suits vanilla and RPU.
+- The archives hold no art. The engine upscales every picture of the game itself, from your own copy (and from a content mod's art, such as the Restoration Project's), with a C++ version of the deterministic upscale the scripted pack was made with: palette-aware de-dithering, edge-directed 2x interpolation, gradient restoration, sharpening; 16-bit colour (`hd_upscale_precision=16`) with de-banding where the picture is smooth. SIMD (NEON, SSE2) on all CPU cores.
+- Characters (critters) are upscaled too (`hd_upscale_critters=1`).
+- Each map is prepared while it loads: floor and roof tiles (upscaled with their real neighbours on the map, so no seams), walls, scenery, items and every character's standing, walking and running animations, nearest to the view first. Nothing is upscaled while you play.
+- A loading screen with a progress bar shows while a map is prepared (`hd_loading_screen`); the game's splash pictures are upscaled.
+- The world map, town maps, help and death screens, other elevations and the rest of the characters' animations are prepared in idle time.
+- Disk cache `data/hd/cache` (`hd_upscale_cache=1`, at most `hd_upscale_cache_mb=2048`, oldest removed first): a second visit to a town loads in 0.1-0.3 s instead of 0.2-0.8 s.
+- New settings component `--with pixel_doubled` (`hd_upscale=double`): the original art doubled, no upscaling.
+- HD art packs are optional and built locally ([HD art packs](../components/hd_packs/README.md)); a pack, when named in `hd_pack`, still wins for the pictures it was made from. Ground variants need a pack.
 
-#### Packaging
+#### Installer
 
-- The archives hold only the art the default `mixed` pack draws: `mods/narg_hd.dat` no longer has the AI images `mixed` takes from the scripted pack, and the scripted pack (`mods/narg_hd_scripted.dat`, `--pack scripted`) is not in the release archives.
+- No `mods/*.dat` to add: without `--pack` the installer takes `narg_hd*.dat` out of `mods/mods_order.txt` (the files stay) and sets `hd_pack=` (empty) and the cache settings.
 
 #### Tools
 
@@ -21,6 +27,7 @@
 #### Engine
 
 - Fixed: "Heap Error: Attempt to unlock a previously unlocked block" in `debug.log` after skipping the intro movie with HD lights on.
+- Builds on Linux and Windows (CI).
 
 ### Version 1.0.0
 

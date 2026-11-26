@@ -4,12 +4,14 @@
 # Extract the release archive into the Fallout 2 folder (vanilla, or with the
 # Restoration Project installed), then run this script there:
 #
-#   ./narg-install.sh [--pack mixed|ai|scripted] [--with <component>] ...
+#   ./narg-install.sh [--with <component>] [--pack mixed|ai|scripted] ...
 #
-#   --pack <name>       HD art pack (default mixed); scripted also needs
-#                       mods/narg_hd_scripted.dat from the archive
 #   --with <component>  apply narg/settings/<component>.cfg after the defaults
-#                       (no_wind, no_shot_light, no_lights, classic, windowed)
+#                       (no_wind, no_shot_light, no_lights, classic, windowed,
+#                       pixel_doubled)
+#   --pack <name>       draw an HD art pack you have in mods/ (narg_hd.dat,
+#                       for scripted also narg_hd_scripted.dat) instead of the
+#                       engine's own upscale; the release archives hold none
 #   --resolution WxH    screen size instead of the detected one
 #
 # Whatever the installer replaces or changes is saved to backup/narg first
@@ -22,7 +24,7 @@ set -eu
 
 cd -- "$(dirname "$0")"
 
-PACK=mixed
+PACK=""
 COMPONENTS=()
 RESOLUTION=""
 while [[ $# -gt 0 ]]; do
@@ -47,7 +49,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$PACK" in
-mixed | ai | scripted) ;;
+"" | mixed | ai | scripted) ;;
 *)
     echo "--pack must be mixed, ai or scripted"
     exit 1
@@ -62,8 +64,8 @@ if [[ ! -d narg || ! -f narg/narg.cfg ]]; then
     echo "narg/ not found: extract the whole Narg Edition archive into this directory first. Aborting."
     exit 1
 fi
-if [[ ! -f mods/narg_hd.dat ]]; then
-    echo "mods/narg_hd.dat not found: extract the whole Narg Edition archive into this directory first. Aborting."
+if [[ -n "$PACK" && ! -f mods/narg_hd.dat ]]; then
+    echo "--pack $PACK needs the HD art pack mods/narg_hd.dat. Aborting."
     exit 1
 fi
 if [[ "$PACK" == "scripted" && ! -f mods/narg_hd_scripted.dat ]]; then
@@ -181,26 +183,22 @@ remove_mod() {
     NARG_M="$1" awk 'BEGIN { m = ENVIRON["NARG_M"] } { l = $0; sub(/\r$/, "", l) } tolower(l) != tolower(m)' mods/mods_order.txt >mods/mods_order.tmp
     mv mods/mods_order.tmp mods/mods_order.txt
 }
-# HD art only adds files under hd/, so its place in the order does not matter.
-# The archive's list is removed once used; a second run adds the main pack.
-if [[ -f mods_order.txt ]]; then
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        line="${line%$'\r'}"
-        [[ -z "$line" || "$line" == \#* || "$line" == \;* ]] && continue
-        add_mod "$line"
-    done <mods_order.txt
-    rm -f mods_order.txt
-else
+# By default the engine upscales the game's own art (and a mod's) itself, so
+# no art is loaded from mods/. HD art packs (--pack) only add files under
+# hd/, so their place in the order does not matter; without --pack they are
+# taken out of the order (the files stay).
+if [[ -n "$PACK" ]]; then
     add_mod narg_hd.dat
+else
+    remove_mod narg_hd.dat
 fi
 if [[ "$PACK" == "scripted" ]]; then
     add_mod narg_hd_scripted.dat
 else
     remove_mod narg_hd_scripted.dat
 fi
-# RPU add-on (narg_v*_rpu.zip): HD art of the Restoration Project's own
-# images, loaded only on RPU.
-if [[ $rpu -eq 1 && -f mods/narg_hd_rpu.dat ]]; then
+# The pack of the Restoration Project's own images, only on RPU.
+if [[ -n "$PACK" && $rpu -eq 1 && -f mods/narg_hd_rpu.dat ]]; then
     add_mod narg_hd_rpu.dat
 else
     remove_mod narg_hd_rpu.dat
@@ -310,11 +308,13 @@ done
 
 rm -f -- narg-install.bat narg-install.command narg-install.sh narg/narg-install.ps1
 
-echo "Fallout 2: Narg Edition installed (HD pack $PACK, screen ${width}x${height}). Backup is in $bdir."
+if [[ -n "$PACK" ]]; then
+    hd="HD art pack $PACK"
+else
+    hd="HD upscaled by the engine"
+fi
+echo "Fallout 2: Narg Edition installed ($hd, screen ${width}x${height}). Backup is in $bdir."
 echo "Start the game with: $launcher"
 if [[ $rpu -eq 1 ]]; then
-    echo "Restoration Project: start a new game, as after installing it (docs: narg/docs/rpu.md)."
-    if [[ ! -f mods/narg_hd_rpu.dat ]]; then
-        echo "Restoration Project art stays in standard resolution: extract narg_v*_rpu.zip here and run the installer again for its HD art."
-    fi
+    echo "Restoration Project: start a new game, or convert your old saves with narg/rpu-save-convert.py (docs: narg/docs/rpu.md)."
 fi

@@ -4,11 +4,8 @@ name: build
 # macOS, Linux and Windows and packs the release archives with
 # extra/package.sh. Tagged builds (v*) are attached to a GitHub release.
 #
-# The HD art (mods/narg_hd*.dat) is derived from the game's own art, so it is
-# not in this repository and cannot be generated here (it needs the game data
-# and local models). Set the repository secret NARG_HD_PACKS_URL to a .tar of
-# the installed packs (ai/ and scripted/ with legacy.txt) to include it;
-# without it the archives contain the engine, installer and docs only.
+# The archives hold no art: the engine upscales the player's own game art
+# (and a mod's) at run time.
 #
 # The engine is in engine/; its Stimpak submodule (engine/external/stimpak)
 # comes from github.com/lukmusial/fallout2-stimpak.
@@ -95,31 +92,17 @@ jobs:
         with:
           path: engines
 
-      - name: Build ce-dat-tool (Linux, to pack the HD art)
+      - name: Install zip
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsdl2-dev zlib1g-dev ninja-build zip
-          cmake -S engine -B tool -G Ninja -D CMAKE_BUILD_TYPE=Release
-          cmake --build tool --target ce-dat-tool
-
-      - name: HD packs
-        env:
-          NARG_HD_PACKS_URL: ${{ secrets.NARG_HD_PACKS_URL }}
-        run: |
-          if [ -n "$NARG_HD_PACKS_URL" ]; then
-            mkdir -p packs
-            curl -fsSL "$NARG_HD_PACKS_URL" | tar -x -C packs
-            echo "PACKS=$PWD/packs" >> "$GITHUB_ENV"
-          else
-            echo "PACKS=" >> "$GITHUB_ENV"
-          fi
+          sudo apt-get install -y zip
 
       - name: Package
         run: |
           # artifacts lose the executable bit
           chmod +x engines/engine-linux/fallout2-ce "engines/engine-macos/Fallout II Community Edition.app/Contents/MacOS/"*
           for platform in macos linux windows; do
-            extra/package.sh "$platform" "engines/engine-$platform" "$PACKS" "$PWD/tool/ce-dat-tool"
+            extra/package.sh "$platform" "engines/engine-$platform"
           done
 
       - name: Upload archives
@@ -129,10 +112,8 @@ jobs:
           name: narg-archives
           path: narg_v*.zip
 
-      # Without the HD packs the archives hold no art: a release is then
-      # made by hand with the full archives (CI must not replace them).
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/') && env.PACKS != ''
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: narg_v*.zip

@@ -141,6 +141,12 @@ static std::vector<Fixture> loadFixtures()
     std::string name;
     int tile = 0;
     while (in >> name >> tile) {
+        // The fixtures are frames of the game's art: they are not in the
+        // repository, make_upscale_fixtures.py makes them from your copy.
+        if (!std::ifstream(std::string(HD_UPSCALE_FIXTURES) + "/" + name + ".in.png")) {
+            printf("hd_upscale_test: fixtures not found (run tools/hd/make_upscale_fixtures.py); skipped\n");
+            return {};
+        }
         Fixture fixture;
         if (loadFixture(name, tile != 0, &fixture)) {
             list.push_back(std::move(fixture));

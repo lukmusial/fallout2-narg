@@ -1,23 +1,23 @@
 #!/bin/bash
 # Packs a Fallout 2: Narg Edition release archive for one platform.
 #
-#   extra/package.sh <platform> <engine build dir> <hd packs dir> [<ce-dat-tool>]
+#   extra/package.sh <platform> <engine build dir> [<hd packs dir> [<ce-dat-tool>]]
 #
 #   <platform>          macos | linux | windows
 #   <engine build dir>  the CMake build of engine/: "Fallout II Community
 #                       Edition.app" (macos), fallout2-ce (linux) or
 #                       fallout2-ce.exe (windows), and ce.dat
-#   <hd packs dir>      the installed HD packs: <dir>/ai and <dir>/scripted, each
-#                       with legacy.txt (engine/tools/hd: install.py makes
-#                       both), and optionally <dir>/rpu (mod_pack.py install).
-#                       Empty ("") packs no HD art: an engine-only archive.
+#   <hd packs dir>      optional, for local builds only: HD art packs made
+#                       from the game's art (engine/tools/hd), <dir>/ai and
+#                       <dir>/scripted, each with legacy.txt, and optionally
+#                       <dir>/rpu. Omitted or empty (""): no art, as the
+#                       releases are (the engine upscales the player's own
+#                       art). Archives with packs are not for distribution.
 #   <ce-dat-tool>       default: <engine build dir>/ce-dat-tool
 #
 # Writes narg_v<VERSION>_<platform>.zip (and, with an rpu pack,
-# narg_v<VERSION>_rpu.zip) in the repository root, following
-# the Restoration Project's layout: everything extracts into the game folder,
-# mods/*.dat are the data, mods_order.txt lists the ones to load and
-# narg-install.* sets the game up (see docs/).
+# narg_v<VERSION>_rpu.zip) in the repository root: everything extracts into
+# the game folder and narg-install.* sets the game up (see docs/).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -31,10 +31,9 @@ STAGE="$ROOT/out/stage/$PLATFORM"
 APP="Fallout II Community Edition.app"
 
 rm -rf "$STAGE"
-mkdir -p "$STAGE/mods" "$STAGE/narg/docs" "$STAGE/narg/settings"
+mkdir -p "$STAGE/narg/docs" "$STAGE/narg/settings"
 
 # installer, load order, settings, docs
-cp "$ROOT/release/mods_order.txt" "$STAGE/"
 cp "$ROOT/release/narg.cfg" "$STAGE/narg/"
 cp "$ROOT/VERSION" "$STAGE/narg/"
 cp "$ROOT"/components/settings/*.cfg "$STAGE/narg/settings/"
@@ -68,7 +67,8 @@ windows)
     ;;
 esac
 
-# HD art: mods/narg_hd.dat holds what the default "mixed" pack draws (the
+# Optional HD art packs (local builds only): mods/narg_hd.dat holds what the
+# "mixed" pack draws (the
 # manifest is ce.dat hd/mixed/manifest.txt): the AI pack (hd/ai) without the
 # images the manifest takes from another pack, and those images of the
 # scripted pack. The whole scripted pack (mods/narg_hd_scripted.dat, for
@@ -88,7 +88,7 @@ if [[ -n "$PACKS" ]]; then
     done
     tree="$ROOT/out/stage/hd"
     rm -rf "$tree"
-    mkdir -p "$tree/main/hd" "$tree/scripted/hd"
+    mkdir -p "$tree/main/hd" "$tree/scripted/hd" "$STAGE/mods"
     # APFS/btrfs clones where possible: no copy of ~600 MB.
     cp -cR "$PACKS/ai" "$tree/main/hd/ai" 2>/dev/null || cp -R "$PACKS/ai" "$tree/main/hd/ai"
     mkdir -p "$tree/main/hd/scripted"
@@ -139,8 +139,6 @@ if [[ -n "$PACKS" ]]; then
         echo "packed $rpu_zip"
     fi
     rm -rf "$tree"
-else
-    echo "warning: no HD packs given; the archive has no HD art" >&2
 fi
 
 rm -f "$ROOT/$NAME.zip"
