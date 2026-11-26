@@ -1,0 +1,33 @@
+# Phase 2.22 runtime scripted upscale on a map (run with --dev-load-game=N,
+# [graphics]hd=1 and a pack name that is not installed, so every frame is
+# upscaled at runtime): the frames queued at the load and the background
+# threads' work (upscalewait), then as hd_map.txt: the frame, hdcheck before
+# and after scrolling.
+until game 30000
+upscalewait stats
+dump state
+wait 2000
+fbshot game
+hdcheck check
+key right
+wait 150
+key right
+wait 150
+key right
+wait 150
+key down
+wait 150
+key down
+wait 150
+key left
+wait 150
+key up
+wait 150
+move 639 0
+wait 1200
+move 320 200
+wait 500
+hdcheck scrolled
+fbshot scrolled_fb
+hdstats end_stats
+quit 0

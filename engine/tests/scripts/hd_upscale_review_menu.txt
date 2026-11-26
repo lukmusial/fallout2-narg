@@ -1,0 +1,8 @@
+# Phase 2.22 review captures: main menu and load screen (hd=1).
+until mainmenu 20000
+wait 1500
+fbshot menu
+key l
+wait 2500
+fbshot load
+quit 0

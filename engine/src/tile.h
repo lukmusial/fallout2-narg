@@ -117,12 +117,14 @@ struct TileHdCheck {
     int objectPixelsHd = 0; // of those, showing HD
     int sceneryPixels = 0; // of the object pixels, last drawn by a wall, scenery or item (HD kinds)
     int sceneryPixelsHd = 0; // of those, showing HD
-    int legacyObjectPixels = 0; // of the object pixels, last drawn by a critter, misc or interface object
+    int critterPixels = 0; // of the object pixels, last drawn by a critter drawing HD (runtime upscale, Phase 2.22)
+    int critterPixelsHd = 0; // of those, showing HD
+    int legacyObjectPixels = 0; // of the object pixels, last drawn by an object without HD (critters with hd_upscale_critters=0 or hd_upscale=double, misc, interface)
     int legacyObjectPixelsHd = 0; // of those, showing HD (must be 0)
     int tilePixels = 0; // floor/roof only (not black, not colour-cycling, no object drawn there)
     int tilePixelsHd = 0; // of those, showing HD
     int cyclingHd = 0; // colour-cycling indices showing HD (must be 0)
-    std::vector<unsigned char> mask; // per pixel: 0 legacy, 1 HD tile, 2 legacy object, 3 HD on a critter/misc object (or unknown), 4 stale, 5 legacy changed, 6 HD wall/scenery/item
+    std::vector<unsigned char> mask; // per pixel: 0 legacy, 1 HD tile, 2 legacy object, 3 HD on a critter/misc object (or unknown), 4 stale, 5 legacy changed, 6 HD wall/scenery/item, 7 HD critter
 };
 bool tileHdCheck(TileHdCheck* check);
 

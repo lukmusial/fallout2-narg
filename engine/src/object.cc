@@ -22,6 +22,7 @@
 #include "game.h"
 #include "game_mouse.h"
 #include "hd_art.h"
+#include "hd_scene.h"
 #include "hd_layer.h"
 #include "hd_wind.h"
 #include "item.h"
@@ -3319,32 +3320,32 @@ void _obj_preload_art_cache(MapHeaderFlags flags)
         v11++;
     }
 
-    CacheEntry* cache_handle;
-    if (artLock(FrmId(*gObjectFids), &cache_handle) != nullptr) {
-        artUnlock(cache_handle);
-    }
+    // (The HD runtime upscale prepares the map's art itself, see
+    // hd_scene.h.)
+    auto preload = [](const FrmId& frmId) {
+        CacheEntry* cache_handle;
+        if (artLock(frmId, &cache_handle) != nullptr) {
+            artUnlock(cache_handle);
+        }
+    };
+
+    preload(FrmId(*gObjectFids));
 
     for (int i = 1; i < v11; i++) {
         if (gObjectFids[i - 1] != gObjectFids[i]) {
-            if (artLock(FrmId(gObjectFids[i]), &cache_handle) != nullptr) {
-                artUnlock(cache_handle);
-            }
+            preload(FrmId(gObjectFids[i]));
         }
     }
 
     for (int i = FrmId::kMinFrameId; i <= FrmId::kMaxFrameId; i++) {
         if (arr[i] != 0) {
-            if (artLock(static_cast<TileFrameId>(i), &cache_handle) != nullptr) {
-                artUnlock(cache_handle);
-            }
+            preload(FrmId(static_cast<TileFrameId>(i)));
         }
     }
 
     for (int i = v11; i < gObjectFidsLength; i++) {
         if (gObjectFids[i - 1] != gObjectFids[i]) {
-            if (artLock(FrmId(gObjectFids[i]), &cache_handle) != nullptr) {
-                artUnlock(cache_handle);
-            }
+            preload(FrmId(gObjectFids[i]));
         }
     }
 
@@ -3779,6 +3780,10 @@ int _obj_load_dude(File* stream)
     memcpy(gDude, temp, sizeof(*gDude));
 
     gDude->flags |= OBJECT_NO_SAVE;
+
+    // CE: the player's art as loaded (weapon in hand, the bar's picture of
+    // it) is upscaled before it is drawn (HD runtime upscale, hd_scene.h).
+    hdScenePrepareDude();
 
     scriptsClearDudeScript();
 
@@ -4820,9 +4825,10 @@ unsigned int objectHdCutOutDraws()
     return gObjectHd.cutOutDraws;
 }
 
-static bool objectHdIsHdType(ObjectType type)
+bool objectHdIsHdType(int type)
 {
-    return type == OBJ_TYPE_ITEM || type == OBJ_TYPE_SCENERY || type == OBJ_TYPE_WALL;
+    return type == OBJ_TYPE_ITEM || type == OBJ_TYPE_SCENERY || type == OBJ_TYPE_WALL
+        || (type == OBJ_TYPE_CRITTER && hdArtUpscalesCritters());
 }
 
 static uint32_t objectHdPaletteColor(const unsigned char* basePalette8, Color color)

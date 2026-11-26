@@ -1,0 +1,28 @@
+# The world map at a wide resolution, entered after loading a game from the
+# main menu's load screen (use with no --dev-load-game; hd=1): the screen
+# outside the world map window must stay black (the map behind it was
+# blanked: its HD layer too), also after the cursor's edge-scroll arrows.
+until mainmenu 30000
+wait 1500
+key l
+wait 2500
+key enter
+until game 60000
+wait 2500
+worldmap
+wait 2500
+fbshot wm
+planes wm
+move 0 270
+wait 600
+move 959 100
+wait 600
+move 959 539
+wait 600
+move 480 0
+wait 600
+move 480 270
+wait 1000
+fbshot wm2
+planes wm2
+quit 0

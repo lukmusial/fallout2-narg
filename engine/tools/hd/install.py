@@ -116,6 +116,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("packs", nargs="*", default=["scripted", "ai"])
     ap.add_argument("--run-dir", type=Path, default=hdlib.BUILD_DIR)
+    ap.add_argument("--mod", type=Path, help="the packs were made from this installed, modded game "
+                                             "(mod_pack.py): legacy.txt from its chain")
     args = ap.parse_args()
     for pack in args.packs:
         copied, kept, removed = install(pack, args.run_dir)
@@ -125,7 +127,7 @@ def main() -> None:
     import legacy_art
 
     legacy_art.cmd_hashes(argparse.Namespace(packs=[args.run_dir / "data/hd" / p for p in args.packs],
-                                             game=hdlib.GAME_DIR, f2_res=None))
+                                             game=hdlib.GAME_DIR, f2_res=None, mod=args.mod))
 
 
 if __name__ == "__main__":

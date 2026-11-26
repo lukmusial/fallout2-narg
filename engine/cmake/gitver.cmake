@@ -38,6 +38,16 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
+# Builds outside a git checkout (or without tags) still need values.
+if(NOT DATE)
+    string(TIMESTAMP DATE "\"%b %d %Y %H:%M:%S\"")
+endif()
+foreach(VAR AUTHOR BRANCH HASH LATEST_TAG)
+    if(NOT ${VAR})
+        set(${VAR} "unknown")
+    endif()
+endforeach()
+
 # Define a variable for CI_BUILD
 set(CI_BUILD 0)
 

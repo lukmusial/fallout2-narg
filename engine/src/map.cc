@@ -22,6 +22,7 @@
 #include "game_mouse.h"
 #include "game_movie.h"
 #include "game_sound.h"
+#include "hd_scene.h"
 #include "input.h"
 #include "interface.h"
 #include "item.h"
@@ -980,6 +981,8 @@ int mapLoadById(Map map)
 // 0x482B74 map_load_file
 static int mapLoad(File* stream)
 {
+    // CE: load time in debug.log (Phase 2.22 timings).
+    unsigned int mapLoadStarted = getTicks();
     int mapLoadSoundId = 0;
     if (!settings.system.executableIsMapper()) {
         _map_save_in_game(true);
@@ -1192,6 +1195,8 @@ err:
     interfaceBarShow();
     _proto_dude_update_gender();
     _map_place_dude_and_mouse();
+    // CE: the HD runtime upscale prepares the scene before play (hd_scene.h).
+    hdScenePrepareMap();
     fileSetReadProgressHandler(nullptr, 0);
     isoEnable();
     _gmouse_disable_scrolling();
@@ -1252,6 +1257,8 @@ err:
         scriptSoundStop(mapLoadSoundId);
         mapLoadSoundId = 0;
     }
+
+    debugPrint("CE: map %s loaded in %u ms\n", gMapHeader.name, getTicksSince(mapLoadStarted));
 
     return rc;
 }

@@ -253,7 +253,7 @@ def read_map_grids(path: Path) -> dict[int, tuple[int, ...]]:
     """Return {elevation: 100x100 tile words} for every elevation the map has.
     Each word is roof << 16 | floor; the low 12 bits of a half are the tile
     number in tiles.lst, the top 4 bits flags."""
-    b = path.read_bytes()
+    b = mapobjects.read_map_bytes(path)
     (version, _name, _ent, _elev, _rot, nloc, _sid, flags, _dark, nglob, _idx, _t) = \
         struct.unpack(">i16s10i", b[:60])
     if version not in (19, 20):

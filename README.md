@@ -2,18 +2,66 @@
 
 [**Download**](#download)
 | [**Installation**](#installation)
+| [**Restoration Project**](#restoration-project)
 | [**Additional mods**](#additional-mods)
 | [**Report issues**](#bug-reports)
 
 **Fallout 2: Narg Edition** is Fallout 2 in high definition on a modern engine:
 
 - the [Fallout 2 Community Edition](https://github.com/fallout2-ce/fallout2-ce) engine (CE), which replaces the game's executable, with
-- **HD rendering**: true colour at twice the resolution, HD art for the interface, floors, roofs, walls, scenery, items and inventory, 2x text, coloured lights and soft shadows, a light from every gunshot, trees swaying in the wind, smooth scrolling and map zoom;
+- **HD rendering**: true colour at twice the resolution; every picture of the game (interface, floors, roofs, walls, scenery, items, characters, world map) upscaled 2x by the engine from your own copy of the game, with 16-bit colour smoothing; 2x text, coloured lights and soft shadows, a light from every gunshot, trees swaying in the wind, smooth scrolling and map zoom;
 - **[Stimpak](https://github.com/lukmusial/fallout2-stimpak)**, a savegame editor on the main menu (character, companions, quests, locations, travel).
 
-It installs on vanilla Fallout 2 and on top of the [Restoration Project](https://github.com/BGforgeNet/Fallout2_Restoration_Project) (RPU). Characters (critters) keep their original art.
+It installs on vanilla Fallout 2 and is compatible with the Restoration Project; we recommend playing the two together (see [below](#restoration-project)).
 
-> **The HD art is made from the game's own art.** Its images are upscaled from Fallout 2's art files, so you need your own copy of Fallout 2 ([GOG](https://www.gog.com/game/fallout_2), [Steam](https://store.steampowered.com/app/38410), [Epic](https://store.epicgames.com/p/fallout-2)) to play, and the archives are not meant to be redistributed without the game.
+**No game art is distributed.** The archives hold the engine, the installer and documentation; the HD pictures are made on your machine, from your game's files, while the game runs. You need your own copy of Fallout 2 ([GOG](https://www.gog.com/game/fallout_2), [Steam](https://store.steampowered.com/app/38410), [Epic](https://store.epicgames.com/p/fallout-2)).
+
+![Arroyo in Narg Edition](docs/media/hd_arroyo.jpg)
+
+## Restoration Project
+
+The [Fallout 2 Restoration Project](https://github.com/BGforgeNet/Fallout2_Restoration_Project) (RPU, by BGforge) is a separate, widely used mod that restores content cut from the original game (locations, quests, characters, items) and fixes many bugs. It is not part of Narg Edition and is not required: Narg Edition plays the unmodded game as well.
+
+Narg Edition is compatible with RPU (tested with v2.4.34) and we recommend using them together:
+
+- install RPU first, with its own installer, then Narg Edition on top; Narg Edition's engine runs RPU's mods and scripts in place of RPU's `fallout2.exe`;
+- RPU's own art (its new locations, the world map, items, the hi-res main menu) is upscaled like the game's;
+- saves from the unmodded game can be carried over with `narg/rpu-save-convert.py`.
+
+Details and known differences: [RPU notes](docs/rpu.md).
+
+## Screenshots
+
+Each pair shows the same spot before (the original art, as the game draws it at this screen size) and after (Narg Edition, upscaled by the engine), enlarged 2x so single pixels show.
+
+![Klamath: original art and HD](docs/media/compare_klamath.jpg)
+![Main menu: original art and HD](docs/media/compare_menu.jpg)
+![Inventory: original art and HD](docs/media/compare_inventory.jpg)
+
+On the Restoration Project, before (RPU's art, as the game draws it) and after (Narg Edition):
+
+![RPU's new location art: doubled and HD](docs/media/rpu_abbey.jpg)
+![RPU's EPA: doubled and HD](docs/media/rpu_epa.jpg)
+
+In motion: lights that move with the player at night, a light from every round of a burst, trees in the wind, and map zoom.
+
+| Lights | Gunshots |
+|---|---|
+| ![Lights at night in the Den](docs/media/lights_walk.gif) | ![A burst at night](docs/media/gunshot.gif) |
+| **Wind** | **Zoom** |
+| ![Trees in the wind in Arroyo](docs/media/wind.gif) | ![Zooming the map out and in](docs/media/zoom.gif) |
+
+Stimpak's screens are in [its README](https://github.com/lukmusial/fallout2-stimpak#readme).
+
+### How the HD pictures are made
+
+The engine upscales each picture the first time it is needed, with a deterministic, palette-aware 2x upscale (de-dithering, edge-directed interpolation, gradient restoration and sharpening, run in 16-bit colour so smooth areas lose their banding), on all CPU cores:
+
+- while a map loads, everything it can show at once (floor and roof tiles with their real neighbours on the map, walls, scenery, items, and every character's standing, walking and running animations in all directions), behind a loading screen with a progress bar;
+- the world map, town maps and help screens, other elevations and the rest of the characters' animations in idle time;
+- the results are kept in `data/hd/cache` (at most 2 GB, oldest removed first), so a second visit to a town loads faster.
+
+After a map has loaded nothing is upscaled while you play. On an Apple M5 Pro a town takes 0.2-0.8 s to prepare the first time and 0.1-0.3 s with the cache; play runs at the 60 fps limit.
 
 ## Download
 
@@ -22,9 +70,7 @@ Releases are archives per platform: `narg_v<version>_macos.zip`, `narg_v<version
 | File | What it is |
 |---|---|
 | `Fallout 2 Narg Edition.app` (macOS), `narg/linux/fallout2-ce`, `narg/windows/fallout2-ce.exe` | the engine |
-| `mods/narg_hd.dat` | the HD art: AI-upscaled pack, plus the scripted images the default `mixed` pack uses |
-| `mods/narg_hd_scripted.dat` | optional: the whole scripted pack (`--pack scripted`) |
-| `mods_order.txt` | the mods the installer adds to `mods/mods_order.txt` |
+| `narg/rpu-save-convert.py` | converts saves from the unmodded game for the Restoration Project ([RPU notes](docs/rpu.md)) |
 | `narg/narg.cfg` | the settings the installer puts into `fallout2.cfg` |
 | `narg/settings/*.cfg` | optional settings components (see below) |
 | `narg/f2_res.dat` | hi-res interface art, installed when the game has none |
@@ -33,8 +79,8 @@ Releases are archives per platform: `narg_v<version>_macos.zip`, `narg_v<version
 
 ## Installation
 
-- Narg Edition installs on **vanilla Fallout 2** (GOG, Steam, CD) or on **Fallout 2 with RPU** (install RPU first, then Narg Edition).
-- Saved games keep working; with RPU, start a new game after installing RPU as usual.
+- Narg Edition installs on **vanilla Fallout 2** (GOG, Steam, CD) or on **Fallout 2 with the [Restoration Project](#restoration-project)** (recommended: install RPU first, then Narg Edition).
+- Saved games keep working. Saves from before RPU load on RPU after `narg/rpu-save-convert.py` ([RPU notes](docs/rpu.md#saves-from-before-rpu)).
 - Everything the installer replaces or changes is copied to `backup/narg/` first.
 
 Per platform: [macOS](docs/macos.md) | [Linux](docs/linux.md) | [Windows](docs/windows.md) | [on top of RPU](docs/rpu.md).
@@ -45,20 +91,19 @@ In short: extract the archive into the game folder, run `narg-install.command` (
 
 | Option | Effect |
 |---|---|
-| `--pack mixed` (default) | AI-upscaled art, scripted (deterministic) upscale where the AI does poorly |
-| `--pack ai` / `--pack scripted` | one pack only (`scripted` needs `mods/narg_hd_scripted.dat`) |
 | `--with no_wind` | trees and bushes stand still |
 | `--with no_shot_light` | no light from gunshots and explosions |
 | `--with no_lights` | no coloured lights, glow or soft shadows (for slow machines) |
+| `--with pixel_doubled` | HD output with the original art pixel-doubled instead of upscaled (no upscaling work) |
 | `--with classic` | the original 256-colour look; engine, Stimpak and fixes stay |
 | `--with windowed` | a window instead of full screen |
 | `--resolution 2560x1440` | screen size, instead of the detected one |
 
-All of them are settings in `fallout2.cfg` (`[graphics]`, `[screen]`) that you can change later. On Windows the options are written `-Pack ai -With no_wind,windowed -Resolution 2560x1440`.
+All of them are settings in `fallout2.cfg` (`[graphics]`, `[screen]`) that you can change later. On Windows the options are written `-With no_wind,windowed -Resolution 2560x1440`.
 
 ### Compatibility with content mods
 
-HD images are found by the art file they were made from. When a mod replaces a picture (RPU repaints the world map, adds real tiles where the game had placeholders, changes the dialogue frame, some items and the hi-res main menu), the engine compares the game's own picture with the one the HD image was made from (`hd/<pack>/legacy.txt`, `[graphics] hd_verify=1`) and draws the mod's picture, doubled, wherever they differ. New art from a mod is also drawn doubled. See [RPU notes](docs/rpu.md).
+The engine upscales whatever picture the game draws, so art a mod replaces or adds (RPU's world map, new locations, tiles, items, the hi-res main menu) is upscaled like the game's own. See [RPU notes](docs/rpu.md).
 
 ## Additional mods
 
@@ -66,7 +111,7 @@ HD images are found by the art file they were made from. When a mod replaces a p
 
 - [Fallout 2 Community Edition](https://github.com/fallout2-ce/fallout2-ce) engine at c30f1efc
 - [Stimpak](https://github.com/lukmusial/fallout2-stimpak) savegame editor
-- HD rendering and HD art (this project)
+- HD rendering and the in-engine upscale (this project)
 
 ### Recommended
 
@@ -83,4 +128,4 @@ Describe the problem, attach a savegame and a screenshot (in HD, F12 saves a ful
 - [Known issues](docs/known.md)
 - [Credits and licences](docs/credits.md)
 - [Development: building the engine and the archives](docs/development.md)
-- [Tests of the 1.0.0 release](docs/testing.md)
+- [Test results](docs/testing.md)

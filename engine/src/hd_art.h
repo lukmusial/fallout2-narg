@@ -12,12 +12,15 @@ namespace fallout {
 
 class FrmId;
 class FrmImage;
+struct Art;
 
 // HD art lookup and cache (file formats: see hd_format.h).
 //
 // The active pack is `[graphics] hd_pack` (a folder name under hd/, looked up
 // through the normal file layering: data/ patches folder, mods, ce.dat,
-// master.dat). Empty means no HD art. A pack folder may contain
+// master.dat). Empty means no pack: every frame comes from the runtime
+// upscale (hd_upscale=scripted, the default), or is doubled
+// (hd_upscale=double). A pack folder may contain
 // `manifest.txt` to take individual assets from other packs; this is how a
 // "mixed" pack is made:
 //
@@ -31,6 +34,13 @@ class FrmImage;
 // replaces (e.g. the Restoration Project's) is drawn from the mod's frame,
 // doubled, instead of as the pack's picture of the original. `[graphics]
 // hd_verify=0` turns the check off.
+//
+// A manifest value may name several packs, tried in order for each frame:
+// the first with an image made from the frame the game draws is used. A pack
+// made from a mod's art then follows the normal pack, and one install serves
+// both the original game and the mod:
+//
+//   * = ai rpu                         # RPU's art where RPU changed or added it
 //
 // Decoded frames are kept in an LRU cache bounded by `[graphics]
 // hd_cache_mb`. When an asset has no HD image, callers can ask for an
@@ -46,6 +56,9 @@ unsigned int hdArtGeneration();
 
 // The pack's HD image for a frame of a legacy art file, or null.
 std::shared_ptr<const HdImage> hdArtFindFrame(const char* artPath, int frame, int direction);
+
+// The pack a frame was taken from by the last lookup (empty: none).
+std::string hdArtFramePack(const char* artPath, int frame, int direction);
 
 // As hdArtFindFrame; without a pack image, the legacy frame (`legacyData`,
 // `width` x `height`, index 0 transparent) expanded 2x through the base
@@ -119,17 +132,120 @@ int hdArtSetButtonArt(int btn, const FrmImage* normal, const FrmImage* pressed, 
 void hdArtAttachButtonArt(int win, const FrmImage* images, int count, unsigned char* const* copies = nullptr);
 
 struct HdArtStats {
-    int assetsResolved; // distinct art paths looked up
-    int assetsWithHd; // of those, with a pack image
-    int framesCached;
-    size_t bytesCached;
-    unsigned long long hits;
-    unsigned long long misses;
-    int legacyChecked; // frames whose legacy source was checked (legacy.txt)
-    int legacyRejected; // of those, frames the running game draws differently
+    int assetsResolved = 0; // distinct art paths looked up
+    int assetsWithHd = 0; // of those, with a pack image
+    int framesCached = 0;
+    size_t bytesCached = 0;
+    unsigned long long hits = 0;
+    unsigned long long misses = 0;
+    int legacyChecked = 0; // frames whose legacy source was checked (legacy.txt)
+    int legacyRejected = 0; // frames no pack has an image of as the running game draws them
+
+    // Runtime scripted upscale (Phase 2.22).
+    int runtimeServed = 0; // frames drawn from it
+    unsigned long long runtimeInline = 0; // of those, upscaled on first draw (not ready in time)
+    double runtimeInlineMs = 0; // time spent on those (main thread)
+    double runtimeInlineMaxMs = 0;
+    unsigned long long runtimeFromPool = 0; // taken from the background threads when first drawn
+    unsigned long long drawUpscales = 0; // frames not ready when drawn (upscaled or waited for then)
+    unsigned long long drawUpscalesSinceScene = 0; // of those, since the last scene preparation ended
+    double runtimeTakeMs = 0; // main-thread time for those (waiting for one, or running a queued one)
+    unsigned long long preupscaleQueued = 0; // frames queued at start and at map loads
+    int upscaleThreads = 0;
+    int upscalePending = 0; // queued or running now
+    unsigned long long upscaleComputed = 0; // by the background threads
+    unsigned long long upscaleComputedInline = 0;
+    unsigned long long upscaleDiskHits = 0;
+    unsigned long long upscaleDiskWrites = 0;
+    double upscaleComputeMs = 0; // summed over threads
+    unsigned long long upscaleOutputPixels = 0;
+    // The last batch queued ("interface" at start, "map" at a map load):
+    // frames, main-thread time queueing them, time until the background
+    // threads were done with it (-1: not done yet).
+    std::string batchName;
+    int batchQueued = 0;
+    double batchQueueMs = 0;
+    double batchDoneMs = -1;
 };
 
 void hdArtGetStats(HdArtStats* stats);
+
+// Runtime scripted upscale (Phase 2.22, `[graphics] hd_upscale=scripted`,
+// src/hd_upscale.h). Lookup order for every frame: (1) the image of the
+// first pack (manifest order) made from the frame the game draws; (2) when
+// none, the frame upscaled at runtime with the scripted pack's algorithm
+// (also when the pack is not installed: `hd_pack=scripted` and manifest
+// entries naming it work without it; an installed pack still wins, its
+// offline images had the tiles' and walls' real neighbours); (3) with
+// `hd_upscale=double`, or for critters with `hd_upscale_critters=0`, the
+// callers' own fallback (pixels doubled, or legacy).
+//
+// Frames are upscaled in background threads ahead of use where the game
+// knows what it will draw (`hd_upscale_preload`): the early interface art at
+// start and the art a map uses when it loads. A frame that is not ready when
+// first drawn is upscaled right then on the main thread (or taken from the
+// background thread working on it), never drawn doubled first: the map's
+// and objects' image tables keep the first image they get, and a later
+// swap would show as a pop. Workers only see copies of the pixels and the
+// palette; nothing here locks art (the callers that have the frame pass it,
+// others read the art file, never from inside an art cache read).
+
+// While a splash or loading screen puts its own palette in `_cmap`: the
+// game's palette (6-bit, 256 x RGB) art is upscaled for meanwhile; null ends
+// it.
+void hdArtSetPaletteOverride(const unsigned char* palette6);
+
+// Whether HD art is on: a pack is set, or the runtime upscale is (no pack
+// needed: `hd_pack` empty with hd_upscale=scripted upscales everything).
+bool hdArtActive();
+
+// Whether critters are drawn HD (runtime upscale on, hd_upscale_critters).
+bool hdArtUpscalesCritters();
+
+// Queues the early interface art (start of the game).
+void hdArtPreupscaleInterface();
+// Job groups of the background upscale.
+constexpr int kHdUpscaleGroupGeneral = 0; // interface, frames drawn
+constexpr int kHdUpscaleGroupScene = 1; // what a map load waits for (hd_scene.h)
+constexpr int kHdUpscaleGroupBackground = 2; // idle-time preparation (the current map's)
+constexpr int kHdUpscaleGroupSession = 3; // idle-time preparation kept across maps (world map, town maps)
+
+// Queues every frame of `art` (locked by the caller, the legacy art of
+// `artPath`) that would be upscaled at runtime, at `priority` (lower first)
+// in `group`. Returns how many.
+int hdArtQueueArt(const char* artPath, Art* art, float priority, int group);
+// The same for an art file read now (`palettePath`: the .pal the game shows
+// it with, e.g. the death screen's; null: the current palette).
+int hdArtQueueArtFile(const char* artPath, const char* palettePath, float priority, int group);
+// Drops a group's queued frames.
+void hdArtUpscaleCancel(int group);
+// Frames of a group queued since its last reset, and how many are done.
+void hdArtUpscaleProgress(int group, int* total, int* done);
+void hdArtUpscaleResetGroup(int group);
+// Floor and roof tiles upscaled with their real neighbours (hd_scene.h):
+// `neighbours` [row delta + 1][screen column delta + 1] (null: the tile
+// itself), each width x height packed. Cleared for every map.
+void hdArtClearTileContexts();
+void hdArtSetTileContext(const char* artPath, const unsigned char* const neighbours[3][3], int width, int height);
+// Moves finished background frames into the HD art cache (its budget then
+// applies to them); the scene's idle ticker calls it.
+void hdArtUpscaleDrain();
+// Runs one queued frame on the calling (main) thread; false when none.
+bool hdArtUpscaleHelp();
+// Scene preparation bookkeeping (stats, "upscaled when drawn" counter).
+void hdArtSceneBegin();
+void hdArtSceneEnd(double queueMs);
+// The HD art cache's size and budget (hd_cache_mb), bytes.
+size_t hdArtCacheBytes();
+size_t hdArtCacheBudget();
+// An image that is not game art (a splash screen with its own palette),
+// upscaled at runtime now (or from the cache); `name` identifies it.
+std::shared_ptr<const HdImage> hdArtUpscaleImage(const std::string& name, const unsigned char* data, int width, int height,
+    int pitch, const unsigned char* palette8);
+// Frames queued or being upscaled in the background.
+int hdArtUpscalePending();
+// Waits until the background threads are idle and takes their results.
+void hdArtUpscaleWaitIdle();
 
 // Gives Stimpak's screens HD art (see stimpakSetRenderHooks).
 void hdArtAttachStimpak();

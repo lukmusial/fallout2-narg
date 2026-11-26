@@ -1,7 +1,7 @@
 ### Known issues
 
-- Characters (critters) and talking heads are the original art, doubled.
-- Art a content mod replaces or adds has no HD image and is drawn doubled (see [RPU notes](rpu.md)).
-- With HD on, aborting the "elder" movie at the start of a new game logs "Heap Error: Attempt to unlock a previously unlocked block" in `debug.log`; nothing visible happens.
-- The action menu, indicator boxes, the dragged inventory item and endgame slides are not HD yet.
+- Talking heads, movies, the mouse cursors (including the dragged inventory item), the action menu, indicator boxes and endgame slides are the original art, doubled.
+- The first visit to a big town takes up to about 0.8 s behind the loading screen while its art is upscaled (0.1-0.3 s once it is in `data/hd/cache`). Maps a town links to are not prepared ahead.
+- A weapon drawn for the first time in combat is upscaled when first shown (about 1 ms per frame).
+- Walls are upscaled without their neighbours.
 - HD needs `[screen] scale=2` and a screen of at least 1280x960; with `scale=1` the game runs in the original look.

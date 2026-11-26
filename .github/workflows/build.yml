@@ -4,14 +4,11 @@ name: build
 # macOS, Linux and Windows and packs the release archives with
 # extra/package.sh. Tagged builds (v*) are attached to a GitHub release.
 #
-# The HD art (mods/narg_hd*.dat) is derived from the game's own art, so it is
-# not in this repository and cannot be generated here (it needs the game data
-# and local models). Set the repository secret NARG_HD_PACKS_URL to a .tar of
-# the installed packs (ai/ and scripted/ with legacy.txt) to include it;
-# without it the archives contain the engine, installer and docs only.
+# The archives hold no art: the engine upscales the player's own game art
+# (and a mod's) at run time.
 #
-# Written for the repository layout; not run yet. The engine submodule (and
-# its external/stimpak submodule) must point at public URLs first.
+# The engine is in engine/; its Stimpak submodule (engine/external/stimpak)
+# comes from github.com/lukmusial/fallout2-stimpak.
 
 on:
   push:
@@ -57,7 +54,9 @@ jobs:
 
       - name: Configure (Windows)
         if: matrix.platform == 'windows'
-        run: cmake -S engine -B build -G "Visual Studio 17 2022" -A x64
+        # static C/C++ runtime, as the engine's own windows-x64 preset (SDL and zlib
+        # are built with it)
+        run: cmake -S engine -B build -G "Visual Studio 17 2022" -A x64 -D CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
 
       - name: Build
         run: cmake --build build --config Release --target fallout2-ce ce-dat-tool
@@ -68,8 +67,12 @@ jobs:
           mkdir -p dist
           case "${{ matrix.platform }}" in
           macos) cp -R "build/Fallout II Community Edition.app" build/ce.dat build/ce-dat-tool dist/ ;;
-          linux) strip build/fallout2-ce; cp build/fallout2-ce build/ce.dat build/ce-dat-tool dist/ ;;
-          windows) cp build/Release/fallout2-ce.exe build/Release/ce-dat-tool.exe dist/; cp build/ce.dat dist/ 2>/dev/null || cp build/Release/ce.dat dist/; cp build/Release/*.dll dist/ 2>/dev/null || true ;;
+          # ce.dat (the engine's own data) is built into the app bundle on macOS only
+          linux) strip build/fallout2-ce; cp build/fallout2-ce build/ce-dat-tool dist/
+                 build/ce-dat-tool create engine/files/ce.dat dist/ce.dat ;;
+          windows) cp build/Release/fallout2-ce.exe build/Release/ce-dat-tool.exe dist/
+                   build/Release/ce-dat-tool.exe create engine/files/ce.dat dist/ce.dat
+                   cp build/Release/*.dll dist/ 2>/dev/null || true ;;
           esac
 
       - uses: actions/upload-artifact@v4
@@ -89,31 +92,17 @@ jobs:
         with:
           path: engines
 
-      - name: Build ce-dat-tool (Linux, to pack the HD art)
+      - name: Install zip
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsdl2-dev zlib1g-dev ninja-build zip
-          cmake -S engine -B tool -G Ninja -D CMAKE_BUILD_TYPE=Release
-          cmake --build tool --target ce-dat-tool
-
-      - name: HD packs
-        env:
-          NARG_HD_PACKS_URL: ${{ secrets.NARG_HD_PACKS_URL }}
-        run: |
-          if [ -n "$NARG_HD_PACKS_URL" ]; then
-            mkdir -p packs
-            curl -fsSL "$NARG_HD_PACKS_URL" | tar -x -C packs
-            echo "PACKS=$PWD/packs" >> "$GITHUB_ENV"
-          else
-            echo "PACKS=" >> "$GITHUB_ENV"
-          fi
+          sudo apt-get install -y zip
 
       - name: Package
         run: |
           # artifacts lose the executable bit
           chmod +x engines/engine-linux/fallout2-ce "engines/engine-macos/Fallout II Community Edition.app/Contents/MacOS/"*
           for platform in macos linux windows; do
-            extra/package.sh "$platform" "engines/engine-$platform" "$PACKS" "$PWD/tool/ce-dat-tool"
+            extra/package.sh "$platform" "engines/engine-$platform"
           done
 
       - name: Upload archives

@@ -18,7 +18,10 @@ tools/dev/fhd.py) and hd/testmixed/ (only a manifest.txt that takes the main
 menu background from the "test" pack and everything else from a missing pack),
 and hd/testlegacy/ (the vanilla and hi-res main menu images with a legacy.txt
 that has the right source hash for the first and a wrong one for the second,
-for the legacy source check, tools/hd/legacy_art.py).
+for the legacy source check, tools/hd/legacy_art.py), hd/testalt/ (inverted
+images of both menus and hr_menu_bg, the right hash only for hr_mainmenu) and
+hd/testchain/ (a manifest that tries testlegacy and testalt in order, as
+`* = ai rpu` does).
 
 This is test art only (a simple filter, no enhancement); the real packs come
 from tools/hd/. Output stays in the gitignored run directory.
@@ -127,6 +130,34 @@ def main():
             target.write_bytes(image.read_bytes())
         legacy.write_text("\n".join(lines) + "\n")
         print(f"wrote {legacy}")
+
+    # A second pack "made from other art" (as hd/rpu is made from a mod's):
+    # inverted images, legacy.txt right only for hr_mainmenu. testchain's
+    # manifest tries both packs in order.
+    alt = RUN_DIR / "data/hd/testalt/legacy.txt"
+    if not alt.exists() or args.force:
+        lines = ["# Test legacy sources (tools/dev/make_test_hd_art.py): right for", "# hr_mainmenu, wrong for the others"]
+        for art, right in (("art/intrface/mainmenu.frm", False), ("art/intrface/hr_mainmenu.frm", True),
+                           ("art/intrface/hr_menu_bg.frm", False)):
+            with tempfile.TemporaryDirectory() as tmp:
+                indices = frm_indices(art.replace("/", "\\"), Path(tmp))
+            height, width = indices.shape
+            value = legacy_art.frame_hash(width, height, np.ascontiguousarray(indices, dtype=np.uint8).tobytes())
+            lines.append(f"{art} 0 0 {value if right else value ^ 1:016x}")
+            image = Image.fromarray(255 - colors[indices], "RGB")
+            image = image.resize((image.width * 2, image.height * 2), Image.LANCZOS).convert("RGBA")
+            target = alt.parent / Path(art).with_suffix(".png")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            image.save(target)
+        alt.write_text("\n".join(lines) + "\n")
+        print(f"wrote {alt}")
+    chain = RUN_DIR / "data/hd/testchain/manifest.txt"
+    if not chain.exists() or args.force:
+        chain.parent.mkdir(parents=True, exist_ok=True)
+        chain.write_text("# Test manifest (tools/dev/make_test_hd_art.py): packs tried in order\n"
+                         "* = testlegacy testalt\n"
+                         "art/intrface/mainmenu.frm = testalt, testlegacy\n")
+        print(f"wrote {chain}")
 
     manifest = RUN_DIR / "data/hd/testmixed/manifest.txt"
     if not manifest.exists() or args.force:

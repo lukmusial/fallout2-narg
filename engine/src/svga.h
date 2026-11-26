@@ -57,6 +57,8 @@ bool presenterGetHdStaging(unsigned char** maskPtr, uint32_t** rgbPtr);
 // While set, `_GNW95_ShowRect` treats its source as the window manager's
 // screen buffer and takes HD pixels from the staging planes.
 void presenterSetHdSource(bool staging);
+// CE (dev automation): the presented 8-bit indices and the HD mask, logical size.
+bool presenterGetPlanes(const unsigned char** index, const unsigned char** mask, int* width, int* height);
 
 int screenGetWidth();
 int screenGetHeight();

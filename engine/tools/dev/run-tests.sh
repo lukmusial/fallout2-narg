@@ -15,7 +15,7 @@ fi
 if [[ ! -f "$BUILD_DIR/build.ninja" ]]; then
     cmake -S "$REPO_DIR" -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Debug
 fi
-cmake --build "$BUILD_DIR" --target fallout2-ce ce-dat-tool ce-frm2png hd_layer_test hd_format_test hd_lights_test map_view_test | grep -E "error|FAILED" || true
+cmake --build "$BUILD_DIR" --target fallout2-ce ce-dat-tool ce-frm2png hd_layer_test hd_format_test hd_lights_test map_view_test hd_upscale_test | grep -E "error|FAILED" || true
 
 # Unit tests (no game data).
 ctest --test-dir "$BUILD_DIR" --output-on-failure | tail -n 3

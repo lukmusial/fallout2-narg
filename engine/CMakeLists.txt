@@ -158,6 +158,10 @@ set(FALLOUT_ENGINE_SOURCES
     "src/hd_lights.h"
     "src/hd_text.cc"
     "src/hd_text.h"
+    "src/hd_scene.cc"
+    "src/hd_scene.h"
+    "src/hd_upscale.cc"
+    "src/hd_upscale.h"
     "src/heap.cc"
     "src/heap.h"
     "src/input.cc"
@@ -557,6 +561,22 @@ target_include_directories(${EXECUTABLE_NAME} PRIVATE ${ZLIB_INCLUDE_DIRS})
 
 target_link_libraries(${EXECUTABLE_NAME} ${SDL2_LIBRARIES})
 target_link_libraries(${EXECUTABLE_NAME} ${SDL2_MAIN_LIBRARIES})
+
+# The runtime scripted upscale (Phase 2.22) runs on worker threads, and is
+# compiled fully optimised in every configuration (it is pure arithmetic; at
+# -O0 it is ~10x slower). (Also the copy the game compiles with Stimpak, see
+# stimpak_attach.)
+find_package(Threads REQUIRED)
+target_link_libraries(${EXECUTABLE_NAME} Threads::Threads)
+set(HD_UPSCALE_SOURCES "src/hd_upscale.cc" "${CMAKE_BINARY_DIR}/stimpak-tree/src/hd_upscale.cc")
+if(MSVC)
+    # /O2 cannot be combined with the Debug configuration's /RTC1 run-time
+    # checks: they are dropped from Debug builds (all files).
+    string(REGEX REPLACE "/RTC[1csu]*" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+    set_source_files_properties(${HD_UPSCALE_SOURCES} PROPERTIES COMPILE_OPTIONS "/O2;/Ob2")
+else()
+    set_source_files_properties(${HD_UPSCALE_SOURCES} PROPERTIES COMPILE_OPTIONS "-O3")
+endif()
 target_include_directories(${EXECUTABLE_NAME} PRIVATE ${SDL2_INCLUDE_DIRS})
 
 if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
@@ -665,6 +685,17 @@ if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
     )
     target_include_directories(hd_format_test PRIVATE "src" "third_party/lodepng")
     add_test(NAME hd_format_test COMMAND hd_format_test)
+
+    add_executable(hd_upscale_test
+        "tests/unit/hd_upscale_test.cc"
+        "src/hd_upscale.cc"
+        "third_party/lodepng/lodepng.cpp"
+    )
+    target_include_directories(hd_upscale_test PRIVATE "src" "third_party/lodepng")
+    target_compile_definitions(hd_upscale_test PRIVATE HD_UPSCALE_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/unit/fixtures/upscale")
+    find_package(Threads REQUIRED)
+    target_link_libraries(hd_upscale_test PRIVATE Threads::Threads)
+    add_test(NAME hd_upscale_test COMMAND hd_upscale_test)
 
     add_executable(hd_lights_test
         "tests/unit/hd_lights_test.cc"

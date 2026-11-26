@@ -139,6 +139,23 @@ void hdManifestParse(const std::string& text, std::unordered_map<std::string, st
     }
 }
 
+std::vector<std::string> hdPackList(const std::string& value)
+{
+    std::vector<std::string> packs;
+    size_t start = 0;
+    while (start < value.size()) {
+        size_t end = value.find_first_of(" \t\r\n,", start);
+        if (end == std::string::npos) {
+            end = value.size();
+        }
+        if (end > start) {
+            packs.push_back(value.substr(start, end - start));
+        }
+        start = end + 1;
+    }
+    return packs;
+}
+
 bool hdImageDecodePng(const unsigned char* data, size_t size, HdImage* image, std::string* error)
 {
     std::vector<unsigned char> rgba;
@@ -161,7 +178,7 @@ bool hdImageDecodePng(const unsigned char* data, size_t size, HdImage* image, st
 
 uint64_t hdLegacyFrameHash(const unsigned char* pixels, int width, int height, int pitch)
 {
-    constexpr uint64_t kPrime = 0x100000001B3ULL;
+    static constexpr uint64_t kPrime = 0x100000001B3ULL;
     uint64_t hash = 0xCBF29CE484222325ULL;
     auto add = [&hash](unsigned char byte) {
         hash = (hash ^ byte) * kPrime;
@@ -205,13 +222,31 @@ size_t hdLegacyParse(const std::string& text, std::unordered_map<std::string, ui
             line.resize(comment);
         }
 
-        char path[512];
+        // The last three fields are numbers; the path is everything before
+        // them (art names may contain spaces, e.g. RPU's "rifle bb.frm").
+        std::string fields[3];
+        line = trim(line);
+        for (int index = 2; index >= 0; index--) {
+            size_t space = line.find_last_of(" \t");
+            if (space == std::string::npos) {
+                line.clear();
+                break;
+            }
+            fields[index] = line.substr(space + 1);
+            line = trim(line.substr(0, space));
+        }
+        std::string path = line;
         int direction = 0;
         int frame = 0;
         char hex[32];
-        if (sscanf(line.c_str(), "%511s %d %d %31s", path, &direction, &frame, hex) != 4) {
+        char extra = 0;
+        if (path.empty()
+            || sscanf(fields[0].c_str(), "%d%c", &direction, &extra) != 1
+            || sscanf(fields[1].c_str(), "%d%c", &frame, &extra) != 1
+            || fields[2].size() >= sizeof(hex)) {
             continue;
         }
+        strcpy(hex, fields[2].c_str());
         if (direction < 0 || direction >= kHdFhdMaxDirections || frame < 0 || strlen(hex) != 16) {
             continue;
         }
@@ -221,7 +256,7 @@ size_t hdLegacyParse(const std::string& text, std::unordered_map<std::string, ui
             continue;
         }
 
-        (*entries)[hdLegacyKey(hdArtNormalizePath(path), direction, frame)] = hash;
+        (*entries)[hdLegacyKey(hdArtNormalizePath(path.c_str()), direction, frame)] = hash;
         count++;
     }
     return count;

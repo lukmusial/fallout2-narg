@@ -303,6 +303,8 @@ void windowHdSetLitWindow(int win);
 // rectangle (x, y, width, height), which must already hold the legacy
 // drawing of the same art. The image is resampled if it is not exactly 2x.
 bool windowHdDrawImage(int win, int x, int y, int width, int height, const HdImage& image);
+// CE (dev automation): the windows, bottom to top, as JSON.
+std::string windowDebugList();
 // Same with a clip rectangle and/or the legacy source art (see HdDrawOptions).
 bool windowHdDrawImageEx(int win, int x, int y, int width, int height, const HdImage& image, const HdDrawOptions& options);
 void windowHdClear(int win);

@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -25,6 +26,7 @@
 #include "game.h"
 #include "game_mouse.h"
 #include "hd_art.h"
+#include "hd_scene.h"
 #include "hd_lights.h"
 #include "hd_lights_map.h"
 #include "hd_shot_light.h"
@@ -469,6 +471,8 @@ namespace {
             << ", \"legacy_height\": " << (haveLegacy ? legacy.getHeight() : 0)
             << ", \"pack\": ";
         jsonString(out, hdArtGetPack().c_str());
+        out << ", \"from_pack\": ";
+        jsonString(out, hdArtFramePack(args[0].c_str(), 0, 0).c_str());
         out << "}\n";
         return true;
     }
@@ -1126,6 +1130,8 @@ namespace {
             << ", \"object_pixels_hd\": " << check.objectPixelsHd
             << ", \"scenery_pixels\": " << check.sceneryPixels
             << ", \"scenery_pixels_hd\": " << check.sceneryPixelsHd
+            << ", \"critter_pixels\": " << check.critterPixels
+            << ", \"critter_pixels_hd\": " << check.critterPixelsHd
             << ", \"legacy_object_pixels\": " << check.legacyObjectPixels
             << ", \"legacy_object_pixels_hd\": " << check.legacyObjectPixelsHd
             << ", \"tile_pixels\": " << check.tilePixels
@@ -1133,7 +1139,7 @@ namespace {
             << ", \"cycling_hd\": " << check.cyclingHd
             << ", \"cut_out_draws\": " << cutOuts << "}\n";
         if (ok) {
-            static const unsigned char kColors[7][3] = { { 0, 0, 0 }, { 128, 128, 128 }, { 0, 0, 255 }, { 255, 0, 0 }, { 255, 255, 0 }, { 0, 255, 255 }, { 0, 200, 0 } };
+            static const unsigned char kColors[8][3] = { { 0, 0, 0 }, { 128, 128, 128 }, { 0, 0, 255 }, { 255, 0, 0 }, { 255, 255, 0 }, { 0, 255, 255 }, { 0, 200, 0 }, { 255, 0, 255 } };
             int width = mapViewIsActive() ? mapViewSurfaceWidth() : windowGetWidth(gIsoWindow);
             int height = static_cast<int>(check.mask.size()) / std::max(width, 1);
             std::vector<unsigned char> rgb(check.mask.size() * 3);
@@ -1168,8 +1174,157 @@ namespace {
             << ", \"hits\": " << stats.hits
             << ", \"misses\": " << stats.misses
             << ", \"legacy_checked\": " << stats.legacyChecked
-            << ", \"legacy_rejected\": " << stats.legacyRejected << "}\n";
+            << ", \"legacy_rejected\": " << stats.legacyRejected
+            << ", \"runtime_served\": " << stats.runtimeServed
+            << ", \"runtime_inline\": " << stats.runtimeInline
+            << ", \"runtime_inline_ms\": " << stats.runtimeInlineMs
+            << ", \"runtime_inline_max_ms\": " << stats.runtimeInlineMaxMs
+            << ", \"runtime_from_pool\": " << stats.runtimeFromPool
+            << ", \"runtime_take_ms\": " << stats.runtimeTakeMs
+            << ", \"preupscale_queued\": " << stats.preupscaleQueued
+            << ", \"upscale_threads\": " << stats.upscaleThreads
+            << ", \"upscale_pending\": " << stats.upscalePending
+            << ", \"upscale_computed\": " << stats.upscaleComputed
+            << ", \"upscale_computed_inline\": " << stats.upscaleComputedInline
+            << ", \"upscale_disk_hits\": " << stats.upscaleDiskHits
+            << ", \"upscale_disk_writes\": " << stats.upscaleDiskWrites
+            << ", \"upscale_compute_ms\": " << stats.upscaleComputeMs
+            << ", \"upscale_output_pixels\": " << stats.upscaleOutputPixels
+            << ", \"batch\": \"" << stats.batchName << "\""
+            << ", \"batch_queued\": " << stats.batchQueued
+            << ", \"batch_queue_ms\": " << stats.batchQueueMs
+            << ", \"batch_done_ms\": " << stats.batchDoneMs
+            << ", \"draw_upscales\": " << stats.drawUpscales
+            << ", \"draw_upscales_since_scene\": " << stats.drawUpscalesSinceScene;
+        HdSceneStats scene;
+        hdSceneGetStats(&scene);
+        out << ", \"scenes\": " << scene.scenes
+            << ", \"scene_arts\": " << scene.sceneArts
+            << ", \"scene_frames\": " << scene.sceneFrames
+            << ", \"scene_collect_ms\": " << scene.collectMs
+            << ", \"scene_wait_ms\": " << scene.waitMs
+            << ", \"loading_screens\": " << scene.loadingScreens
+            << ", \"background_arts\": " << scene.backgroundArts
+            << ", \"background_left\": " << scene.backgroundLeft << "}\n";
         return true;
+    }
+
+    // Frame times (Phase 2.23): the interval between input polls (one game
+    // loop iteration, including the frame limiter's wait), recorded from
+    // `frametimes reset` to `frametimes <name>` (count, mean, p95, p99, max,
+    // frames over 33 and 50 ms).
+    struct FrameTimes {
+        bool recording = false;
+        std::chrono::steady_clock::time_point reset;
+        std::chrono::steady_clock::time_point last;
+        std::vector<float> intervals;
+    };
+
+    FrameTimes gFrameTimes;
+
+    void frameTimesTicker()
+    {
+        if (!gFrameTimes.recording) {
+            return;
+        }
+        auto now = std::chrono::steady_clock::now();
+        if (gFrameTimes.last.time_since_epoch().count() != 0) {
+            float interval = std::chrono::duration<float, std::milli>(now - gFrameTimes.last).count();
+            gFrameTimes.intervals.push_back(interval);
+            if (interval > 40.0f) {
+                debugPrint("AUTOMATION: frame took %.1f ms\n", interval);
+            }
+        }
+        gFrameTimes.last = now;
+    }
+
+    bool commandFrametimes(const DevAutomationCommand& command, bool first)
+    {
+        (void)first;
+        if (command.args.empty()) {
+            devAutomationFail(command, "usage: frametimes reset|<name>");
+        }
+        if (command.args[0] == "reset") {
+            gFrameTimes.intervals.clear();
+            gFrameTimes.last = {};
+            gFrameTimes.reset = std::chrono::steady_clock::now();
+            gFrameTimes.recording = true;
+            return true;
+        }
+        std::vector<float> sorted = gFrameTimes.intervals;
+        std::sort(sorted.begin(), sorted.end());
+        auto at = [&](double q) {
+            return sorted.empty() ? 0.0f : sorted[std::min(sorted.size() - 1, static_cast<size_t>(q * (sorted.size() - 1) + 0.5))];
+        };
+        double sum = 0;
+        int over33 = 0;
+        int over50 = 0;
+        for (float value : sorted) {
+            sum += value;
+            over33 += value > 33.4f ? 1 : 0;
+            over50 += value > 50.0f ? 1 : 0;
+        }
+        std::ofstream out(devAutomationOutputPath(command.args[0], ".json"));
+        out << "{\"frames\": " << sorted.size()
+            << ", \"mean_ms\": " << (sorted.empty() ? 0.0 : sum / sorted.size())
+            << ", \"p50_ms\": " << at(0.5) << ", \"p95_ms\": " << at(0.95) << ", \"p99_ms\": " << at(0.99)
+            << ", \"max_ms\": " << (sorted.empty() ? 0.0f : sorted.back())
+            << ", \"over_33ms\": " << over33 << ", \"over_50ms\": " << over50
+            << ", \"elapsed_ms\": " << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - gFrameTimes.reset).count()
+            << "}\n";
+        return true;
+    }
+
+    // planes <name>: the presenter's 8-bit indices (<name>_index.png, grey)
+    // and HD mask (<name>_mask.png): what the screen shows where.
+    bool commandPlanes(const DevAutomationCommand& command, bool first)
+    {
+        (void)first;
+        if (command.args.empty()) {
+            devAutomationFail(command, "usage: planes <name>");
+        }
+        const unsigned char* index = nullptr;
+        const unsigned char* mask = nullptr;
+        int width = 0;
+        int height = 0;
+        if (!presenterGetPlanes(&index, &mask, &width, &height)) {
+            return true;
+        }
+        std::vector<unsigned char> a(index, index + static_cast<size_t>(width) * height);
+        std::vector<unsigned char> b(mask, mask + static_cast<size_t>(width) * height);
+        lodepng::encode(devAutomationOutputPath(command.args[0] + "_index", ".png"), a, width, height, LCT_GREY, 8);
+        lodepng::encode(devAutomationOutputPath(command.args[0] + "_mask", ".png"), b, width, height, LCT_GREY, 8);
+        std::ofstream(devAutomationOutputPath(command.args[0] + "_windows", ".json")) << windowDebugList() << "\n";
+        return true;
+    }
+
+    // loadingshot <name>: the next loading screen (map load with the
+    // runtime upscale) writes its first presented frame as <name>.png.
+    bool commandLoadingshot(const DevAutomationCommand& command, bool first)
+    {
+        (void)first;
+        if (command.args.empty()) {
+            devAutomationFail(command, "usage: loadingshot <name>");
+        }
+        std::string path = devAutomationOutputPath(command.args[0], ".png");
+        hdSceneSetLoadingScreenHook([path]() {
+            if (!screenshotSaveFramebufferPng(path.c_str())) {
+                debugPrint("AUTOMATION: loadingshot: cannot write %s\n", path.c_str());
+            }
+        });
+        return true;
+    }
+
+    // upscalewait <name>: blocks until the runtime upscale's background
+    // threads are idle (Phase 2.22 timings), then writes hdstats as <name>.
+    bool commandUpscalewait(const DevAutomationCommand& command, bool first)
+    {
+        (void)first;
+        auto started = std::chrono::steady_clock::now();
+        hdArtUpscaleWaitIdle();
+        double waited = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+        debugPrint("AUTOMATION: upscalewait %.1f ms\n", waited);
+        return commandHdstats(command, true);
     }
 
     bool commandFadeshot(const DevAutomationCommand& command, bool first)
@@ -1356,6 +1511,11 @@ void hdDevAutomationInit()
     devAutomationRegisterCommand("benchrefresh", commandBenchrefresh);
     devAutomationRegisterCommand("hdcheck", commandHdcheck);
     devAutomationRegisterCommand("hdstats", commandHdstats);
+    devAutomationRegisterCommand("upscalewait", commandUpscalewait);
+    devAutomationRegisterCommand("loadingshot", commandLoadingshot);
+    devAutomationRegisterCommand("planes", commandPlanes);
+    devAutomationRegisterCommand("frametimes", commandFrametimes);
+    devAutomationRegisterTicker(frameTimesTicker);
     devAutomationRegisterCommand("fadeshot", commandFadeshot);
     devAutomationRegisterCommand("perf", commandPerf);
     devAutomationRegisterCommand("worldmap", commandWorldmap);

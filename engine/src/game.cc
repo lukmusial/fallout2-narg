@@ -30,6 +30,7 @@
 #include "game_movie.h"
 #include "game_sound.h"
 #include "hd_art.h"
+#include "hd_scene.h"
 #include "game_speed.h"
 #include "input.h"
 #include "interface.h"
@@ -220,6 +221,11 @@ int gameInitWithOptions(const char* windowTitle, bool isMapper, int font, Window
     }
 
     debugPrint(">init_options_menu\n");
+
+    // CE: HD runtime upscale (Phase 2.22): the main menu, the interface bar
+    // and the common dialogs, in background threads from here on.
+    hdArtPreupscaleInterface();
+    hdSceneInit();
 
     if (!gIsMapper && skipOpeningMovies < 2) {
         showSplash();
@@ -428,6 +434,8 @@ int gameInitWithOptions(const char* windowTitle, bool isMapper, int font, Window
 
     // SFALL: Execute all code that should be executed AFTER game init
     sfallOnAfterGameInit();
+
+    hdSceneHideSplash();
 
     return 0;
 }
@@ -1627,16 +1635,23 @@ static void showSplash()
 
             int x = screenWidth > scaledWidth ? (screenWidth - scaledWidth) / 2 : 0;
             int y = screenHeight > scaledHeight ? (screenHeight - scaledHeight) / 2 : 0;
-            _scr_blit(scaled, scaledWidth, scaledHeight, 0, 0, scaledWidth, scaledHeight, x, y);
+            // CE: in HD, upscaled at runtime (hd_scene.h).
+            if (!hdSceneShowSplash(data, width, height, palette, scaled, x, y, scaledWidth, scaledHeight)) {
+                _scr_blit(scaled, scaledWidth, scaledHeight, 0, 0, scaledWidth, scaledHeight, x, y);
+            }
             paletteFadeTo(palette);
+            hdSceneSplashShown();
 
             internal_free(scaled);
         }
     } else {
         int x = (screenWidth - width) / 2;
         int y = (screenHeight - height) / 2;
-        _scr_blit(data, width, height, 0, 0, width, height, x, y);
+        if (!hdSceneShowSplash(data, width, height, palette, data, x, y, width, height)) {
+            _scr_blit(data, width, height, 0, 0, width, height, x, y);
+        }
         paletteFadeTo(palette);
+        hdSceneSplashShown();
     }
 
     internal_free(data);

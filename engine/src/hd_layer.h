@@ -1,6 +1,7 @@
 #ifndef FALLOUT_HD_LAYER_H_
 #define FALLOUT_HD_LAYER_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include <vector>

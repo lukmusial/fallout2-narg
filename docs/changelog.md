@@ -1,25 +1,25 @@
 ## Changelog
 
-- [Version 1.0.0](#version-100)
-
 ### Version 1.0.0
 
 First release.
 
 #### Engine
 
-- Fallout 2 Community Edition at c30f1efc, with:
-  - HD rendering (`[graphics] hd=1`, `[screen] scale=2`): true colour at twice the logical resolution; HD art for the main menu, load/save, character editor, dialogue, Pip-Boy, world map, inventory, interface bar, floors, roofs, walls, scenery and items; 2x text; coloured lights, glow and soft shadows; a short light from every ranged attack and a flash at explosions; trees, bushes and grass swaying in the wind; smooth map scrolling and 0.5x-2x map zoom.
-  - HD art is only used while the game's own picture is the one it was made from (`[graphics] hd_verify`, `hd/<pack>/legacy.txt`): art replaced by a mod such as the Restoration Project is drawn from the mod.
-  - Stimpak 1.0.2, the savegame editor (main menu, **STIMPAK**).
-
-#### HD art
-
-- `mods/narg_hd.dat`: the AI-upscaled pack (`ai`, about 7650 images and `.fhd` multi-frame files) plus the 141 scripted images the `mixed` pack takes for small arrows, digits, lettered buttons, corrugated and striped roofs and a few objects; each pack's `legacy.txt` lists the 8231 source frames.
-- `mods/narg_hd_scripted.dat` (optional): the scripted pack.
-- Ground variants for desert, asphalt, pavement and grass.
-- Characters keep their original art.
+- [Fallout 2 Community Edition](https://github.com/fallout2-ce/fallout2-ce) at c30f1efc, for macOS, Linux and Windows.
+- HD rendering (`[graphics] hd=1`, `[screen] scale=2`): true colour at twice the logical resolution, 2x text.
+- In-engine 2x upscale of every picture the game draws (interface, floors, roofs, walls, scenery, items, characters, world map, town maps, splash and help screens), made from your own copy of the game and from a content mod's art, such as the Restoration Project's: palette-aware de-dithering, edge-directed interpolation, gradient restoration and sharpening, in 16-bit colour with de-banding where the picture is smooth (`hd_upscale_precision=16`); SIMD (NEON, SSE2) on all CPU cores.
+- Scene preparation: while a map loads, everything it can show at once is upscaled (floor and roof tiles with their real neighbours on the map, so no seams; walls, scenery, items; every character's standing, walking and running animations), nearest to the view first, behind a loading screen with a progress bar (`hd_loading_screen`). The world map, town maps, help and death screens, other elevations and other animations are prepared in idle time. Nothing is upscaled while you play.
+- Disk cache `data/hd/cache` (`hd_upscale_cache`, at most `hd_upscale_cache_mb=2048`, oldest removed first): a town takes 0.2-0.8 s to prepare the first time, 0.1-0.3 s from the cache (Apple M5 Pro).
+- Coloured lights, glow and soft shadows; a short light from every ranged attack and a flash at explosions; trees, bushes and grass swaying in the wind; smooth map scrolling and 0.5x-2x map zoom.
+- [Stimpak](https://github.com/lukmusial/fallout2-stimpak) 1.0.2, the savegame editor (main menu, **STIMPAK**).
+- Runs the Restoration Project's mods, scripts and art.
 
 #### Installer
 
-- `narg-install.sh` / `.command` / `.bat`: for vanilla Fallout 2 and for the Restoration Project; backs up what it changes to `backup/narg/`; detects the screen size; options `--pack`, `--with <component>`, `--resolution`.
+- `narg-install.sh` / `.command` / `.bat`, for vanilla Fallout 2 and for the Restoration Project: merges the settings into `fallout2.cfg`, detects the screen size, installs `f2_res.dat` when the game has none, and backs up what it changes to `backup/narg/`.
+- Options `--with <component>` (`no_wind`, `no_shot_light`, `no_lights`, `pixel_doubled`, `classic`, `windowed`) and `--resolution`.
+
+#### Tools
+
+- `narg/rpu-save-convert.py`: saves from the unmodded game load on the Restoration Project (new global variables and party members added; `--restore` brings back the saves RPU's installer moved to `backup/`). See [RPU notes](rpu.md).

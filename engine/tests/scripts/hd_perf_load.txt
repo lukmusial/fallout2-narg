@@ -1,0 +1,11 @@
+# Phase 2.23: time from the start of a saved game's load (--dev-load-game=N)
+# to the first playable frame (the game loop running), longest frame on
+# the way, then the first 5 s of play (tools/dev/runtime_perf_play.py --load).
+frametimes reset
+until game 60000
+frametimes loading
+hdstats load
+wait 5000
+frametimes first5s
+hdstats end_stats
+quit 0

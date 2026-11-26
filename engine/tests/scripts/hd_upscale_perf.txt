@@ -1,0 +1,21 @@
+# Phase 2.22 runtime upscale timings (use with --dev-load-game=N, hd=1, a
+# pack): the art queued at the map load and how long the background threads
+# took (upscalewait), then presenter timings while idle and edge scrolling,
+# and whole-map redraws (tools/dev/runtime_upscale_perf.py).
+until game 30000
+hdstats load_stats
+upscalewait map_stats
+wait 1000
+perf reset
+wait 2000
+perf idle
+move 639 200
+wait 3000
+move 0 200
+wait 3000
+move 320 200
+perf scroll
+wait 500
+benchrefresh bench 20
+hdstats end_stats
+quit 0

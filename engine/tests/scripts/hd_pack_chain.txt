@@ -1,0 +1,13 @@
+# Packs tried in order (run with [graphics]hd=1 [graphics]hd_pack=testchain):
+# testchain's manifest has "* = testlegacy testalt" and mainmenu from
+# "testalt, testlegacy". testalt's legacy.txt is right only for hr_mainmenu,
+# testlegacy's only for mainmenu; hr_menu_bg is only in testalt, with a wrong
+# hash. So mainmenu comes from testlegacy, hr_mainmenu from testalt and
+# hr_menu_bg from the game.
+until mainmenu 20000
+hdprobe art/intrface/mainmenu.frm first
+hdprobe art/intrface/hr_mainmenu.frm second
+hdprobe art/intrface/hr_menu_bg.frm none
+hdprobe art/intrface/mainmenu.frm first_again
+hdstats stats
+quit 0
