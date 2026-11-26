@@ -10,7 +10,7 @@
 
 - the [Fallout 2 Community Edition](https://github.com/fallout2-ce/fallout2-ce) engine (CE), which replaces the game's executable, with
 - **HD rendering**: true colour at twice the resolution; every picture of the game (interface, floors, roofs, walls, scenery, items, characters, world map) upscaled 2x by the engine from your own copy of the game, with 16-bit colour smoothing; 2x text, coloured lights and soft shadows, a light from every gunshot, trees swaying in the wind, smooth scrolling and map zoom;
-- **[Stimpak](https://github.com/lukmusial/fallout2-stimpak)**, a savegame editor on the main menu (character, companions, quests, locations, travel).
+- **[Stimpak](https://github.com/lukmusial/fallout2-stimpak)**, a savegame editor built into the engine, opened with **STIMPAK** on the main menu (character, companions, quests, locations, travel); it is developed as its own project and included in every archive.
 
 It installs on vanilla Fallout 2 and is compatible with the Restoration Project; we recommend playing the two together (see [below](#restoration-project)).
 
