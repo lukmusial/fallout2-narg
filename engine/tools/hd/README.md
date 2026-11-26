@@ -670,10 +670,12 @@ the first 30 s of walking, running and scrolling: p99 19.3-20.9 ms, max
 max 21-35 ms (both); opening the world map 80-100 ms (both: the world
 map's own setup; its art is prepared in idle time now).
 
-Memory (peak RSS): before ~770-780 MB; after ~600-730 MB with a warm disk
-cache and 850-1050 MB cold (the HD art cache holds 310-440 MB: the scene
-plus idle-time work, which stops at half of `hd_cache_mb`). Disk cache
-after a session of two towns and the world map: 330-420 MB (cap 2 GB).
+Memory (peak RSS, loading a save and 5 s of play, final build): before
+~760-790 MB; after ~450-500 MB with a warm disk cache, 800-1050 MB cold (the
+eight threads' working buffers while the scene is computed; the HD art cache
+holds 310-440 MB: the scene, pinned while the map is shown, plus idle-time
+work, which stops at half of `hd_cache_mb`). Disk cache after a session of
+two towns and the world map: 330-420 MB (cap 2 GB).
 
 
 ## Seam quality (`tilemap.py`, map patches)

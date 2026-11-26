@@ -69,7 +69,7 @@ def main():
     shutil.copyfile(splash / "splash.png", OUT / "splash.png")
 
     # Klamath: loading screen of the transition to the Den, world map, town map.
-    play = hd_run("screens_play", "hd_perf_play.txt", "[graphics]zoom=1", app=args.app, slot=1, sets=["NEXT_MAP=DENBUS1"])
+    play = hd_run("screens_play", "hd_perf_play.txt", "[graphics]zoom=1", app=args.app, slot=1, sets=["NEXT_MAP=DENBUS1", "LOADING_CMD=loadingshot"])
     for name in ("transition_loading", "worldmap", "townmap", "newtown", "play"):
         if (play / f"{name}.png").exists():
             shutil.copyfile(play / f"{name}.png", OUT / f"{name.replace('transition_', '')}.png")
@@ -95,7 +95,7 @@ def main():
     if args.rpu:
         for slot, town, next_map in ((3, "arroyo", "ABBEY"), (8, "den", "ARVILLAG")):
             out = hd_run(f"screens_rpu_{town}", "hd_perf_play.txt", "[graphics]zoom=1", app=args.app, game=args.rpu, slot=slot,
-                         sets=[f"NEXT_MAP={next_map}"])
+                         sets=[f"NEXT_MAP={next_map}", "LOADING_CMD=loadingshot"])
             for name in ("play", "transition_loading", "newtown", "worldmap"):
                 if (out / f"{name}.png").exists():
                     shutil.copyfile(out / f"{name}.png", OUT / f"rpu_{town}_{name.replace('transition_', '')}.png")
