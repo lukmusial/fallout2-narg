@@ -59,7 +59,7 @@ jobs:
         run: cmake -S engine -B build -G "Visual Studio 17 2022" -A x64 -D CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
 
       - name: Build
-        run: cmake --build build --config Release --target fallout2-ce ce-dat-tool
+        run: cmake --build build --config Release --target fallout2-ce ce-dat-tool mapper-ce
 
       - name: Collect
         shell: bash
