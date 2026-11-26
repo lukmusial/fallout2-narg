@@ -166,6 +166,8 @@ set(FALLOUT_ENGINE_SOURCES
     "src/heap.h"
     "src/input.cc"
     "src/input.h"
+    "src/iface_bar_art.cc"
+    "src/iface_bar_art.h"
     "src/interface.cc"
     "src/interface.h"
     "src/interpreter_extra.cc"
@@ -676,6 +678,12 @@ if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
     )
     target_include_directories(hd_layer_test PRIVATE "src")
     add_test(NAME hd_layer_test COMMAND hd_layer_test)
+
+    add_executable(iface_bar_art_test
+        "tests/unit/iface_bar_art_test.cc"
+    )
+    target_include_directories(iface_bar_art_test PRIVATE "src")
+    add_test(NAME iface_bar_art_test COMMAND iface_bar_art_test)
 
     add_executable(hd_format_test
         "tests/unit/hd_format_test.cc"

@@ -1,0 +1,4 @@
+# The 800-wide interface bar as artLoad returns it (test_iface_bar_built).
+until mainmenu 60000
+artcheck bar art\intrface\HR_IFACE_800.FRM
+quit 0
