@@ -1,3 +1,5 @@
+> **Modified version.** This is the engine of [Fallout 2: Narg Edition](../README.md), modified from Fallout 2 Community Edition at c30f1efc (HD rendering, in-engine upscale, Stimpak and more; see [NOTICE.md](../NOTICE.md)). Licence: [LICENSE.md](LICENSE.md).
+
 # Fallout 2: Community Engine
 
 Fallout 2:CE is a fully working re-implementation of the classic Fallout engine, optimized for a hassle-free experience on multiple platforms, including Windows, Mac, iOS, Android, and Linux.  It provides high resolution support, quality-of-life improvements, and dozens upon dozens of bug fixes.

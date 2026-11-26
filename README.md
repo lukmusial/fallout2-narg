@@ -127,5 +127,10 @@ Describe the problem, attach a savegame and a screenshot (in HD, F12 saves a ful
 - [Changelog](docs/changelog.md)
 - [Known issues](docs/known.md)
 - [Credits and licences](docs/credits.md)
+- [Licence](LICENSE.md) (Sustainable Use License, as Fallout 2 Community Edition and Stimpak) and [notices](NOTICE.md)
 - [Development: building the engine and the archives](docs/development.md)
 - [Test results](docs/testing.md)
+
+## Licence
+
+Fallout 2: Narg Edition is free for non-commercial and personal use under the [Sustainable Use License](LICENSE.md). Its engine is a modified version of [Fallout 2 Community Edition](https://github.com/fallout2-ce/fallout2-ce) (c30f1efc), under the same licence. No part of Fallout 2 is included; see [NOTICE.md](NOTICE.md).
