@@ -2,6 +2,7 @@
 
 [**Download**](#download)
 | [**Installation**](#installation)
+| [**Restoration Project**](#restoration-project)
 | [**Additional mods**](#additional-mods)
 | [**Report issues**](#bug-reports)
 
@@ -11,11 +12,23 @@
 - **HD rendering**: true colour at twice the resolution; every picture of the game (interface, floors, roofs, walls, scenery, items, characters, world map) upscaled 2x by the engine from your own copy of the game, with 16-bit colour smoothing; 2x text, coloured lights and soft shadows, a light from every gunshot, trees swaying in the wind, smooth scrolling and map zoom;
 - **[Stimpak](https://github.com/lukmusial/fallout2-stimpak)**, a savegame editor on the main menu (character, companions, quests, locations, travel).
 
-It installs on vanilla Fallout 2 and on top of the [Restoration Project](https://github.com/BGforgeNet/Fallout2_Restoration_Project) (RPU), whose own art is upscaled the same way.
+It installs on vanilla Fallout 2 and is compatible with the Restoration Project; we recommend playing the two together (see [below](#restoration-project)).
 
 **No game art is distributed.** The archives hold the engine, the installer and documentation; the HD pictures are made on your machine, from your game's files, while the game runs. You need your own copy of Fallout 2 ([GOG](https://www.gog.com/game/fallout_2), [Steam](https://store.steampowered.com/app/38410), [Epic](https://store.epicgames.com/p/fallout-2)).
 
 ![Arroyo in Narg Edition](docs/media/hd_arroyo.jpg)
+
+## Restoration Project
+
+The [Fallout 2 Restoration Project](https://github.com/BGforgeNet/Fallout2_Restoration_Project) (RPU, by BGforge) is a separate, widely used mod that restores content cut from the original game (locations, quests, characters, items) and fixes many bugs. It is not part of Narg Edition and is not required: Narg Edition plays the unmodded game as well.
+
+Narg Edition is compatible with RPU (tested with v2.4.34) and we recommend using them together:
+
+- install RPU first, with its own installer, then Narg Edition on top; Narg Edition's engine runs RPU's mods and scripts in place of RPU's `fallout2.exe`;
+- RPU's own art (its new locations, the world map, items, the hi-res main menu) is upscaled like the game's;
+- saves from the unmodded game can be carried over with `narg/rpu-save-convert.py`.
+
+Details and known differences: [RPU notes](docs/rpu.md).
 
 ## Screenshots
 
@@ -66,7 +79,7 @@ Releases are archives per platform: `narg_v<version>_macos.zip`, `narg_v<version
 
 ## Installation
 
-- Narg Edition installs on **vanilla Fallout 2** (GOG, Steam, CD) or on **Fallout 2 with RPU** (install RPU first, then Narg Edition).
+- Narg Edition installs on **vanilla Fallout 2** (GOG, Steam, CD) or on **Fallout 2 with the [Restoration Project](#restoration-project)** (recommended: install RPU first, then Narg Edition).
 - Saved games keep working. Saves from before RPU load on RPU after `narg/rpu-save-convert.py` ([RPU notes](docs/rpu.md#saves-from-before-rpu)).
 - Everything the installer replaces or changes is copied to `backup/narg/` first.
 
