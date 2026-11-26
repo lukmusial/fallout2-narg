@@ -1487,17 +1487,18 @@ def test_english_interface_bar(update):
     return f"English {english:.0%} vs Russian {russian:.0%} ({seconds:.0f}s)"
 
 
-# The HR_IFACE_800.FRM shipped in ce.dat before the bar was built at run time
-# (tools/dev/iface_bar_art.py from the game's iface.frm), as artLoad returned
-# it: FNV-1a 64 of its pixels and of the whole in-memory art.
-SHIPPED_BAR_PIXELS_FNV = "06bfa3f99bd636b6"
-SHIPPED_BAR_ART_FNV = "225522509f582b1b"
+# The 800-wide bar built from the game's iface.frm (src/iface_bar_art.h:
+# the straight part of the message box stretched, irregularly, without
+# repeating), as artLoad returns it: FNV-1a 64 of its pixels and of the whole
+# in-memory art. Change these only with a deliberate change of construction.
+BUILT_BAR_PIXELS_FNV = "6fbdedc4f00ddbdc"
+BUILT_BAR_ART_FNV = "e3e3e1f53b30c161"
 
 
 def test_iface_bar_built(update):
-    """The 800-wide bar built from the game's iface.frm in place of the
-    Russian one in f2_res.dat is the art ce.dat used to ship, byte for byte;
-    ce.dat no longer carries it."""
+    """The 800-wide bar is built from the game's iface.frm in place of the
+    Russian one in f2_res.dat (stable golden hashes; the no-repetition
+    property is in iface_bar_art_test); ce.dat does not carry one."""
     entries = subprocess.run([str(RUN_DIR / "ce-dat-tool"), str(RUN_DIR / "ce.dat"), "list"],
                              capture_output=True, text=True, check=True).stdout.lower()
     if "hr_iface_800" in entries:
@@ -1505,14 +1506,14 @@ def test_iface_bar_built(update):
     out, seconds = run_game("iface_bar_built", "iface_bar_built.txt")
     bar = json.loads((out / "bar.json").read_text())
     expected = {"loaded": True, "frames": 1, "width": 800, "height": 99, "x": 0, "y": 0,
-                "pixels_fnv": SHIPPED_BAR_PIXELS_FNV, "art_fnv": SHIPPED_BAR_ART_FNV}
+                "pixels_fnv": BUILT_BAR_PIXELS_FNV, "art_fnv": BUILT_BAR_ART_FNV}
     wrong = {key: bar.get(key) for key, value in expected.items() if bar.get(key) != value}
     if wrong:
-        raise TestFailure(f"built bar differs from the shipped one: {wrong}")
+        raise TestFailure(f"built bar differs from the golden: {wrong}")
     log = (run_dir() / "debug.log").read_text(errors="replace")
     if "HR_IFACE_800.FRM built from the game's iface.frm" not in log:
         raise TestFailure("debug.log does not say the bar was built")
-    return f"identical to the shipped bar ({seconds:.0f}s)"
+    return f"matches the golden ({seconds:.0f}s)"
 
 
 def test_load_save_with_hidden_bar(update):

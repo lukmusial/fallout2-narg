@@ -49,7 +49,7 @@ With `[graphics] hd=1` (and `[screen] scale=2`) the game renders in true colour 
 
 Map motion (Phase 2.13, `[graphics]` in `fallout2.cfg`): `hd_lights_follow=1` makes the light a walking critter carries (the player's light circle at night) follow the drawn sprite instead of jumping hex by hex (HD lights only); `smooth_scroll=1` pans the map smoothly every frame (arrow keys, mouse at the screen edge, Home; `scroll_speed` in % of the original); `zoom=1` zooms the map view 0.5x–2x with the mouse wheel over the map or Ctrl+= / Ctrl+- (Ctrl+0 resets). The interface bar keeps its size, the zoom lasts for the session and is not saved, dialogue pictures of the map are taken at 1x. The map is then drawn into a larger off-screen surface that the map window shows through a pan/zoom transform (`src/map_view.h`); game logic, saves and scroll limits are unchanged.
 
-The bundled `f2_res.dat` has a Russian 800-pixel interface bar; in its place the engine builds the 800-pixel bar at run time from the game's own `iface.frm` (the message box widened, `src/iface_bar_art.cc`), in the game's language. A different 800-pixel bar from a mod (RPU's English one, say) is used as is.
+The bundled `f2_res.dat` has a Russian 800-pixel interface bar; in its place the engine builds the 800-pixel bar at run time from the game's own `iface.frm` (the straight part of the message box stretched without repeating, `src/iface_bar_art.h`), in the game's language. A different 800-pixel bar from a mod (RPU's English one, say) is used as is.
 
 ### Playing and testing
 
