@@ -3,7 +3,7 @@
 Tested with RPU v2.4.34 (manual archive, `rpu-install.command`, on macOS).
 
 1. Install RPU on vanilla Fallout 2 as its [instructions](https://github.com/BGforgeNet/Fallout2_Restoration_Project/blob/master/docs/linux.md) say.
-1. Install Narg Edition as for your platform. The installer sees `mods/rpu.dat` and keeps RPU's hi-res data (`mods\f2_res.dat`, from `f2_res.ini`) and RPU's `mods/mods_order.txt`.
+1. Install Narg Edition as for your platform. The installer sees `mods/rpu.dat` and keeps RPU's hi-res data (`mods\f2_res.dat`, from `f2_res.ini`).
 1. Start a new game, or bring your saves from before RPU (below).
 
 ### Saves from before RPU

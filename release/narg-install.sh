@@ -4,15 +4,11 @@
 # Extract the release archive into the Fallout 2 folder (vanilla, or with the
 # Restoration Project installed), then run this script there:
 #
-#   ./narg-install.sh [--with <component>] [--pack mixed|ai|scripted] ...
+#   ./narg-install.sh [--with <component>] [--resolution WxH] ...
 #
 #   --with <component>  apply narg/settings/<component>.cfg after the defaults
 #                       (no_wind, no_shot_light, no_lights, classic, windowed,
 #                       pixel_doubled)
-#   --pack <name>       draw an HD art pack you have in mods/ (narg_hd.dat,
-#                       for scripted also narg_hd_scripted.dat) instead of the
-#                       engine's own upscale; the release archives hold none
-#   --resolution WxH    screen size instead of the detected one
 #
 # Whatever the installer replaces or changes is saved to backup/narg first
 # (only the first time: a re-install keeps the original backup).
@@ -24,15 +20,10 @@ set -eu
 
 cd -- "$(dirname "$0")"
 
-PACK=""
 COMPONENTS=()
 RESOLUTION=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-    --pack)
-        PACK="$2"
-        shift 2
-        ;;
     --with)
         COMPONENTS+=("$2")
         shift 2
@@ -48,28 +39,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-case "$PACK" in
-"" | mixed | ai | scripted) ;;
-*)
-    echo "--pack must be mixed, ai or scripted"
-    exit 1
-    ;;
-esac
-
 if [[ ! -f master.dat || ! -f critter.dat ]]; then
     echo "master.dat / critter.dat not found. This is not a Fallout 2 directory (or its file names are not lower case). Aborting."
     exit 1
 fi
 if [[ ! -d narg || ! -f narg/narg.cfg ]]; then
     echo "narg/ not found: extract the whole Narg Edition archive into this directory first. Aborting."
-    exit 1
-fi
-if [[ -n "$PACK" && ! -f mods/narg_hd.dat ]]; then
-    echo "--pack $PACK needs the HD art pack mods/narg_hd.dat. Aborting."
-    exit 1
-fi
-if [[ "$PACK" == "scripted" && ! -f mods/narg_hd_scripted.dat ]]; then
-    echo "--pack scripted needs mods/narg_hd_scripted.dat. Aborting."
     exit 1
 fi
 for c in ${COMPONENTS[@]+"${COMPONENTS[@]}"}; do
@@ -159,49 +134,6 @@ elif [[ ! -f f2_res.dat ]]; then
     f2res="f2_res.dat"
 else
     f2res="f2_res.dat"
-fi
-
-# --- mods ------------------------------------------------------------------
-mkdir -p mods
-backup mods/mods_order.txt
-if [[ ! -f mods/mods_order.txt ]]; then
-    # Without a load order the engine would load every mods/*.dat; write the
-    # mods that are there now, in name order, as it would.
-    (cd mods && find . -maxdepth 1 -type f | sed 's|^\./||' | awk 'tolower($0) ~ /\.dat$/ && $0 !~ /^narg_hd/' | sort) >mods/mods_order.txt
-fi
-add_mod() {
-    if ! NARG_M="$1" awk 'BEGIN { m = ENVIRON["NARG_M"]; f = 0 } { sub(/\r$/, "") } tolower($0) == tolower(m) { f = 1 } END { exit !f }' mods/mods_order.txt; then
-        # keep the file's line endings (the Restoration Project's are CRLF)
-        if grep -q $'\r' mods/mods_order.txt; then
-            printf '%s\r\n' "$1" >>mods/mods_order.txt
-        else
-            printf '%s\n' "$1" >>mods/mods_order.txt
-        fi
-    fi
-}
-remove_mod() {
-    NARG_M="$1" awk 'BEGIN { m = ENVIRON["NARG_M"] } { l = $0; sub(/\r$/, "", l) } tolower(l) != tolower(m)' mods/mods_order.txt >mods/mods_order.tmp
-    mv mods/mods_order.tmp mods/mods_order.txt
-}
-# By default the engine upscales the game's own art (and a mod's) itself, so
-# no art is loaded from mods/. HD art packs (--pack) only add files under
-# hd/, so their place in the order does not matter; without --pack they are
-# taken out of the order (the files stay).
-if [[ -n "$PACK" ]]; then
-    add_mod narg_hd.dat
-else
-    remove_mod narg_hd.dat
-fi
-if [[ "$PACK" == "scripted" ]]; then
-    add_mod narg_hd_scripted.dat
-else
-    remove_mod narg_hd_scripted.dat
-fi
-# The pack of the Restoration Project's own images, only on RPU.
-if [[ -n "$PACK" && $rpu -eq 1 && -f mods/narg_hd_rpu.dat ]]; then
-    add_mod narg_hd_rpu.dat
-else
-    remove_mod narg_hd_rpu.dat
 fi
 
 # --- settings --------------------------------------------------------------
@@ -297,7 +229,6 @@ apply_cfg() {
 }
 
 apply_cfg narg/narg.cfg
-set_cfg graphics hd_pack "$PACK"
 # Writing [screen] stops the engine's one-time import of f2_res.ini, so carry
 # over the hi-res data path it would have imported.
 set_cfg system f2_res_dat "$f2res"
@@ -308,12 +239,7 @@ done
 
 rm -f -- narg-install.bat narg-install.command narg-install.sh narg/narg-install.ps1
 
-if [[ -n "$PACK" ]]; then
-    hd="HD art pack $PACK"
-else
-    hd="HD upscaled by the engine"
-fi
-echo "Fallout 2: Narg Edition installed ($hd, screen ${width}x${height}). Backup is in $bdir."
+echo "Fallout 2: Narg Edition installed (HD upscaled by the engine, screen ${width}x${height}). Backup is in $bdir."
 echo "Start the game with: $launcher"
 if [[ $rpu -eq 1 ]]; then
     echo "Restoration Project: start a new game, or convert your old saves with narg/rpu-save-convert.py (docs: narg/docs/rpu.md)."

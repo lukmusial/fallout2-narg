@@ -88,8 +88,6 @@ In short: extract the archive into the game folder, run `narg-install.command` (
 
 All of them are settings in `fallout2.cfg` (`[graphics]`, `[screen]`) that you can change later. On Windows the options are written `-With no_wind,windowed -Resolution 2560x1440`.
 
-`--pack mixed|ai|scripted` draws a pre-made HD art pack instead (`mods/narg_hd.dat`), for those who build one from their own game with `engine/tools/hd` ([HD art packs](components/hd_packs/README.md)); the releases have none.
-
 ### Compatibility with content mods
 
 The engine upscales whatever picture the game draws, so art a mod replaces or adds (RPU's world map, new locations, tiles, items, the hi-res main menu) is upscaled like the game's own. See [RPU notes](docs/rpu.md).
