@@ -14,8 +14,8 @@ Layout (after the Restoration Project's):
 ### Building
 
 ```sh
-git clone --recurse-submodules https://github.com/lukmusial/fallout2-nerg.git
-cd fallout2-nerg
+git clone --recurse-submodules https://github.com/lukmusial/fallout2-narg.git
+cd fallout2-narg
 cmake -S engine -B engine/out/build/macos-release -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build engine/out/build/macos-release --target fallout2-ce ce-dat-tool
 ```
