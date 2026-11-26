@@ -1458,6 +1458,50 @@ namespace {
         return true;
     }
 
+    // `artcheck <name> <art path>`: <name>.json with the loaded art's first
+    // frame (size, offsets, FNV-1a 64 of its pixels) as artLoad returns it.
+    bool commandArtcheck(const DevAutomationCommand& command, bool first)
+    {
+        (void)first;
+        if (command.args.size() != 2) {
+            devAutomationFail(command, "usage: artcheck <name> <art path>");
+        }
+        std::ofstream out(devAutomationOutputPath(command.args[0], ".json"));
+        ArtPtr art { artLoad(command.args[1].c_str()) };
+        if (!art) {
+            out << "{\"loaded\": false}\n";
+            return true;
+        }
+        int width = 0;
+        int height = 0;
+        int x = 0;
+        int y = 0;
+        const unsigned char* pixels = artGetFrameData(art.get(), 0, ROTATION_NE, &width, &height, &x, &y);
+        uint64_t hash = 0xcbf29ce484222325ULL;
+        for (size_t index = 0; pixels != nullptr && index < static_cast<size_t>(width) * height; index++) {
+            hash = (hash ^ pixels[index]) * 0x100000001b3ULL;
+        }
+        // The whole in-memory art up to the end of the frame's pixels
+        // (header, padding, frame header, pixels).
+        uint64_t artHash = 0xcbf29ce484222325ULL;
+        const unsigned char* bytes = reinterpret_cast<const unsigned char*>(art.get());
+        size_t artBytes = pixels != nullptr ? static_cast<size_t>(pixels - bytes) + static_cast<size_t>(width) * height : 0;
+        for (size_t index = 0; index < artBytes; index++) {
+            artHash = (artHash ^ bytes[index]) * 0x100000001b3ULL;
+        }
+        char hex[17];
+        snprintf(hex, sizeof(hex), "%016llx", static_cast<unsigned long long>(hash));
+        char artHex[17];
+        snprintf(artHex, sizeof(artHex), "%016llx", static_cast<unsigned long long>(artHash));
+        out << "{\"loaded\": true, \"frames\": " << artGetFrameCount(art.get())
+            << ", \"fps\": " << art->framesPerSecond
+            << ", \"width\": " << width << ", \"height\": " << height
+            << ", \"x\": " << x << ", \"y\": " << y
+            << ", \"pixels_fnv\": \"" << hex << "\", \"art_bytes\": " << artBytes
+            << ", \"art_fnv\": \"" << artHex << "\"}\n";
+        return true;
+    }
+
     // `scrollhold` keeps scrolling while later commands run.
     void scrollTicker()
     {
@@ -1511,6 +1555,7 @@ void hdDevAutomationInit()
     devAutomationRegisterCommand("benchrefresh", commandBenchrefresh);
     devAutomationRegisterCommand("hdcheck", commandHdcheck);
     devAutomationRegisterCommand("hdstats", commandHdstats);
+    devAutomationRegisterCommand("artcheck", commandArtcheck);
     devAutomationRegisterCommand("upscalewait", commandUpscalewait);
     devAutomationRegisterCommand("loadingshot", commandLoadingshot);
     devAutomationRegisterCommand("planes", commandPlanes);

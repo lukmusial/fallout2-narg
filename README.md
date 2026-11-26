@@ -10,7 +10,7 @@
 
 - the [Fallout 2 Community Edition](https://github.com/fallout2-ce/fallout2-ce) engine (CE), which replaces the game's executable, with
 - **HD rendering**: true colour at twice the resolution; every picture of the game (interface, floors, roofs, walls, scenery, items, characters, world map) upscaled 2x by the engine from your own copy of the game, with 16-bit colour smoothing; 2x text, coloured lights and soft shadows, a light from every gunshot, trees swaying in the wind, smooth scrolling and map zoom;
-- **[Stimpak](https://github.com/lukmusial/fallout2-stimpak)**, a savegame editor on the main menu (character, companions, quests, locations, travel).
+- **[Stimpak](https://github.com/lukmusial/fallout2-stimpak)**, a savegame editor built into the engine, opened with **STIMPAK** on the main menu (character, companions, quests, locations, travel); it is developed as its own project and included in every archive.
 
 It installs on vanilla Fallout 2 and is compatible with the Restoration Project; we recommend playing the two together (see [below](#restoration-project)).
 
@@ -127,5 +127,10 @@ Describe the problem, attach a savegame and a screenshot (in HD, F12 saves a ful
 - [Changelog](docs/changelog.md)
 - [Known issues](docs/known.md)
 - [Credits and licences](docs/credits.md)
+- [Licence](LICENSE.md) (Sustainable Use License, as Fallout 2 Community Edition and Stimpak) and [notices](NOTICE.md)
 - [Development: building the engine and the archives](docs/development.md)
 - [Test results](docs/testing.md)
+
+## Licence
+
+Fallout 2: Narg Edition is free for non-commercial and personal use under the [Sustainable Use License](LICENSE.md). Its engine is a modified version of [Fallout 2 Community Edition](https://github.com/fallout2-ce/fallout2-ce) (c30f1efc), under the same licence. No part of Fallout 2 is included; see [NOTICE.md](NOTICE.md).

@@ -12,6 +12,7 @@
 #include "art_defs.h"
 #include "content_config.h"
 #include "datafile.h"
+#include "iface_bar_art.h"
 #include "debug.h"
 #include "draw.h"
 #include "game.h"
@@ -1427,6 +1428,11 @@ Art* artLoad(const char* path)
 
     if (artPathHasExtension(path, ".pcx")) {
         return artLoadPcx(path);
+    }
+
+    // The wide interface bar, built from the game's own (iface_bar_art.h).
+    if (Art* bar = interfaceBarArtLoad(path)) {
+        return bar;
     }
 
     Art* art = artLoadFrm(path);

@@ -166,6 +166,8 @@ set(FALLOUT_ENGINE_SOURCES
     "src/heap.h"
     "src/input.cc"
     "src/input.h"
+    "src/iface_bar_art.cc"
+    "src/iface_bar_art.h"
     "src/interface.cc"
     "src/interface.h"
     "src/interpreter_extra.cc"
@@ -677,6 +679,12 @@ if((NOT ANDROID) AND (NOT IOS) AND (NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
     target_include_directories(hd_layer_test PRIVATE "src")
     add_test(NAME hd_layer_test COMMAND hd_layer_test)
 
+    add_executable(iface_bar_art_test
+        "tests/unit/iface_bar_art_test.cc"
+    )
+    target_include_directories(iface_bar_art_test PRIVATE "src")
+    add_test(NAME iface_bar_art_test COMMAND iface_bar_art_test)
+
     add_executable(hd_format_test
         "tests/unit/hd_format_test.cc"
         "src/hd_format.cc"
@@ -883,3 +891,37 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/external/stimpak/cmake/Stimpak.cmake")
 endif()
 include("${CMAKE_SOURCE_DIR}/external/stimpak/cmake/Stimpak.cmake")
 stimpak_attach(${EXECUTABLE_NAME})
+
+# The mapper shares the engine's sources, which call into Stimpak (the
+# character editor), so it builds from the same patched tree, with
+# Stimpak's sources, as the game.
+if(TARGET mapper-ce)
+    set(stimpak_tree "${CMAKE_BINARY_DIR}/stimpak-tree")
+    foreach(property SOURCES INTERFACE_SOURCES)
+        get_target_property(sources mapper-ce ${property})
+        if(NOT sources)
+            continue()
+        endif()
+        set(mapped "")
+        foreach(source IN LISTS sources)
+            if(source MATCHES "^src/")
+                list(APPEND mapped "${stimpak_tree}/${source}")
+            elseif(source MATCHES "^${CMAKE_SOURCE_DIR}/src/")
+                string(REPLACE "${CMAKE_SOURCE_DIR}/" "${stimpak_tree}/" source "${source}")
+                list(APPEND mapped "${source}")
+            else()
+                list(APPEND mapped "${source}")
+            endif()
+        endforeach()
+        set_property(TARGET mapper-ce PROPERTY ${property} "${mapped}")
+    endforeach()
+    file(GLOB_RECURSE stimpak_own RELATIVE "${STIMPAK_DIR}/src" CONFIGURE_DEPENDS
+        "${STIMPAK_DIR}/src/*.cc" "${STIMPAK_DIR}/src/*.h")
+    foreach(source IN LISTS stimpak_own)
+        target_sources(mapper-ce PRIVATE "${stimpak_tree}/src/${source}")
+    endforeach()
+    file(STRINGS "${STIMPAK_DIR}/VERSION" stimpak_version LIMIT_COUNT 1)
+    target_compile_definitions(mapper-ce PRIVATE FALLOUT2_STIMPAK=1 "STIMPAK_VERSION=\"${stimpak_version}\"")
+    target_include_directories(mapper-ce PRIVATE "${stimpak_tree}/src")
+    add_dependencies(mapper-ce stimpak-tree)
+endif()
