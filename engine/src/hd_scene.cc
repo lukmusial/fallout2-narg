@@ -581,6 +581,7 @@ namespace {
         // The splash's palette is the base palette while it is shown.
         memcpy(screen->savedCmap, _cmap, sizeof(screen->savedCmap));
         memcpy(screen->savedSystem, _getSystemPalette(), sizeof(screen->savedSystem));
+        hdArtSetPaletteOverride(screen->savedCmap);
         memcpy(_cmap, screen->palette6, sizeof(screen->palette6));
         paletteSetEntries(screen->palette6);
 
@@ -612,6 +613,7 @@ namespace {
         windowDestroy(screen->window);
         screen->window = -1;
         memcpy(_cmap, screen->savedCmap, sizeof(screen->savedCmap));
+        hdArtSetPaletteOverride(nullptr);
         paletteSetEntries(screen->savedSystem);
     }
 
@@ -855,6 +857,7 @@ bool hdSceneShowSplash(const unsigned char* data, int width, int height, const u
     gSplash.window = window;
     // Its palette is the base palette while it shows (HD colours follow it).
     memcpy(gSplash.savedCmap, _cmap, sizeof(gSplash.savedCmap));
+    hdArtSetPaletteOverride(gSplash.savedCmap);
     memcpy(_cmap, palette6, sizeof(gSplash.savedCmap));
     unsigned char* buffer = windowGetBuffer(window);
     int pitch = windowGetWidth(window);
@@ -882,6 +885,7 @@ void hdSceneHideSplash()
     windowDestroy(gSplash.window);
     gSplash.window = -1;
     memcpy(_cmap, gSplash.savedCmap, sizeof(gSplash.savedCmap));
+    hdArtSetPaletteOverride(nullptr);
 }
 
 void hdSceneGetStats(HdSceneStats* stats)

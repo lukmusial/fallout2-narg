@@ -190,6 +190,11 @@ void hdArtGetStats(HdArtStats* stats);
 // palette; nothing here locks art (the callers that have the frame pass it,
 // others read the art file, never from inside an art cache read).
 
+// While a splash or loading screen puts its own palette in `_cmap`: the
+// game's palette (6-bit, 256 x RGB) art is upscaled for meanwhile; null ends
+// it.
+void hdArtSetPaletteOverride(const unsigned char* palette6);
+
 // Whether HD art is on: a pack is set, or the runtime upscale is (no pack
 // needed: `hd_pack` empty with hd_upscale=scripted upscales everything).
 bool hdArtActive();

@@ -719,6 +719,67 @@ def test_hd_loading_screen(update):
             f"{arrived['scene_collect_ms']:.0f}+{arrived['scene_wait_ms']:.0f} ms, none upscaled when drawn ({seconds:.0f}s)")
 
 
+WIDE_ARGS = ["[screen]resolution_x=1920", "[screen]resolution_y=1080", "[screen]scale=2"]
+
+
+def test_hd_worldmap_wide(update):
+    """World map at 1920x1080 after loading from the main menu, no pack: the
+    blanked map behind the world map window shows nothing (its HD layer was
+    left showing the old map faintly at the sides), also after the cursor's
+    edge arrows."""
+    reset_saves()
+    out, seconds = run_game("hd_worldmap_wide", "hd_worldmap_wide.txt", [*RUNTIME_ARGS, *WIDE_ARGS])
+    notes = []
+    for name in ("wm", "wm2"):
+        fb = load_png(out / f"{name}.png")
+        if fb.shape != (1080, 1920, 3):
+            raise TestFailure(f"{name}: frame is {fb.shape}")
+        sides = np.concatenate([fb[:, :320], fb[:, 1600:]], axis=1)
+        lit = int((sides.max(axis=2) > 12).sum())
+        mask = np.asarray(Image.open(out / f"{name}_mask.png"))
+        stale = int((np.concatenate([mask[:, :160], mask[:, 800:]], axis=1) & 1).sum())
+        # The map window behind (full width, above the bar) was blanked: its
+        # HD layer must hold nothing (whatever the map's pixels were).
+        windows = json.loads((out / f"{name}_windows.json").read_text())
+        behind = [w for w in windows if w["rect"][0] == 0 and w["rect"][2] == 959 and w["rect"][1] == 0 and w["layer"]
+                  and w["id"] != 0 and not w["flags"] & 0x200]
+        valid = sum(w["hd_valid"] for w in behind)
+        if lit or stale or not behind or valid:
+            raise TestFailure(f"{name}: {lit} lit pixels and {stale} HD pixels beside the world map window, "
+                              f"{valid} HD pixels left in the blanked map window ({len(behind)} found)")
+        notes.append(f"{name} sides black")
+    return ", ".join(notes) + f" ({seconds:.0f}s)"
+
+
+def test_hd_bar_colours(update):
+    """The interface bar with the start-up splash and the loading screen
+    shown (both put their own palette in place meanwhile), no pack, cold and
+    warm disk cache: the bar's HD art has the game's colours (it was
+    upscaled with the splash palette)."""
+    args = [f"--dev-load-game={RUNTIME_MAP_SLOTS[1]}", *RUNTIME_ARGS, *WIDE_ARGS, "[ui]skip_opening_movies=1",
+            "[ui]iface_bar_width=800", "[graphics]hd_loading_screen_min_ms=0", "[graphics]hd_upscale_cache=1"]
+    cache = run_dir() / "data/hd/cache"
+    shutil.rmtree(cache, ignore_errors=True)
+    notes = []
+    try:
+        for label in ("cold", "warm"):
+            reset_saves()
+            out, seconds = run_game(f"hd_bar_colours_{label}", "hd_bar_colours.txt", args)
+            fb = load_png(out / "game.png")
+            legacy = load_png(out / "game_legacy.png")
+            if fb.shape != (1080, 1920, 3) or legacy.shape != (540, 960, 3):
+                raise TestFailure(f"{label}: unexpected sizes {fb.shape} {legacy.shape}")
+            # The bar: the bottom 100 logical rows.
+            hd = fb[880:].reshape(100, 2, 960, 2, 3).mean(axis=(1, 3))
+            diff = float(np.abs(hd - legacy[440:]).mean())
+            if diff > 10.0:
+                raise TestFailure(f"{label}: the bar's HD colours differ from the game's by {diff:.1f} levels on average")
+            notes.append(f"{label} bar colour diff {diff:.1f}")
+    finally:
+        shutil.rmtree(cache, ignore_errors=True)
+    return ", ".join(notes)
+
+
 def test_hd_runtime_disk_cache(update):
     """[graphics] hd_upscale_cache=1: a second session takes the map's frames
     from data/hd/cache instead of upscaling them again; the frame is the same."""
@@ -2164,7 +2225,8 @@ TESTS = ([test_main_menu, test_menu_fades, test_main_menu_hd, test_main_menu_hd_
          + [make_hd_bar_test(pack) for pack in HD_BAR_PACKS]
          + [test_view_identity, test_view_pan, test_view_zoom, test_view_zoom_hd0, test_view_light_follow]
          + [test_hd_shot_light] + [make_hd_wind_test(slot) for slot in WIND_SLOTS]
-         + [test_hd_runtime_lookup, test_hd_runtime_disk_cache, test_hd_runtime_screens, test_hd_loading_screen]
+         + [test_hd_runtime_lookup, test_hd_runtime_disk_cache, test_hd_runtime_screens, test_hd_loading_screen,
+            test_hd_worldmap_wide, test_hd_bar_colours]
          + [make_hd_runtime_map_test(slot) for slot in RUNTIME_MAP_SLOTS])
 
 

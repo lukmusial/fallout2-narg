@@ -549,11 +549,18 @@ namespace {
     // The base palette (8 bits per channel) and a short tag naming it, part
     // of every runtime key: art shown through another palette (the death
     // screen, endings) is upscaled again with it.
+    // While a splash or loading screen makes its own palette the base one
+    // (hd_scene.cc), art upscaled meanwhile (the interface bar during game
+    // start) is for the game's palette saved then.
+    bool gPaletteOverride = false;
+    unsigned char gPaletteOverride6[256 * 3];
+
     const std::string& currentPalette(unsigned char* palette8)
     {
         unsigned char now[256 * 3];
+        const unsigned char* base = gPaletteOverride ? gPaletteOverride6 : _cmap;
         for (int index = 0; index < 256 * 3; index++) {
-            now[index] = colorExpand6(_cmap[index]);
+            now[index] = colorExpand6(base[index]);
         }
         if (!gHdArt.paletteKnown || memcmp(now, gHdArt.palette8, sizeof(now)) != 0) {
             memcpy(gHdArt.palette8, now, sizeof(now));
@@ -1252,6 +1259,14 @@ void hdArtPreupscaleInterface()
     gHdArt.batchQueued = queued;
     gHdArt.batchQueueMs = ms;
     debugPrint("HD: queued %d interface frame(s) for the runtime upscale in %.1f ms\n", queued, ms);
+}
+
+void hdArtSetPaletteOverride(const unsigned char* palette6)
+{
+    gPaletteOverride = palette6 != nullptr;
+    if (palette6 != nullptr) {
+        memcpy(gPaletteOverride6, palette6, sizeof(gPaletteOverride6));
+    }
 }
 
 bool hdArtActive()

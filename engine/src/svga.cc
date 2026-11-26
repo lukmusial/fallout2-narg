@@ -684,6 +684,18 @@ bool presenterGetHdStaging(unsigned char** maskPtr, uint32_t** rgbPtr)
     return true;
 }
 
+bool presenterGetPlanes(const unsigned char** index, const unsigned char** mask, int* width, int* height)
+{
+    if (gScreenIndex.empty() || gHdMask.empty()) {
+        return false;
+    }
+    *index = gScreenIndex.data();
+    *mask = gHdMask.data();
+    *width = gScreenWidth;
+    *height = gScreenHeight;
+    return true;
+}
+
 void presenterSetHdSource(bool staging)
 {
     gHdSourceIsStaging = staging && gHdActive;

@@ -681,6 +681,15 @@ void windowFill(int win, int x, int y, int width, int height, ColorWithFlags col
     if (color < COLOR_COUNT) {
         bufferFill(window->buffer + window->width * y + x, width, height, window->width, static_cast<Color>(color & COLOR_LAST));
     }
+
+    // CE: what the HD layer showed there is gone too. (The layer is checked
+    // against the legacy pixels it was drawn for, so pixels that already had
+    // the fill's index, e.g. the dark ones of a map blanked for the world
+    // map, would otherwise keep their old HD colours.)
+    if (window->hdLayer != nullptr) {
+        hdLayerInvalidateRect(window->hdLayer, x, y, width, height);
+        hdLayerClearTextRect(window->hdLayer, x, y, width, height);
+    }
 }
 
 // 0x4D6DAC
@@ -896,6 +905,29 @@ static void windowComposeHd(Window* window, const Rect* rect)
             }
         }
     }
+}
+
+std::string windowDebugList()
+{
+    std::string out;
+    for (int index = 0; index < gWindowsLength; index++) {
+        Window* window = gWindows[index];
+        if (window == nullptr) {
+            continue;
+        }
+        size_t valid = 0;
+        if (window->hdLayer != nullptr) {
+            for (unsigned char flag : window->hdLayer->valid) {
+                valid += flag != 0 ? 1 : 0;
+            }
+        }
+        char line[224];
+        snprintf(line, sizeof(line), "%s{\"id\": %d, \"rect\": [%d, %d, %d, %d], \"flags\": %d, \"layer\": %s, \"buffer\": %s, \"hd_valid\": %zu}",
+            out.empty() ? "" : ", ", window->id, window->rect.left, window->rect.top, window->rect.right, window->rect.bottom,
+            window->flags, window->hdLayer != nullptr ? "true" : "false", window->buffer != nullptr ? "true" : "false", valid);
+        out += line;
+    }
+    return "[" + out + "]";
 }
 
 bool windowFindBufferPixel(const unsigned char* ptr, int pitch, int* winPtr, int* xPtr, int* yPtr)

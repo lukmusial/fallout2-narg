@@ -1275,6 +1275,29 @@ namespace {
         return true;
     }
 
+    // planes <name>: the presenter's 8-bit indices (<name>_index.png, grey)
+    // and HD mask (<name>_mask.png): what the screen shows where.
+    bool commandPlanes(const DevAutomationCommand& command, bool first)
+    {
+        (void)first;
+        if (command.args.empty()) {
+            devAutomationFail(command, "usage: planes <name>");
+        }
+        const unsigned char* index = nullptr;
+        const unsigned char* mask = nullptr;
+        int width = 0;
+        int height = 0;
+        if (!presenterGetPlanes(&index, &mask, &width, &height)) {
+            return true;
+        }
+        std::vector<unsigned char> a(index, index + static_cast<size_t>(width) * height);
+        std::vector<unsigned char> b(mask, mask + static_cast<size_t>(width) * height);
+        lodepng::encode(devAutomationOutputPath(command.args[0] + "_index", ".png"), a, width, height, LCT_GREY, 8);
+        lodepng::encode(devAutomationOutputPath(command.args[0] + "_mask", ".png"), b, width, height, LCT_GREY, 8);
+        std::ofstream(devAutomationOutputPath(command.args[0] + "_windows", ".json")) << windowDebugList() << "\n";
+        return true;
+    }
+
     // loadingshot <name>: the next loading screen (map load with the
     // runtime upscale) writes its first presented frame as <name>.png.
     bool commandLoadingshot(const DevAutomationCommand& command, bool first)
@@ -1490,6 +1513,7 @@ void hdDevAutomationInit()
     devAutomationRegisterCommand("hdstats", commandHdstats);
     devAutomationRegisterCommand("upscalewait", commandUpscalewait);
     devAutomationRegisterCommand("loadingshot", commandLoadingshot);
+    devAutomationRegisterCommand("planes", commandPlanes);
     devAutomationRegisterCommand("frametimes", commandFrametimes);
     devAutomationRegisterTicker(frameTimesTicker);
     devAutomationRegisterCommand("fadeshot", commandFadeshot);

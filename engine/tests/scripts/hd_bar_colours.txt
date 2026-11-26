@@ -1,0 +1,9 @@
+# Interface bar colours (use with --dev-load-game=N, hd=1, the start-up
+# splash and the loading screen shown): the bar's HD art must have the
+# game's colours, not the splash palette's.
+until game 60000
+wait 2500
+fbshot game
+legacyshot game_legacy
+hdstats stats
+quit 0
