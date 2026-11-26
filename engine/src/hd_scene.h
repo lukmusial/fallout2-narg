@@ -19,7 +19,7 @@ namespace fallout {
 // splash picture, upscaled, with a progress bar) shows the progress.
 //
 // Then, in idle time (a ticker, a few milliseconds per call, stopped by the
-// next map load and while the HD art cache is above 3/4 of hd_cache_mb):
+// next map load and while the HD art cache is above half of hd_cache_mb):
 // the other elevations, the critters' other animations (combat, death,
 // using things), the player's inventory pictures, the world map and the
 // town's maps.

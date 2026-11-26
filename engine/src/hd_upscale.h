@@ -164,8 +164,8 @@ public:
     // as done). False when nothing is queued.
     bool help();
 
-    // Moves every finished result out (key, image).
-    void drain(const std::function<void(const std::string&, std::shared_ptr<HdImage>)>& sink);
+    // Moves every finished result out (key, image, job group).
+    void drain(const std::function<void(const std::string&, std::shared_ptr<HdImage>, int)>& sink);
 
     // Jobs queued or running (in total, or of a group).
     int pending();

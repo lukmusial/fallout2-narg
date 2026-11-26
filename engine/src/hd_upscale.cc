@@ -1609,9 +1609,14 @@ bool HdUpscalePool::help()
     return true;
 }
 
-void HdUpscalePool::drain(const std::function<void(const std::string&, std::shared_ptr<HdImage>)>& sink)
+void HdUpscalePool::drain(const std::function<void(const std::string&, std::shared_ptr<HdImage>, int)>& sink)
 {
-    std::vector<std::pair<std::string, std::shared_ptr<HdImage>>> done;
+    struct Finished {
+        std::string key;
+        std::shared_ptr<HdImage> image;
+        int group;
+    };
+    std::vector<Finished> done;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (done_.empty()) {
@@ -1621,15 +1626,15 @@ void HdUpscalePool::drain(const std::function<void(const std::string&, std::shar
             // Taken meanwhile (take()) when no longer there.
             auto found = entries_.find(key);
             if (found != entries_.end() && found->second.state == State::Done) {
-                done.emplace_back(key, std::move(found->second.image));
+                done.push_back({ key, std::move(found->second.image), found->second.group });
                 entries_.erase(found);
             }
         }
         done_.clear();
     }
-    for (auto& entry : done) {
-        if (entry.second != nullptr) {
-            sink(entry.first, std::move(entry.second));
+    for (Finished& entry : done) {
+        if (entry.image != nullptr) {
+            sink(entry.key, std::move(entry.image), entry.group);
         }
     }
 }

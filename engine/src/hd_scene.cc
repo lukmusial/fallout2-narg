@@ -30,6 +30,7 @@
 #include "object.h"
 #include "palette.h"
 #include "platform_compat.h"
+#include "proto.h"
 #include "settings.h"
 #include "svga.h"
 #include "tile.h"
@@ -58,14 +59,17 @@ namespace {
         std::string path; // art read from its file (with `palette`)
         std::string palette; // .pal file for `path` ("" = game palette)
         float priority = kBackgroundPriority;
+        int group = kHdUpscaleGroupBackground;
     };
 
     struct SceneState {
         bool tickerAdded = false;
         HdSceneStats stats;
-        std::vector<BackgroundItem> background;
+        std::vector<BackgroundItem> background; // this map's, rebuilt per map
         size_t backgroundNext = 0;
-        bool backgroundStatic = false; // world map etc. queued once per session
+        std::vector<BackgroundItem> statics; // world map etc., once per session, after the map's
+        size_t staticNext = 0;
+        bool staticsAdded = false;
         std::function<void()> loadingHook;
     };
 
@@ -99,6 +103,20 @@ namespace {
             }
         }
     };
+
+    // An item's inventory picture (art/inven), -1 when it has none or its
+    // prototype cannot be read.
+    int inventoryFid(Object* item)
+    {
+        if (item == nullptr || ProtoId(item->pid).objectType() != OBJ_TYPE_ITEM) {
+            return -1;
+        }
+        Proto* proto = nullptr;
+        if (protoGetProto(ProtoId(item->pid), &proto) == -1 || proto == nullptr) {
+            return -1;
+        }
+        return proto->item.inventoryFid;
+    }
 
     float screenDistance(int x, int y, int originX, int originY)
     {
@@ -168,7 +186,9 @@ namespace {
         // player's is set after the map loads): the weapons in their
         // hands, and the pictures the interface bar shows of them.
         for (Object* weapon : { critterGetItem2(object), critterGetItem1(object) }) {
-            if (weapon == nullptr) {
+            Proto* proto = nullptr;
+            if (weapon == nullptr || ProtoId(weapon->pid).objectType() != OBJ_TYPE_ITEM
+                || protoGetProto(ProtoId(weapon->pid), &proto) == -1 || proto == nullptr) {
                 continue;
             }
             int code = static_cast<int>(weaponGetAnimationCode(weapon));
@@ -180,9 +200,9 @@ namespace {
                 }
             }
             if (object == gDude) {
-                FrmId inventory = itemGetInventoryFrmId(weapon);
-                if (inventory.valid() && inventory.fid() != -1) {
-                    put(inventory.fid(), 0.0f);
+                int fid = inventoryFid(weapon);
+                if (fid != -1) {
+                    put(fid, 0.0f);
                 }
             }
         }
@@ -352,15 +372,16 @@ namespace {
     // queued once per session, last.
     void addStaticBackground(std::vector<BackgroundItem>* background)
     {
-        if (gScene.backgroundStatic) {
+        if (gScene.staticsAdded) {
             return;
         }
-        gScene.backgroundStatic = true;
+        gScene.staticsAdded = true;
         auto put = [&](const std::string& path, const char* palette, float priority) {
             BackgroundItem item;
             item.path = path;
             item.palette = palette;
             item.priority = 2.0f * kBackgroundPriority + priority;
+            item.group = kHdUpscaleGroupSession;
             background->push_back(item);
         };
         char path[64];
@@ -368,13 +389,18 @@ namespace {
             snprintf(path, sizeof(path), "art\\intrface\\wrldmp%02d.frm", index);
             put(path, "", static_cast<float>(index));
         }
-        static const char* const kWorldMapArt[] = { "wmscreen", "wmdial", "wmglobe", "wmapbox", "wmaploc", "wmaptarg",
-            "wmaptrg2", "wmcarmve", "wminfce0", "wminfce1", "wminfce2", "wminfce3", "wmaplabs", "wmapfgt0", "wmapfgt1" };
+        static const char* const kWorldMapArt[] = { "wmapbox", "wmtabs", "wmtbedge", "wmscreen", "wmdial", "wmglobe", "wmaploc",
+            "wmaptarg", "wmaptrg2", "wmcarmve", "wminfce0", "wminfce1", "wminfce2", "wminfce3", "wmaplabs", "wmapfgt0", "wmapfgt1",
+            "wrldspr0", "wrldspr1", "wrldspr2", "hotspot1", "hotspot2", "wrld0000", "wrld0001", "wrld0002", "wrld0003" };
         for (const char* name : kWorldMapArt) {
             snprintf(path, sizeof(path), "art\\intrface\\%s.frm", name);
             put(path, "", 50.0f);
         }
-        static const char* const kTownMaps[] = { "wm_abbey", "wm_army", "wm_arroy", "wm_colus", "wm_den", "wm_enclv", "wm_epa",
+        // Town maps (and the world map's town labels).
+        static const char* const kTownMaps[] = { "twnarroy", "twnbrokn", "twnden", "twngecko", "twnklama", "twnmilbs",
+            "twnmodoc", "twnnavro", "twnncr", "twnredng", "twnreno", "twnsad", "twnsanfr", "twnv13", "twnv15", "twnvcity",
+            "twnmap00", "twnmap01", "twnmap02", "twnmap03", "twnmap04", "twnmap05", "twnmap06", "twnmap07", "twnmap08",
+            "twnmap09", "twnmap10", "twnmap11", "wm_abbey", "wm_army", "wm_arroy", "wm_colus", "wm_den", "wm_enclv", "wm_epa",
             "wm_gecko", "wm_hills", "wm_klam", "wm_mltry", "wm_modoc", "wm_navar", "wm_ncr", "wm_red", "wm_reno",
             "wm_sanfn", "wm_tribe", "wm_vlt13", "wm_vlt15", "wm_vltct" };
         for (const char* name : kTownMaps) {
@@ -398,9 +424,8 @@ namespace {
             if (item == nullptr) {
                 continue;
             }
-            FrmId frmId = itemGetInventoryFrmId(item);
-            int fid = frmId.fid();
-            if (!frmId.valid() || fid == -1) {
+            int fid = inventoryFid(item);
+            if (fid == -1) {
                 continue;
             }
             BackgroundItem entry;
@@ -594,28 +619,47 @@ namespace {
 
     void backgroundTicker()
     {
-        if (gScene.backgroundNext >= gScene.background.size() || !sceneEnabled()) {
+        // Finished frames go into the HD art cache (bounded by its budget)
+        // even when nothing is being drawn that would take them.
+        if (sceneEnabled()) {
+            hdArtUpscaleDrain();
+        }
+        bool mapLeft = gScene.backgroundNext < gScene.background.size();
+        bool staticsLeft = gScene.staticNext < gScene.statics.size();
+        if ((!mapLeft && !staticsLeft) || !sceneEnabled()) {
             return;
         }
-        // Not while the art cache is busy, nor beyond 3/4 of the HD cache.
-        if (artIsLoading() || hdArtCacheBytes() > hdArtCacheBudget() / 4 * 3 || hdArtUpscalePending() > 64) {
+        // Not while the art cache is busy, nor beyond half the HD cache (the
+        // next scene must fit beside it).
+        if (artIsLoading() || hdArtCacheBytes() > hdArtCacheBudget() / 2 || hdArtUpscalePending() > 64) {
             return;
         }
         Clock::time_point start = Clock::now();
         std::set<std::string> paths;
         int arts = 0;
-        while (gScene.backgroundNext < gScene.background.size() && msSince(start) < 2.0) {
-            const BackgroundItem& item = gScene.background[gScene.backgroundNext++];
+        while (msSince(start) < 2.0 && hdArtUpscalePending() <= 256) {
+            // The world map and town maps first (opened any time), then the
+            // map's other elevations and animations.
+            const BackgroundItem* next = nullptr;
+            if (gScene.staticNext < gScene.statics.size()) {
+                next = &gScene.statics[gScene.staticNext++];
+            } else if (gScene.backgroundNext < gScene.background.size()) {
+                next = &gScene.background[gScene.backgroundNext++];
+            } else {
+                break;
+            }
+            const BackgroundItem& item = *next;
             if (item.fid != -1) {
-                lockAndQueue(item.fid, item.priority, kHdUpscaleGroupBackground, &paths, &arts);
+                lockAndQueue(item.fid, item.priority, item.group, &paths, &arts);
             } else {
                 hdArtQueueArtFile(item.path.c_str(), item.palette.empty() ? nullptr : item.palette.c_str(), item.priority,
-                    kHdUpscaleGroupBackground);
+                    item.group);
                 arts++;
             }
         }
         gScene.stats.backgroundArts += arts;
-        gScene.stats.backgroundLeft = static_cast<int>(gScene.background.size() - gScene.backgroundNext);
+        gScene.stats.backgroundLeft = static_cast<int>(gScene.background.size() - gScene.backgroundNext
+            + gScene.statics.size() - gScene.staticNext);
     }
 
 } // namespace
@@ -669,7 +713,7 @@ void hdScenePrepareMap()
         }
     }
     addInventory(&background);
-    addStaticBackground(&background);
+    addStaticBackground(&gScene.statics);
     std::stable_sort(background.begin(), background.end(),
         [](const BackgroundItem& a, const BackgroundItem& b) { return a.priority < b.priority; });
     gScene.background = std::move(background);
@@ -843,7 +887,8 @@ void hdSceneHideSplash()
 void hdSceneGetStats(HdSceneStats* stats)
 {
     *stats = gScene.stats;
-    stats->backgroundLeft = static_cast<int>(gScene.background.size() - std::min(gScene.backgroundNext, gScene.background.size()));
+    stats->backgroundLeft = static_cast<int>(gScene.background.size() - std::min(gScene.backgroundNext, gScene.background.size())
+        + gScene.statics.size() - std::min(gScene.staticNext, gScene.statics.size()));
 }
 
 void hdSceneSetLoadingScreenHook(std::function<void()> hook)

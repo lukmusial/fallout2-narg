@@ -62,7 +62,8 @@ def main() -> int:
         # into the clone).
         work.mkdir(parents=True)
         for entry in Path(args.game).iterdir():
-            if entry.suffix != ".app":
+            # (Not the game's own outputs: devout, logs.)
+            if entry.suffix != ".app" and entry.name not in ("devout", "debug.log", "stdout.txt"):
                 subprocess.run(["cp", "-cR", str(entry), str(work / entry.name)], check=True)
         # Only the packs asked for (below): no HD pack archives either.
         shutil.rmtree(work / "data/hd", ignore_errors=True)

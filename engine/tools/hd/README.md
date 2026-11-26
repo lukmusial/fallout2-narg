@@ -533,7 +533,7 @@ the map's image tables keep the first image they get. The CE main menu
 background is made by Stimpak in memory, so it cannot be queued at start
 (upscaled on first draw, ~25-45 ms).
 
-Disk cache (`hd_upscale_cache=1`, off by default): `data/hd/cache/xx/<key>.rgba`,
+Disk cache (`hd_upscale_cache=1`; off by default in 2.22, on since 2.23): `data/hd/cache/xx/<key>.rgba`,
 raw RGBA keyed by FNV-1a of pixels, palette, flags and algorithm version;
 about 70-115 MB per town.
 
@@ -556,6 +556,125 @@ Frame time is unchanged (presents 1.3-3.5 ms and whole-map redraws 9-12 ms in
 every configuration, within run-to-run noise). The HD art cache holds 72-115
 MB after a town's frames are upscaled (offline pack: 20-26 MB; under the
 256 MB `hd_cache_mb`).
+
+## No packs: runtime upscale as the HD art path (Phase 2.23)
+
+Nothing derived from the game's art has to be distributed: with no pack
+(`hd_pack=` empty, the default) every frame is upscaled while the game
+runs. `hd_upscale=double` gives the pixel-doubled look instead. Pack-only
+features switch off cleanly without a pack: ground variants (only packs
+have them); the main menu, Stimpak's seven-plate menu, HR_MAINMENU, the
+world map, town maps, death and help screens and the splash pictures are
+all upscaled like any art. A pack, when installed and named, still wins.
+
+### Preparation (`src/hd_scene.{h,cc}`)
+
+- **Map load** (`hdScenePrepareMap`, from `mapLoad` once the objects and
+  the player are placed): the scene is every art the map can show at once:
+  floor and roof tiles of the current elevation, walls, scenery, items,
+  misc objects, and each critter in all directions of its current,
+  standing, walking and running animations, also as armed with the weapons
+  in its hands, plus the bar's picture of the player's weapon. Each art is
+  locked once on the main thread (its pixels copied into the jobs) and
+  queued ordered by on-screen distance from the player; the main thread
+  then helps the pool until all of it is done. When a saved game restores
+  the player (`_obj_load_dude`) his art is prepared the same way. After
+  that nothing is upscaled at draw time (`draw_upscales_since_scene` in
+  `hdstats`, checked by the tests).
+- **Loading screen** while that runs, once it takes `hd_loading_screen_min_ms`
+  (150): the game's splash picture (its own palette) upscaled, with a thin
+  progress bar along the bottom. The start-up splash is upscaled too.
+- **Idle time** (a ticker, ~2 ms per input poll, only while the HD art cache
+  is below half of `hd_cache_mb`, cancelled by the next map load): the world
+  map tiles and frame, the town maps, help and death screens (with their
+  own palettes) once per session; then the map's other elevations, every
+  other animation of its critters (combat, death, using things) and the
+  player's inventory pictures.
+- **Tiles with their real neighbours** (`hd_upscale_tile_neighbours`): per
+  tile art, the tile most often found at each of the 8 nearest lattice
+  positions on this map (all elevations), when it is there in at least a
+  quarter of the placements; elsewhere the tile's own copy (the lattice
+  self-wrap). The self-wrap is exact where a tile is surrounded by itself
+  (large uniform areas) and wrong at transitions between tiles, which is
+  where the seams were; the context makes those continue into what is
+  really there. Matches `enhance_scripted.py`'s tile context exactly
+  (unit-test fixture `tile_ctx_edg5000`). Walls keep transparent
+  surroundings (their offline context came from all maps; not done here).
+- **Memory**: frames live in the LRU HD art cache (`hd_cache_mb`, now 512 MB
+  by default); interface art is never evicted (a few tens of MB).
+- **Disk cache** (`hd_upscale_cache=1`, now the default): `data/hd/cache`,
+  raw RGBA keyed by the frame's pixels, palette, neighbours, flags and
+  algorithm version, capped at `hd_upscale_cache_mb` (2048) with the least
+  recently used files removed (reads refresh a file's time). It holds only
+  what the user's own game produced. No "warm everything" pass at first
+  start: a whole game is several GB raw and the per-map preparation is
+  already short; idle time covers the next likely screens.
+
+### Speed of the upscaler
+
+Release build, M5 Pro, single thread / 8 pool threads, ns per output pixel
+(`hd_upscale_test`): Phase 2.22 82.9 / 14.8; now ~46-49 / ~8-9. Changes: the
+de-banding works on the 1x de-dithered base (where the bands are; 35 -> 6
+ns), the bilateral filters run all taps of 4 pixels in registers with
+GCC/Clang vector extensions (NEON / SSE2; plain C++ elsewhere), DCCI's
+second pass fills holes in place and sums gradients from row sums. Per
+stage now: prepare 2.6, de-dither 5.3, DCCI 11, restoration 19, de-band 6,
+grain 0.8, output 1.3. Fixed-point int16 was not used: the range filters
+need an exp per tap and the de-banding works below one 8-bit level, so
+16-bit integers would need rescaling at every stage for 2x the lanes of
+NEON's 4 floats; the float SIMD path is already close to its arithmetic
+limit. MSVC compiles `hd_upscale.cc` with /O2 in every configuration
+(Debug drops /RTC1 for it). x86 builds use SSE2 (no AVX2 without runtime
+dispatch).
+
+### Timings (Phase 2.23)
+
+Release builds, Apple M5 Pro, no HD packs (the RPU copy without its
+narg_hd*.dat), 1280x960 window at scale 2, HD effects off;
+`tools/dev/runtime_perf_play.py` (`tests/scripts/hd_perf_play.txt`,
+`hd_perf_combat.txt`). "Before" is the Phase 2.22 build (preloading, no
+scene preparation). Frame times are the game loop's (60 fps limiter: ~17.7
+ms mean).
+
+Map load to the first playable frame (ms): the map load, plus, before,
+the main thread's upscaling at the first frames (82-155 ms); after, that
+work is inside the load (scene preparation, loading screen) and nothing is
+upscaled afterwards.
+
+| town | before | after, cold disk cache | after, warm |
+|---|---|---|---|
+| Arroyo | 229 | 232 | 109 |
+| Klamath | 422 | 600 | 260 |
+| the Den | 407 | 749 | 269 |
+| RPU Arroyo | 224 | 257 | 133 |
+| RPU Klamath | 434 | 651 | 304 |
+| RPU Den | 462 | 815 | 316 |
+
+Map transition to the next town (load + upscaling in its first frames):
+
+| from -> to | before | after cold | after warm |
+|---|---|---|---|
+| Arroyo -> Klamath | 588 | 624 | 270 |
+| Klamath -> the Den | 402 | 489 | 241 |
+| the Den -> Arroyo | 461 | 244 | 140 |
+| RPU Arroyo -> Klamath | 667 | 756 | 373 |
+| RPU Klamath -> the Den | 523 | 722 | 368 |
+| RPU Den -> Arroyo | 402 | 265 | 150 |
+| RPU Klamath -> the Abbey (RPU only) | 558 | 594 | 300 |
+
+Frames upscaled when drawn during play: before 80-150 per run (each 0.3-3
+ms, spread over the first seconds and after every transition); after 0 (3-9
+when the harness hands the player a new weapon in combat). Frame times in
+the first 30 s of walking, running and scrolling: p99 19.3-20.9 ms, max
+22-28 ms in both builds; entering combat max ~19 ms; zoomed out to 0.5x
+max 21-35 ms (both); opening the world map 80-100 ms (both: the world
+map's own setup; its art is prepared in idle time now).
+
+Memory (peak RSS): before ~770-780 MB; after ~600-730 MB with a warm disk
+cache and 850-1050 MB cold (the HD art cache holds 310-440 MB: the scene
+plus idle-time work, which stops at half of `hd_cache_mb`). Disk cache
+after a session of two towns and the world map: 330-420 MB (cap 2 GB).
+
 
 ## Seam quality (`tilemap.py`, map patches)
 

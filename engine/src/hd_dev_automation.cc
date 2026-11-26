@@ -1215,6 +1215,7 @@ namespace {
     // frames over 33 and 50 ms).
     struct FrameTimes {
         bool recording = false;
+        std::chrono::steady_clock::time_point reset;
         std::chrono::steady_clock::time_point last;
         std::vector<float> intervals;
     };
@@ -1228,7 +1229,11 @@ namespace {
         }
         auto now = std::chrono::steady_clock::now();
         if (gFrameTimes.last.time_since_epoch().count() != 0) {
-            gFrameTimes.intervals.push_back(std::chrono::duration<float, std::milli>(now - gFrameTimes.last).count());
+            float interval = std::chrono::duration<float, std::milli>(now - gFrameTimes.last).count();
+            gFrameTimes.intervals.push_back(interval);
+            if (interval > 40.0f) {
+                debugPrint("AUTOMATION: frame took %.1f ms\n", interval);
+            }
         }
         gFrameTimes.last = now;
     }
@@ -1242,6 +1247,7 @@ namespace {
         if (command.args[0] == "reset") {
             gFrameTimes.intervals.clear();
             gFrameTimes.last = {};
+            gFrameTimes.reset = std::chrono::steady_clock::now();
             gFrameTimes.recording = true;
             return true;
         }
@@ -1263,7 +1269,9 @@ namespace {
             << ", \"mean_ms\": " << (sorted.empty() ? 0.0 : sum / sorted.size())
             << ", \"p50_ms\": " << at(0.5) << ", \"p95_ms\": " << at(0.95) << ", \"p99_ms\": " << at(0.99)
             << ", \"max_ms\": " << (sorted.empty() ? 0.0f : sorted.back())
-            << ", \"over_33ms\": " << over33 << ", \"over_50ms\": " << over50 << "}\n";
+            << ", \"over_33ms\": " << over33 << ", \"over_50ms\": " << over50
+            << ", \"elapsed_ms\": " << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - gFrameTimes.reset).count()
+            << "}\n";
         return true;
     }
 

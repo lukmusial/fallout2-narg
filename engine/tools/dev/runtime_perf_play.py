@@ -25,7 +25,7 @@ RUN = ROOT / "out/build/macos/hdrun"
 # Settings pinned for comparable runs: no pack installed (hd_pack names the
 # scripted pack, which is absent: the runtime upscale in both builds), the
 # HD effects off, a 1280x960 window at scale 2, the map view (zoom).
-OVERRIDES = ["[graphics]hd=1", "[graphics]hd_pack=scripted", "[graphics]hd_text=1", "[graphics]zoom=1",
+OVERRIDES = ["[debug]mode=log", "[graphics]hd=1", "[graphics]hd_pack=scripted", "[graphics]hd_text=1", "[graphics]zoom=1",
              "[graphics]hd_lights=0", "[graphics]hd_wind=0", "[graphics]hd_shot_light=0",
              "[graphics]hd_ground_variants=0", "[graphics]hd_cache_mb=512", "[graphics]hd_upscale_cache=1",
              "[screen]resolution_x=1280", "[screen]resolution_y=960", "[screen]scale=2", "[screen]windowed=1",
@@ -36,9 +36,10 @@ VANILLA = [(3, "arroyo", "KLADWTWN"), (1, "klamath", "DENBUS1"), (8, "den", "ARV
 RPU = [(3, "arroyo", "KLADWTWN"), (1, "klamath", "DENBUS1"), (8, "den", "ARVILLAG"), (1, "klamath>abbey", "ABBEY")]
 
 
-def run(name, build, game, slot, next_map, keep):
-    cmd = [sys.executable, str(ROOT / "tools/dev/hd_run.py"), name, "hd_perf_play.txt", "--slot", str(slot),
-           "--packs", "", "--app", str(build), "--set", f"NEXT_MAP={next_map}", "--timeout", "400", "--rss"]
+def run(name, build, game, slot, next_map, keep, loading=True, script="hd_perf_play.txt"):
+    cmd = [sys.executable, str(ROOT / "tools/dev/hd_run.py"), name, script, "--slot", str(slot),
+           "--packs", "", "--app", str(build), "--set", f"NEXT_MAP={next_map}", "--timeout", "400", "--rss",
+           "--set", "LOADING_CMD=" + ("loadingshot" if loading else "log")]
     if game:
         cmd += ["--game", str(game)]
     if keep:
@@ -72,12 +73,27 @@ def summary(out):
     return row
 
 
+def load_summary(out):
+    loading = load(out, "loading")
+    first = load(out, "first5s")
+    end = load(out, "end_stats")
+    rss = (out / "rss.txt").read_text().strip() if (out / "rss.txt").exists() else ""
+    log = (out / "debug.log").read_text(errors="replace")
+    loads = [int(m) for m in re.findall(r"CE: map \S+ loaded in (\d+) ms", log)]
+    return {"to_first_playable_ms": round(loading.get("elapsed_ms", 0)), "longest_frame_loading_ms": round(loading.get("max_ms", 0)),
+            "map_load_ms": loads[0] if loads else None,
+            "first5s_p99": round(first.get("p99_ms", 0), 1), "first5s_max": round(first.get("max_ms", 0), 1),
+            "drawn_upscales": end.get("draw_upscales_since_scene", end.get("runtime_inline")),
+            "disk_hits": end.get("upscale_disk_hits"), "rss_mb": round(int(rss) / 1048576) if rss else None}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--build", action="append", required=True, help="label=build dir (with the .app)")
     ap.add_argument("--game", action="append", default=[], help="vanilla, or label=installed game dir")
     ap.add_argument("--warm", action="store_true", help="also a second run with the disk cache of the first")
     ap.add_argument("--only", help="only runs whose name contains this")
+    ap.add_argument("--load", action="store_true", help="load timings only (hd_perf_load.txt)")
     args = ap.parse_args()
     games = []
     for entry in args.game or ["vanilla"]:
@@ -91,13 +107,24 @@ def main():
         label, path = build.split("=", 1)
         for game_label, game, saves in games:
             for slot, town, next_map in saves:
-                name = f"play_{label}_{game_label}_{town.replace('>', '_')}"
+                if args.load and ">" in town:
+                    continue
+                name = f"{'load' if args.load else 'play'}_{label}_{game_label}_{town.replace('>', '_')}"
                 if args.only and args.only not in name:
                     continue
                 passes = ["cold", "warm"] if args.warm and label != "before" else ["cold"]
                 for index, cache in enumerate(passes):
-                    out = run(name, Path(path).resolve(), game, slot, next_map, keep=index > 0)
-                    row = {"build": label, "game": game_label, "town": town, "cache": cache, **summary(out)}
+                    # (Builds before Phase 2.23 have no loading screen.)
+                    out = run(name, Path(path).resolve(), game, slot, next_map, keep=index > 0, loading=label != "before",
+                              script="hd_perf_load.txt" if args.load else "hd_perf_play.txt")
+                    row = {"build": label, "game": game_label, "town": town, "cache": cache,
+                           **(load_summary(out) if args.load else summary(out))}
+                    if not args.load and ">" not in town:
+                        combat = run(name + "_combat", Path(path).resolve(), game, slot, next_map, keep=False,
+                                     loading=label != "before", script="hd_perf_combat.txt")
+                        times = load(combat, "combat")
+                        row["combat_p99"] = round(times.get("p99_ms", 0), 1)
+                        row["combat_max"] = round(times.get("max_ms", 0), 1)
                     rows.append(row)
                     print(json.dumps(row), flush=True)
     keys = list(rows[0].keys())

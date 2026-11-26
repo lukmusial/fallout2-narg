@@ -45,6 +45,7 @@ namespace {
         std::string key;
         std::shared_ptr<const HdImage> image;
         size_t bytes;
+        unsigned int scene = 0; // the map scene it was prepared for (kept while that map is shown)
     };
 
     struct HdArtState {
@@ -106,6 +107,9 @@ namespace {
         double batchQueueMs = 0;
         std::string batchName;
 
+        // Scene preparations so far (frames of the current one are pinned).
+        unsigned int sceneId = 0;
+
         // Tiles: their most common neighbours on the current map
         // (hdArtSetTileContext), by art path; part of their runtime key.
         struct TileContext {
@@ -118,6 +122,11 @@ namespace {
     };
 
     HdArtState gHdArt;
+
+    unsigned int currentScene()
+    {
+        return gHdArt.sceneId;
+    }
 
     // .dat archives (ce.dat, master.dat) store names with backslashes; loose
     // files accept either, so look everything up in the engine's own form.
@@ -269,16 +278,29 @@ namespace {
         return it->second->image;
     }
 
-    void cachePut(const std::string& key, std::shared_ptr<const HdImage> image)
+    unsigned int currentScene();
+
+    void cachePut(const std::string& key, std::shared_ptr<const HdImage> image, unsigned int scene = 0)
     {
         size_t bytes = image->pixels.size() * sizeof(uint32_t) + sizeof(HdImage);
-        gHdArt.lru.push_front({ key, std::move(image), bytes });
+        gHdArt.lru.push_front({ key, std::move(image), bytes, scene });
         gHdArt.frames[key] = gHdArt.lru.begin();
         gHdArt.bytes += bytes;
 
+        // Interface art stays (the bar's buttons are drawn rarely but must
+        // not be upscaled again; all of it is a few tens of MB), and so does
+        // the current map's scene (hd_scene.h: nothing is upscaled when
+        // drawn); idle-time work and older maps go first.
         size_t budget = static_cast<size_t>(std::max(settings.graphics.hd_cache_mb, 1)) * 1024 * 1024;
-        while (gHdArt.bytes > budget && gHdArt.lru.size() > 1) {
+        size_t skipped = 0;
+        unsigned int pinned = currentScene();
+        while (gHdArt.bytes > budget && gHdArt.lru.size() > 1 && skipped < gHdArt.lru.size()) {
             CachedFrame& last = gHdArt.lru.back();
+            if (last.key.find(":art/intrface/") != std::string::npos || (pinned != 0 && last.scene == pinned)) {
+                gHdArt.lru.splice(gHdArt.lru.begin(), gHdArt.lru, std::prev(gHdArt.lru.end()));
+                skipped++;
+                continue;
+            }
             gHdArt.bytes -= last.bytes;
             gHdArt.frames.erase(last.key);
             gHdArt.lru.pop_back();
@@ -576,9 +598,9 @@ namespace {
         if (!gHdArt.poolStarted) {
             return;
         }
-        gHdArt.pool.drain([](const std::string& key, std::shared_ptr<HdImage> image) {
+        gHdArt.pool.drain([](const std::string& key, std::shared_ptr<HdImage> image, int group) {
             if (gHdArt.frames.find(key) == gHdArt.frames.end()) {
-                cachePut(key, std::move(image));
+                cachePut(key, std::move(image), group == kHdUpscaleGroupScene ? gHdArt.sceneId : 0);
             }
         });
     }
@@ -663,7 +685,12 @@ namespace {
                     continue;
                 }
                 std::string key = runtimeKey(tag, path, frame, direction);
-                if (gHdArt.frames.find(key) != gHdArt.frames.end()) {
+                auto cached = gHdArt.frames.find(key);
+                if (cached != gHdArt.frames.end()) {
+                    // Ready already: part of this scene now (kept).
+                    if (group == kHdUpscaleGroupScene) {
+                        cached->second->scene = gHdArt.sceneId;
+                    }
                     continue;
                 }
                 int width = 0;
@@ -1355,6 +1382,11 @@ void hdArtSetTileContext(const char* artPath, const unsigned char* const neighbo
     gHdArt.generation++;
 }
 
+void hdArtUpscaleDrain()
+{
+    drainPool();
+}
+
 bool hdArtUpscaleHelp()
 {
     if (!gHdArt.poolStarted) {
@@ -1368,6 +1400,7 @@ bool hdArtUpscaleHelp()
 void hdArtSceneBegin()
 {
     ensureInitialized();
+    gHdArt.sceneId++;
     gHdArt.batchStart = std::chrono::steady_clock::now();
     gHdArt.batchActive = runtimeEnabled() && settings.graphics.hd_upscale_preload;
     gHdArt.batchQueued = 0;

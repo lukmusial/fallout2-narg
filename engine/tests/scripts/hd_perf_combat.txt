@@ -1,0 +1,10 @@
+# Phase 2.23 timings: entering combat with the critters around (use with
+# --dev-load-game=N, hd=1; tools/dev/runtime_perf_play.py).
+until game 60000
+wait 2000
+frametimes reset
+shoot 8 nearest
+wait 6000
+frametimes combat
+hdstats combat_stats
+quit 0

@@ -202,7 +202,8 @@ void hdArtPreupscaleInterface();
 // Job groups of the background upscale.
 constexpr int kHdUpscaleGroupGeneral = 0; // interface, frames drawn
 constexpr int kHdUpscaleGroupScene = 1; // what a map load waits for (hd_scene.h)
-constexpr int kHdUpscaleGroupBackground = 2; // idle-time preparation
+constexpr int kHdUpscaleGroupBackground = 2; // idle-time preparation (the current map's)
+constexpr int kHdUpscaleGroupSession = 3; // idle-time preparation kept across maps (world map, town maps)
 
 // Queues every frame of `art` (locked by the caller, the legacy art of
 // `artPath`) that would be upscaled at runtime, at `priority` (lower first)
@@ -221,6 +222,9 @@ void hdArtUpscaleResetGroup(int group);
 // itself), each width x height packed. Cleared for every map.
 void hdArtClearTileContexts();
 void hdArtSetTileContext(const char* artPath, const unsigned char* const neighbours[3][3], int width, int height);
+// Moves finished background frames into the HD art cache (its budget then
+// applies to them); the scene's idle ticker calls it.
+void hdArtUpscaleDrain();
 // Runs one queued frame on the calling (main) thread; false when none.
 bool hdArtUpscaleHelp();
 // Scene preparation bookkeeping (stats, "upscaled when drawn" counter).
