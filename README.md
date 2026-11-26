@@ -16,7 +16,7 @@ It installs on vanilla Fallout 2 and is compatible with the Restoration Project;
 
 **No game art is distributed.** The archives hold the engine, the installer and documentation; the HD pictures are made on your machine, from your game's files, while the game runs. You need your own copy of Fallout 2 ([GOG](https://www.gog.com/game/fallout_2), [Steam](https://store.steampowered.com/app/38410), [Epic](https://store.epicgames.com/p/fallout-2)).
 
-![Arroyo in Narg Edition](docs/media/hd_arroyo.jpg)
+![Arroyo in Narg Edition, with the Restoration Project](docs/media/hd_arroyo.jpg)
 
 ## Restoration Project
 
