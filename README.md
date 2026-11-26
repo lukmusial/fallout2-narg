@@ -21,11 +21,9 @@ It installs on vanilla Fallout 2 and on top of the [Restoration Project](https:/
 
 Each pair shows the same spot before (the original art, as the game draws it at this screen size) and after (Narg Edition, upscaled by the engine), enlarged 2x so single pixels show.
 
-![Arroyo: original art and HD](docs/media/compare_arroyo.jpg)
 ![Klamath: original art and HD](docs/media/compare_klamath.jpg)
 ![Main menu: original art and HD](docs/media/compare_menu.jpg)
 ![Inventory: original art and HD](docs/media/compare_inventory.jpg)
-![Character screen: original art and HD](docs/media/compare_character.jpg)
 
 On the Restoration Project, before (RPU's art, as the game draws it) and after (Narg Edition):
 
