@@ -55,11 +55,18 @@ constexpr int kHdUpscaleTilePad = 8;
 // tools' << 2 both keep them) are expanded at full precision, v * 255 / 63,
 // and every step works on floats (finer than 16 bits per channel); a
 // de-banding pass turns the one-palette-step bands of smooth areas into
-// ramps (edges of several steps stay), and the result is rounded to 8 bits
-// with a light 4x4 ordered dither. Without it the output is the Python's
+// ramps (edges of several steps stay; done at source resolution on the
+// de-dithered base, where the bands are), and the result is rounded to 8
+// bits with a light 4x4 ordered dither. Without it the output is the Python's
 // (8-bit palette, no de-banding, plain rounding).
 void hdUpscaleScripted(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8,
     bool tile, HdImage* dest, int threads = 1, bool precise = false);
+
+// Time spent per stage (ns, all threads): 0 palette/holes/steps, 1
+// de-dither, 2 DCCI, 3 gradient restoration, 4 de-banding, 5 grain, 6
+// output. `reset` clears the counters.
+constexpr int kHdUpscaleStages = 7;
+void hdUpscaleStageTimes(unsigned long long* ns, bool reset = false);
 
 // FNV-1a 64 of everything the output depends on (pixels, size, palette, tile
 // flag, algorithm version): the disk cache key.

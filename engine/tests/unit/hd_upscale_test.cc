@@ -375,6 +375,8 @@ static HdUpscaleJob makeJob(const Fixture& fixture, const std::string& key)
 static void testPoolAndSpeed(const std::vector<Fixture>& fixtures)
 {
     // Single thread, per output pixel.
+    unsigned long long discard[kHdUpscaleStages];
+    hdUpscaleStageTimes(discard, true);
     size_t pixels = 0;
     auto start = std::chrono::steady_clock::now();
     int rounds = 0;
@@ -389,6 +391,16 @@ static void testPoolAndSpeed(const std::vector<Fixture>& fixtures)
     } while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < 1.0);
     double single = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - start).count() / pixels;
     printf("single thread (precision 16): %.1f ns per output pixel (%d rounds)\n", single, rounds);
+    {
+        unsigned long long ns[kHdUpscaleStages];
+        hdUpscaleStageTimes(ns);
+        static const char* const kNames[kHdUpscaleStages] = { "prepare", "de-dither", "dcci", "restore", "de-band", "grain", "output" };
+        printf("  per stage:");
+        for (int stage = 0; stage < kHdUpscaleStages; stage++) {
+            printf(" %s %.1f", kNames[stage], static_cast<double>(ns[stage]) / pixels);
+        }
+        printf(" ns/px\n");
+    }
     {
         size_t pixels8 = 0;
         auto start8 = std::chrono::steady_clock::now();

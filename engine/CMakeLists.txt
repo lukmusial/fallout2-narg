@@ -561,14 +561,19 @@ target_link_libraries(${EXECUTABLE_NAME} ${SDL2_LIBRARIES})
 target_link_libraries(${EXECUTABLE_NAME} ${SDL2_MAIN_LIBRARIES})
 
 # The runtime scripted upscale (Phase 2.22) runs on worker threads, and is
-# compiled optimised even in Debug builds (it is pure arithmetic; at -O0 it
-# is ~10x slower).
+# compiled fully optimised in every configuration (it is pure arithmetic; at
+# -O0 it is ~10x slower). (Also the copy the game compiles with Stimpak, see
+# stimpak_attach.)
 find_package(Threads REQUIRED)
 target_link_libraries(${EXECUTABLE_NAME} Threads::Threads)
-if(NOT MSVC)
-    # (Also the copy the game compiles with Stimpak, see stimpak_attach.)
-    set_source_files_properties("src/hd_upscale.cc" "${CMAKE_BINARY_DIR}/stimpak-tree/src/hd_upscale.cc"
-        PROPERTIES COMPILE_OPTIONS "-O2")
+set(HD_UPSCALE_SOURCES "src/hd_upscale.cc" "${CMAKE_BINARY_DIR}/stimpak-tree/src/hd_upscale.cc")
+if(MSVC)
+    # /O2 cannot be combined with the Debug configuration's /RTC1 run-time
+    # checks: they are dropped from Debug builds (all files).
+    string(REGEX REPLACE "/RTC[1csu]*" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+    set_source_files_properties(${HD_UPSCALE_SOURCES} PROPERTIES COMPILE_OPTIONS "/O2;/Ob2")
+else()
+    set_source_files_properties(${HD_UPSCALE_SOURCES} PROPERTIES COMPILE_OPTIONS "-O3")
 endif()
 target_include_directories(${EXECUTABLE_NAME} PRIVATE ${SDL2_INCLUDE_DIRS})
 

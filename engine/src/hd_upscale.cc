@@ -244,6 +244,87 @@ namespace {
     // acc = sum w * n, w = tap weight * exp(-|n - c|^2 * invS2(c)) * valid(n).
     // `keepInvalid` (de-dither): pixels that are not valid keep their value;
     // otherwise (gradient restoration) pixels with no weight do.
+#if defined(__GNUC__) || defined(__clang__)
+#define HD_UPSCALE_SIMD 1
+    // 4 floats: NEON on ARM, SSE2 on x86 (GCC/Clang vector extensions).
+    typedef float V4 __attribute__((vector_size(16)));
+    typedef int32_t I4 __attribute__((vector_size(16)));
+
+    inline V4 load4(const float* p)
+    {
+        V4 v;
+        memcpy(&v, p, sizeof(v));
+        return v;
+    }
+
+    inline void store4(float* p, V4 v)
+    {
+        memcpy(p, &v, sizeof(v));
+    }
+
+    inline V4 splat4(float x)
+    {
+        return V4 { x, x, x, x };
+    }
+
+    // e^x for x <= 0, 4 at a time: 2^(x log2 e) with the integer part from
+    // round-to-nearest (the 1.5 * 2^23 trick, no floor) and a degree-6
+    // polynomial on [-0.5, 0.5] (relative error < 1e-7).
+    inline V4 fastExp4(V4 x)
+    {
+        const V4 lowest = splat4(-87.0f);
+        x = x < lowest ? lowest : x;
+        V4 t = x * 1.44269504089f;
+        const V4 magic = splat4(12582912.0f);
+        V4 r = t + magic;
+        I4 n = (I4)r - (I4)magic;
+        V4 f = t - (r - magic);
+        V4 p = 1.0f + f * (0.693147182f + f * (0.240226507f + f * (0.0555041087f + f * (0.00961812911f + f * (0.00133335581f + f * 0.000154035304f)))));
+        I4 bits = (n + 127) << 23;
+        return p * (V4)bits;
+    }
+
+    // All taps for 4 pixels at a time in registers (same tap order per
+    // pixel as the scalar loops), for columns whose neighbours are all in
+    // the row. Returns the first column not done.
+    int bilateralInteriorSimd(int x0, int x1, const float* cr, const float* cg, const float* cb, const float* inv,
+        const float* const* rowR, const float* const* rowG, const float* const* rowB, const float* const* rowV,
+        const int* dx, const float* weights, int count, float* ar, float* ag, float* ab, float* ws)
+    {
+        int x = x0;
+        for (; x + 4 <= x1; x += 4) {
+            V4 sr = splat4(0.0f);
+            V4 sg = splat4(0.0f);
+            V4 sb = splat4(0.0f);
+            V4 sw = splat4(0.0f);
+            V4 r = load4(cr + x);
+            V4 g = load4(cg + x);
+            V4 b = load4(cb + x);
+            V4 k = -load4(inv + x);
+            for (int t = 0; t < count; t++) {
+                int at = x + dx[t];
+                V4 nr = load4(rowR[t] + at);
+                V4 ng = load4(rowG[t] + at);
+                V4 nb = load4(rowB[t] + at);
+                V4 dr = nr - r;
+                V4 dg = ng - g;
+                V4 db = nb - b;
+                V4 d2 = dr * dr + dg * dg + db * db;
+                V4 wt = weights[t] * fastExp4(d2 * k) * load4(rowV[t] + at);
+                sr += wt * nr;
+                sg += wt * ng;
+                sb += wt * nb;
+                sw += wt;
+            }
+            store4(ar + x, sr);
+            store4(ag + x, sg);
+            store4(ab + x, sb);
+            store4(ws + x, sw);
+        }
+        return x;
+    }
+#endif
+
     void bilateral(const Planes& in, const float* invS2, const float* valid, const std::vector<Tap>& taps, bool keepInvalid, Planes& out)
     {
         int w = in.width;
@@ -270,8 +351,40 @@ namespace {
             float* ab = accB.data();
             float* ws = wsum.data();
 
-            // Tap by tap over the whole row (the inner loop vectorises;
-            // faster here than all taps per pixel).
+            // Interior columns: all taps per 4 pixels in registers (SIMD).
+            int radius = 0;
+            for (const Tap& tap : taps) {
+                radius = std::max(radius, std::abs(tap.dx));
+            }
+            int simdFrom = w;
+            int simdTo = w;
+#ifdef HD_UPSCALE_SIMD
+            if (w > 2 * radius + 4) {
+                constexpr int kMaxTaps = 25;
+                const float* rowR[kMaxTaps];
+                const float* rowG[kMaxTaps];
+                const float* rowB[kMaxTaps];
+                const float* rowV[kMaxTaps];
+                int dxs[kMaxTaps];
+                float weights[kMaxTaps];
+                int count = std::min(static_cast<int>(taps.size()), kMaxTaps);
+                for (int t = 0; t < count; t++) {
+                    size_t nrow = static_cast<size_t>(clampi(y + taps[t].dy, 0, h - 1)) * w;
+                    rowR[t] = in.r.data() + nrow;
+                    rowG[t] = in.g.data() + nrow;
+                    rowB[t] = in.b.data() + nrow;
+                    rowV[t] = valid + nrow;
+                    dxs[t] = taps[t].dx;
+                    weights[t] = taps[t].weight;
+                }
+                simdFrom = radius;
+                simdTo = bilateralInteriorSimd(radius, w - radius, cr, cg, cb, inv, rowR, rowG, rowB, rowV, dxs, weights, count,
+                    ar, ag, ab, ws);
+            }
+#endif
+
+            // Elsewhere (edges, the remainder, or without SIMD) tap by tap
+            // over the row (the inner loop vectorises).
             for (const Tap& tap : taps) {
                 size_t nrow = static_cast<size_t>(clampi(y + tap.dy, 0, h - 1)) * w;
                 const float* nr = in.r.data() + nrow;
@@ -296,22 +409,30 @@ namespace {
 
                 int lo = std::min(std::max(0, -dx), w);
                 int hi = std::max(std::min(w, w - dx), lo);
+                auto inner = [&](int from, int to) {
+                    for (int x = from; x < to; x++) {
+                        float dr = nr[x + dx] - cr[x];
+                        float dg = ng[x + dx] - cg[x];
+                        float db = nb[x + dx] - cb[x];
+                        float d2 = dr * dr + dg * dg + db * db;
+                        float wt = weight * fastExp(-d2 * inv[x]) * nv[x + dx];
+                        ar[x] += wt * nr[x + dx];
+                        ag[x] += wt * ng[x + dx];
+                        ab[x] += wt * nb[x + dx];
+                        ws[x] += wt;
+                    }
+                };
                 for (int x = 0; x < lo; x++) {
-                    edge(x);
+                    if (x < simdFrom || x >= simdTo) {
+                        edge(x);
+                    }
                 }
-                for (int x = lo; x < hi; x++) {
-                    float dr = nr[x + dx] - cr[x];
-                    float dg = ng[x + dx] - cg[x];
-                    float db = nb[x + dx] - cb[x];
-                    float d2 = dr * dr + dg * dg + db * db;
-                    float wt = weight * fastExp(-d2 * inv[x]) * nv[x + dx];
-                    ar[x] += wt * nr[x + dx];
-                    ag[x] += wt * ng[x + dx];
-                    ab[x] += wt * nb[x + dx];
-                    ws[x] += wt;
-                }
+                inner(lo, std::max(lo, std::min(hi, simdFrom)));
+                inner(std::max(lo, simdTo), hi);
                 for (int x = hi; x < w; x++) {
-                    edge(x);
+                    if (x < simdFrom || x >= simdTo) {
+                        edge(x);
+                    }
                 }
             }
 
@@ -479,27 +600,52 @@ namespace {
             }
         }
         {
-            static const int kFill[4][2] = { { 0, 1 }, { 0, -1 }, { 1, 0 }, { -1, 0 } };
-            std::vector<int> next;
-            for (const auto& step : kFill) {
-                next = source;
-                for (int py = 0; py < ph; py++) {
-                    int sy = clampi(py + step[0], 0, ph - 1);
-                    for (int px = 0; px < pw; px++) {
-                        size_t i = static_cast<size_t>(py) * pw + px;
-                        if (source[i] == -1) {
-                            int from = source[static_cast<size_t>(sy) * pw + clampi(px + step[1], 0, pw - 1)];
-                            if (from != -1) {
-                                next[i] = from;
-                            }
-                        }
-                    }
+            // Each pass reads the state before it: scanning away from the
+            // neighbour read keeps that true in place.
+            auto fill = [&](int py, int px, int sy, int sx) {
+                int& at = source[static_cast<size_t>(py) * pw + px];
+                if (at == -1) {
+                    at = source[static_cast<size_t>(sy) * pw + sx];
                 }
-                source.swap(next);
+            };
+            for (int py = 0; py < ph; py++) {
+                for (int px = 0; px < pw; px++) {
+                    fill(py, px, py, std::min(px + 1, pw - 1));
+                }
+                for (int px = pw - 1; px >= 0; px--) {
+                    fill(py, px, py, std::max(px - 1, 0));
+                }
+            }
+            for (int py = 0; py < ph; py++) {
+                int sy = std::min(py + 1, ph - 1);
+                for (int px = 0; px < pw; px++) {
+                    fill(py, px, sy, px);
+                }
+            }
+            for (int py = ph - 1; py >= 0; py--) {
+                int sy = std::max(py - 1, 0);
+                for (int px = 0; px < pw; px++) {
+                    fill(py, px, sy, px);
+                }
             }
         }
 
-        // Padded planes (r, g, b, guide luma).
+        // The known HR pixels, then the padded planes (r, g, b, guide luma).
+        size_t hn = static_cast<size_t>(hh) * ww;
+        std::vector<float> hr(hn * 4, 0.0f);
+        for (int y = 0; y < hh; y++) {
+            const Planes& from = (y & 1) == 0 ? base : centre;
+            const float* fromY = (y & 1) == 0 ? lowY.data() : centreY.data();
+            size_t lrow = static_cast<size_t>(y / 2) * w;
+            for (int x = y & 1; x < ww; x += 2) {
+                size_t li = lrow + x / 2;
+                float* to = hr.data() + (static_cast<size_t>(y) * ww + x) * 4;
+                to[0] = from.r[li];
+                to[1] = from.g[li];
+                to[2] = from.b[li];
+                to[3] = fromY[li];
+            }
+        }
         std::vector<float> pr(pn), pg(pn), pb(pn), py_(pn);
         for (size_t i = 0; i < pn; i++) {
             int q = source[i];
@@ -507,41 +653,61 @@ namespace {
                 pr[i] = pg[i] = pb[i] = py_[i] = 0.0f;
                 continue;
             }
-            int qy = q / ww;
-            int qx = q % ww;
-            size_t li = static_cast<size_t>(qy / 2) * w + qx / 2;
-            if ((qy & 1) == 0) {
-                pr[i] = base.r[li];
-                pg[i] = base.g[li];
-                pb[i] = base.b[li];
-                py_[i] = lowY[li];
-            } else {
-                pr[i] = centre.r[li];
-                pg[i] = centre.g[li];
-                pb[i] = centre.b[li];
-                py_[i] = centreY[li];
-            }
+            const float* from = hr.data() + static_cast<size_t>(q) * 4;
+            pr[i] = from[0];
+            pg[i] = from[1];
+            pb[i] = from[2];
+            py_[i] = from[3];
         }
         std::vector<int>().swap(source);
+        std::vector<float>().swap(hr);
 
         auto pidx = [&](int y, int x) {
             return static_cast<size_t>(y + Q) * pw + (x + Q);
         };
 
-        size_t hn = static_cast<size_t>(hh) * ww;
         std::vector<float> dh(hn), dv(hn);
         for (int y = 0; y < hh; y++) {
+            const float* row = py_.data() + pidx(y, 0);
+            const float* up = py_.data() + pidx(y - 1, 0);
+            const float* down = py_.data() + pidx(y + 1, 0);
+            float* oh = dh.data() + static_cast<size_t>(y) * ww;
+            float* ov = dv.data() + static_cast<size_t>(y) * ww;
             for (int x = 0; x < ww; x++) {
-                size_t i = static_cast<size_t>(y) * ww + x;
-                dh[i] = std::fabs(py_[pidx(y, x - 1)] - py_[pidx(y, x + 1)]);
-                dv[i] = std::fabs(py_[pidx(y - 1, x)] - py_[pidx(y + 1, x)]);
+                oh[x] = std::fabs(row[x - 1] - row[x + 1]);
+                ov[x] = std::fabs(up[x] - down[x]);
             }
         }
 
+        // Gradient sums over the 13 offsets of [-2, 2]^2 with an even
+        // dy + dx (edge replicated): rows dy = 0, +-2 take dx = 0, +-2, rows
+        // dy = +-1 take dx = +-1; row sums first.
+        std::vector<float> evenH(hn), oddH(hn), evenV(hn), oddV(hn);
+        for (int y = 0; y < hh; y++) {
+            size_t row = static_cast<size_t>(y) * ww;
+            for (int x = 0; x < ww; x++) {
+                int l2 = clampi(x - 2, 0, ww - 1);
+                int l1 = clampi(x - 1, 0, ww - 1);
+                int r1 = clampi(x + 1, 0, ww - 1);
+                int r2 = clampi(x + 2, 0, ww - 1);
+                evenH[row + x] = dh[row + l2] + dh[row + x] + dh[row + r2];
+                oddH[row + x] = dh[row + l1] + dh[row + r1];
+                evenV[row + x] = dv[row + l2] + dv[row + x] + dv[row + r2];
+                oddV[row + x] = dv[row + l1] + dv[row + r1];
+            }
+        }
+        std::vector<float>().swap(dh);
+        std::vector<float>().swap(dv);
+
         out.init(ww, hh);
         for (int y = 0; y < hh; y++) {
+            size_t rm2 = static_cast<size_t>(clampi(y - 2, 0, hh - 1)) * ww;
+            size_t rm1 = static_cast<size_t>(clampi(y - 1, 0, hh - 1)) * ww;
+            size_t r0 = static_cast<size_t>(y) * ww;
+            size_t rp1 = static_cast<size_t>(clampi(y + 1, 0, hh - 1)) * ww;
+            size_t rp2 = static_cast<size_t>(clampi(y + 2, 0, hh - 1)) * ww;
             for (int x = 0; x < ww; x++) {
-                size_t o = static_cast<size_t>(y) * ww + x;
+                size_t o = r0 + x;
                 if (((y + x) & 1) == 0) {
                     size_t i = pidx(y, x);
                     out.r[o] = pr[i];
@@ -550,21 +716,8 @@ namespace {
                     continue;
                 }
 
-                float gh = 0.0f;
-                float gv = 0.0f;
-                bool inside = y >= 2 && y < hh - 2 && x >= 2 && x < ww - 2;
-                for (int dy = -2; dy <= 2; dy++) {
-                    for (int dx = -2; dx <= 2; dx++) {
-                        if (((dy + dx) & 1) != 0) {
-                            continue;
-                        }
-                        size_t j = inside
-                            ? static_cast<size_t>(y + dy) * ww + (x + dx)
-                            : static_cast<size_t>(clampi(y + dy, 0, hh - 1)) * ww + clampi(x + dx, 0, ww - 1);
-                        gh += dh[j];
-                        gv += dv[j];
-                    }
-                }
+                float gh = evenH[rm2 + x] + oddH[rm1 + x] + evenH[r0 + x] + oddH[rp1 + x] + evenH[rp2 + x];
+                float gv = evenV[rm2 + x] + oddV[rm1 + x] + evenV[r0 + x] + oddV[rp1 + x] + evenV[rp2 + x];
 
                 int pick = 0;
                 float a = blendWeight(gh, gv, &pick);
@@ -645,7 +798,10 @@ namespace {
     // texture stay. `steps`: the palette step per pixel; `valid`: 0 on holes.
     void deband(Planes& big, const float* steps, const float* valid)
     {
-        constexpr int R = 8;
+        // At source resolution (bands are features of the 1x picture):
+        // radius 4 here is 8 at 2x.
+        constexpr int R = 4;
+        constexpr int A = 2; // activity window radius
         int w = big.width;
         int h = big.height;
         size_t n = static_cast<size_t>(w) * h;
@@ -658,7 +814,7 @@ namespace {
         }
         // Where it applies: banded areas are flat between isolated one-step
         // edges, textured ones change at nearly every pixel. Activity = mean
-        // luma gradient over 7x7 pixels, in palette steps; full effect below
+        // luma gradient over 5x5 pixels, in palette steps; full effect below
         // kFlat, none above kTextured.
         constexpr float kFlat = 0.10f;
         constexpr float kTextured = 0.22f;
@@ -677,12 +833,12 @@ namespace {
                     grad[i] = 0.5f * (std::fabs(gx) + std::fabs(gy));
                 }
             }
-            // 7x7 box mean, separable.
+            // 5x5 box mean, separable.
             std::vector<float> rows(n);
             for (int y = 0; y < h; y++) {
                 for (int x = 0; x < w; x++) {
                     float sum = 0.0f;
-                    for (int d = -3; d <= 3; d++) {
+                    for (int d = -A; d <= A; d++) {
                         sum += grad[static_cast<size_t>(y) * w + clampi(x + d, 0, w - 1)];
                     }
                     rows[static_cast<size_t>(y) * w + x] = sum;
@@ -691,11 +847,11 @@ namespace {
             for (int y = 0; y < h; y++) {
                 for (int x = 0; x < w; x++) {
                     float sum = 0.0f;
-                    for (int d = -3; d <= 3; d++) {
+                    for (int d = -A; d <= A; d++) {
                         sum += rows[static_cast<size_t>(clampi(y + d, 0, h - 1)) * w + x];
                     }
                     size_t i = static_cast<size_t>(y) * w + x;
-                    float activity = sum / 49.0f / std::max(steps[i], 1.0f);
+                    float activity = sum / static_cast<float>((2 * A + 1) * (2 * A + 1)) / std::max(steps[i], 1.0f);
                     amount[i] = std::min(std::max((kTextured - activity) / (kTextured - kFlat), 0.0f), 1.0f);
                 }
             }
@@ -798,6 +954,20 @@ namespace {
 
 namespace {
 
+    // Per-stage time (ns), summed over all threads (hdUpscaleStageTimes).
+    std::atomic<unsigned long long> gStageNs[kHdUpscaleStages];
+
+    struct StageClock {
+        std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
+        void mark(int stage)
+        {
+            auto now = std::chrono::steady_clock::now();
+            gStageNs[stage].fetch_add(static_cast<unsigned long long>(std::chrono::duration_cast<std::chrono::nanoseconds>(now - last).count()),
+                std::memory_order_relaxed);
+            last = now;
+        }
+    };
+
     void upscaleWhole(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8,
         bool tile, bool precise, HdImage* dest);
 
@@ -893,6 +1063,7 @@ void upscaleWhole(const unsigned char* indices, int width, int height, int pitch
         rgb.g[i] = palette[index * 3 + 1];
         rgb.b[i] = palette[index * 3 + 2];
     }
+    StageClock clock;
     fillHoles(rgb, holes);
 
     float steps[256];
@@ -907,13 +1078,30 @@ void upscaleWhole(const unsigned char* indices, int width, int height, int pitch
     Planes pass1;
     Planes base;
     Planes guide;
+    clock.mark(0);
     bilateral(rgb, invS2.data(), valid.data(), deditherTaps(), true, pass1);
     bilateral(pass1, invS2.data(), valid.data(), deditherTaps(), true, base);
     pass1.release();
+    // Precise: de-banding of the de-dithered base; the grain is still what
+    // the de-dither removed from the source (`grainBase`).
+    Planes debandedFrom;
+    if (precise) {
+        debandedFrom = base;
+        std::vector<float> stepsLow(n);
+        for (size_t i = 0; i < n; i++) {
+            stepsLow[i] = steps[work[i]];
+        }
+        clock.mark(1);
+        deband(base, stepsLow.data(), valid.data());
+        clock.mark(4);
+    }
+    const Planes& grainBase = precise ? debandedFrom : base;
     bilateral(base, invS2.data(), valid.data(), deditherTaps(), true, guide);
 
     Planes big;
+    clock.mark(1);
     dcci2x(base, guide, big);
+    clock.mark(2);
     guide.release();
 
     int ww = 2 * w;
@@ -931,15 +1119,7 @@ void upscaleWhole(const unsigned char* indices, int width, int height, int pitch
             }
         }
         restoreGradients(big, invS2Big.data(), validBig.data());
-        if (precise) {
-            // Palette steps per 2x pixel (reuse the sigma buffer).
-            for (int y = 0; y < hh; y++) {
-                for (int x = 0; x < ww; x++) {
-                    invS2Big[static_cast<size_t>(y) * ww + x] = steps[work[static_cast<size_t>(y / 2) * w + x / 2]];
-                }
-            }
-            deband(big, invS2Big.data(), validBig.data());
-        }
+        clock.mark(3);
     }
 
     // Grain: what the de-dither removed, bilinear 2x (weights 3/4, 1/4).
@@ -949,7 +1129,7 @@ void upscaleWhole(const unsigned char* indices, int width, int height, int pitch
         std::vector<float> column(static_cast<size_t>(w) * hh);
         for (int c = 0; c < 3; c++) {
             const std::vector<float>& src = c == 0 ? rgb.r : (c == 1 ? rgb.g : rgb.b);
-            const std::vector<float>& sub = c == 0 ? base.r : (c == 1 ? base.g : base.b);
+            const std::vector<float>& sub = c == 0 ? grainBase.r : (c == 1 ? grainBase.g : grainBase.b);
             std::vector<float>& dst = c == 0 ? big.r : (c == 1 ? big.g : big.b);
             for (size_t i = 0; i < n; i++) {
                 diff[i] = src[i] - sub[i];
@@ -979,6 +1159,7 @@ void upscaleWhole(const unsigned char* indices, int width, int height, int pitch
         }
     }
 
+    clock.mark(5);
     // Crop (tiles), clip, alpha from the source silhouette.
     int offset = 2 * pad;
     for (int y = 0; y < dest->height; y++) {
@@ -1002,9 +1183,17 @@ void upscaleWhole(const unsigned char* indices, int width, int height, int pitch
             out[x] = 0xFF000000u | (channel(big.r[i]) << 16) | (channel(big.g[i]) << 8) | channel(big.b[i]);
         }
     }
+    clock.mark(6);
 }
 
 } // namespace
+
+void hdUpscaleStageTimes(unsigned long long* ns, bool reset)
+{
+    for (int stage = 0; stage < kHdUpscaleStages; stage++) {
+        ns[stage] = reset ? gStageNs[stage].exchange(0) : gStageNs[stage].load();
+    }
+}
 
 uint64_t hdUpscaleKey(const unsigned char* indices, int width, int height, int pitch, const unsigned char* palette8, bool tile,
     bool precise)
